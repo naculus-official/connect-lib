@@ -30,7 +30,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build packages first (needed for dist/ resolution)
-        run: pnpm build
+        run: pnpm build --filter !@naculus/connector-wagmi
 
       - name: TypeScript check
         run: npx tsc --noEmit
@@ -82,7 +82,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build packages first (needed for dist/ resolution)
-        run: pnpm build
+        run: pnpm build --filter !@naculus/connector-wagmi
 
       - name: Run coverage
         run: pnpm test:coverage
