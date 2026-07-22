@@ -1,0 +1,40 @@
+{
+  "name": "@naculus/connector-wagmi",
+  "version": "2.0.0-alpha.4",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@naculus/connect-core": "workspace:*",
+    "@naculus/connector-walletconnect": "workspace:*"
+  },
+  "peerDependencies": {
+    "wagmi": "^2.0.0",
+    "viem": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "wagmi": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsup": "^8.3.6",
+    "@wagmi/core": "^3.1.3",
+        "viem": "^2.27.0",
+        "wagmi": "^3.7.3"
+  },
+  "sideEffects": false
+}

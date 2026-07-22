@@ -1,0 +1,32 @@
+{
+  "name": "@naculus/connect",
+  "version": "0.1.0",
+  "description": "Convenience umbrella \u2014 installs all @naculus/connect-* packages in one go",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "echo 'Umbrella package — nothing to build'"
+  },
+  "dependencies": {
+    "@naculus/connect-core": "workspace:*",
+    "@naculus/connector-walletconnect": "workspace:*",
+    "@naculus/connector-evm-injected": "workspace:*",
+    "@naculus/connector-embedded": "workspace:*",
+    "@naculus/connector-passkeys": "workspace:*",
+    "@naculus/siwx": "workspace:*",
+    "@naculus/wallet-engine": "workspace:*"
+  },
+  "sideEffects": false
+}

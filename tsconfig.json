@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@naculus/connect-core": ["./packages/core/src"],
+      "@naculus/connector-walletconnect": [
+        "./packages/connector-walletconnect/src"
+      ],
+      "@naculus/connector-embedded": ["./packages/connector-embedded/src"],
+      "@naculus/connector-evm-injected": [
+        "./packages/connector-evm-injected/src"
+      ],
+      "@naculus/connector-solana": ["./packages/connector-solana/src"],
+      "@naculus/connector-xrpl": ["./packages/connector-xrpl/src"],
+      "@naculus/connector-passkeys": ["./packages/connector-passkeys/src"],
+      "@naculus/connector-safe": ["./packages/connector-safe/src"],
+      "@naculus/connector-coinbase": ["./packages/connector-coinbase/src"],
+      "@naculus/connector-wagmi": ["./packages/connector-wagmi/src"],
+      "@naculus/connector-reown": ["./packages/connector-reown/src"],
+      "@naculus/siwx": ["./packages/siwx/src"],
+      "@naculus/wallet-engine": ["./packages/wallet-engine/src"],
+      "@naculus/test-utils": ["./test-utils"],
+      "@naculus/test-utils/*": ["./test-utils/*"]
+    }
+  },
+  "include": ["packages/*/src", "test-utils"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx"]
+}

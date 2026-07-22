@@ -1,0 +1,32 @@
+{
+  "name": "@naculus/siwx",
+  "version": "2.0.0-alpha.4",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.18",
+    "bs58": "^6.0.0",
+    "ripple-keypairs": "^2.0.0",
+    "tsup": "^8.3.6",
+    "tweetnacl": "^1.0.3",
+    "typescript": "^5.9.3"
+  },
+  "sideEffects": false
+}

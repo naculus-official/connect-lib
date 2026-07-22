@@ -1,0 +1,17 @@
+packages:
+  - "packages/*"
+shamefullyHoist: true
+allowBuilds:
+  '@reown/appkit': true
+  bufferutil: true
+  esbuild: true
+  keccak: true
+  msw: true
+  puppeteer: true
+  sharp: true
+  unrs-resolver: true
+  utf-8-validate: true
+  workerd: true
+overrides:
+  '@noble/hashes': ^1.7.1
+  '@noble/curves': ^1.9.0

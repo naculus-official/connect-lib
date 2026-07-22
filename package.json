@@ -1,0 +1,47 @@
+{
+  "name": "@naculus/connect-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.1.2",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "publish:local": "bash scripts/publish.sh",
+    "publish:npm": "REGISTRY=https://registry.npmjs.org bash scripts/publish.sh",
+    "bump:patch": "VERSION=patch bash scripts/publish.sh",
+    "bump:minor": "VERSION=minor bash scripts/publish.sh",
+    "release:patch": "VERSION=patch REGISTRY=https://registry.npmjs.org bash scripts/publish.sh",
+    "release:minor": "VERSION=minor REGISTRY=https://registry.npmjs.org bash scripts/publish.sh",
+    "version:show": "node -p \"require('./packages/core/package.json').version\"",
+    "clean": "pnpm -r clean",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:core": "vitest run packages/core",
+    "test:ui": "vitest run packages/ui",
+    "test:coverage": "vitest run --coverage",
+    "docs:generate": "api-extractor run --local --config config/api-extractor.json",
+    "docs:serve": "npx serve docs",
+    "spell-check": "cspell lint \"**/*.{ts,tsx,md}\"",
+    "spell-fix": "cspell lint --fix \"**/*.{ts,tsx,md}\"",
+    "lint": "biome lint"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.4",
+    "@changesets/cli": "^2.31.1",
+    "@microsoft/api-extractor": "^7.58.11",
+    "@reown/appkit": "^1.8.22",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.7",
+    "cspell": "^10.0.1",
+    "jsdom": "^29.1.1",
+    "typescript": "^7.0.2",
+    "viem": "^2.54.6",
+    "vitest": "^4.1.7",
+    "wagmi": "^3.7.3"
+  }
+}

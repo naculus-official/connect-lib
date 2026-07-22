@@ -1,0 +1,45 @@
+node_modules
+dist
+.pnpm-store
+*.log
+.DS_Store
+.env
+.env.local
+coverage
+.vscode
+.idea
+*.opencode-panes.sh
+.codegraph/
+
+# Playwright
+playwright-report/
+test-results/
+
+connect-app/
+
+# Python linter cache
+
+# Scratch / temp
+temp/
+*.verify.ts
+*.scratch.ts
+.ruff_cache/
+
+# Scratch / temp
+test-opencode.md
+docs/openclaw/
+_*/
+# Time tracking logs (local only)
+time-*.md
+
+# TypeDoc generated API docs
+docs/api/
+
+# Nested lockfiles in workspace sub-packages
+packages/*/pnpm-lock.yaml
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+# Turborepo cache
+.turbo/

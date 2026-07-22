@@ -1,0 +1,39 @@
+{
+  "name": "@naculus/connector-reown",
+  "version": "2.0.0-alpha.4",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@naculus/connect-core": "workspace:*",
+    "@naculus/connector-walletconnect": "workspace:*"
+  },
+  "peerDependencies": {
+    "@reown/appkit": "^1.0.0",
+    "viem": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@reown/appkit": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "tsup": "^8.3.6",
+    "typescript": "^5.9.3",
+    "viem": "^2.21.0"
+  },
+  "sideEffects": false
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@naculus/e2e-wallet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "node --input-type=module -e \"import('./src/index.js').then(m => m.runE2EWallet(process.argv[2] || process.env.WC_URI).catch(e => { console.error(e); process.exit(1); }))\"",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "@walletconnect/sign-client": "^2.16.1",
+    "@walletconnect/types": "^2.16.1",
+    "viem": "^2.48.11"
+  }
+}

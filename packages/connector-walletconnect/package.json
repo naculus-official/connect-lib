@@ -1,0 +1,31 @@
+{
+  "name": "@naculus/connector-walletconnect",
+  "version": "2.0.0-alpha.4",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@naculus/connect-core": "workspace:*",
+    "@scure/base": "^1.2.0",
+    "@walletconnect/sign-client": "^2.16.1",
+    "@walletconnect/types": "^2.16.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.6",
+    "typescript": "^5.9.3"
+  },
+  "sideEffects": false
+}
