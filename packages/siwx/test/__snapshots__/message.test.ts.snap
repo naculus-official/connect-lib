@@ -1,0 +1,20 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`createSiwxMessage > should produce a complete CAIP-122 compliant message 1`] = `
+"service.org wants you to sign in with your Ethereum account:
+0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B
+
+I accept the Terms of Service.
+
+URI: https://service.org/auth
+Version: 1
+Chain ID: eip155:1
+Nonce: n-0S6_WzA2Mj
+Issued At: 2026-01-01T00:00:00Z
+Expiration Time: 2026-12-31T23:59:59Z
+Not Before: 2026-01-01T00:00:00Z
+Request ID: req_001
+Resources:
+- https://service.org/tos
+- https://service.org/privacy"
+`;
