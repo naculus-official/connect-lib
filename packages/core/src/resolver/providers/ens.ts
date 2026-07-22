@@ -51,10 +51,7 @@ const RESOLVER_ABI = [
   },
 ] as const;
 
-const ADDR_INTERFACE_ID = "0x3b3b57de";
-const NAME_INTERFACE_ID = "0x691f3431";
-
-// ── Namehash ─────────────────────────────────────────────────────
+const EMPTY_ADDR = `0x${"00".repeat(20)}` as const;
 
 /**
  * ENS namehash algorithm.
