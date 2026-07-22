@@ -18,6 +18,7 @@ test-results/
 connect-app/
 
 # Python linter cache
+!__snapshots__/
 
 # Scratch / temp
 temp/
