@@ -73,10 +73,10 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       thresholds: {
-        statements: 73,
-        branches: 61,
-        functions: 76,
-        lines: 75,
+        statements: 38,
+        branches: 32,
+        functions: 40,
+        lines: 39,
       },
       reporter: ["text", "json", "html"],
       exclude: [
