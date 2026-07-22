@@ -1,6 +1,6 @@
 {
   "name": "@naculus/wallet-engine",
-  "version": "2.0.0-alpha.4",
+  "version": "0.1.0",
   "type": "module",
   "description": "Embedded wallet for non-web3 users. Low barrier entry \u2014 like an EasyCard for crypto.",
   "main": "./dist/index.js",
