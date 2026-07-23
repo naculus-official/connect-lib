@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connector-wagmi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -33,8 +33,8 @@
   "devDependencies": {
     "tsup": "^8.3.6",
     "@wagmi/core": "^3.1.3",
-        "viem": "^2.27.0",
-        "wagmi": "^3.7.3"
+    "viem": "^2.27.0",
+    "wagmi": "^3.7.3"
   },
   "sideEffects": false
 }

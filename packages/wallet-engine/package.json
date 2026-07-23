@@ -2,7 +2,7 @@
   "name": "@naculus/wallet-engine",
   "version": "0.1.0",
   "type": "module",
-  "description": "Embedded wallet for non-web3 users. Low barrier entry \u2014 like an EasyCard for crypto.",
+  "description": "Embedded wallet for non-web3 users. Low barrier entry — like an EasyCard for crypto.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

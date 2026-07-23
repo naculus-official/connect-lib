@@ -1,7 +1,7 @@
 {
   "name": "@naculus/connect",
-  "version": "0.1.0",
-  "description": "Convenience umbrella \u2014 installs all @naculus/connect-* packages in one go",
+  "version": "0.1.1",
+  "description": "Convenience umbrella — installs all @naculus/connect-* packages in one go",
   "type": "module",
   "main": "./index.js",
   "types": "./index.d.ts",
