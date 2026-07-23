@@ -1,17 +1,22 @@
 #!/bin/bash
 # publish.sh — Bump version → Build (parallel) → Publish (sequential)
 #
-# Usage:
-#   pnpm publish:local                  # verdaccio (local dev)
-#   pnpm publish:github                 # GitHub Packages (CI/deploy)
-#   pnpm bump:patch                     # patch bump + publish to verdaccio
-#   pnpm bump:minor                     # minor bump + publish to verdaccio
-#   pnpm version:show                   # show current version
+# Two modes:
 #
-# Env overrides:
-#   VERSION=1.2.3 REGISTRY=https://npm.pkg.github.com ./scripts/publish.sh
+# 1. Local dev (default):
+#      pnpm bump:patch                    → verdaccio (http://localhost:4873)
+#      VERSION=minor ./scripts/publish.sh → manual bump + verdaccio
 #
-# GitHub Packages auto-detects GITHUB_TOKEN from env or gh CLI.
+# 2. CI / npm:
+#      CI=true REGISTRY=https://registry.npmjs.org ./scripts/publish.sh
+#      (NPM_TOKEN must be set in environment or gh CLI)
+#
+# Developer workflow:
+#   1. pnpm changeset                      # per PR — describe change
+#   2. Commit changeset with PR
+#   3. pnpm changeset version              # on master, consume changesets
+#   4. git commit -m "vVERSION"
+#   5. CI publish.yml (or publish.sh)      # pushes to npm
 
 set -e
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
