@@ -97,6 +97,9 @@ export class WalletConnectConnector implements UniversalConnector {
   constructor(config: WalletConnectConfig) {
     this.config = config;
     this.client = config.client;
+    if (this.client) {
+      this.attachSessionListeners(this.client);
+    }
   }
 
   private async getClient(): Promise<SignClient> {
@@ -110,16 +113,7 @@ export class WalletConnectConnector implements UniversalConnector {
       metadata: this.config.metadata,
     });
 
-    this.client.on("session_delete", (event: { topic: string }) => {
-      if (event.topic === this.lastSession?.topic) {
-        this.sessionExpiryHandler?.();
-      }
-    });
-    this.client.on("session_expire", (event: { topic: string }) => {
-      if (event.topic === this.lastSession?.topic) {
-        this.sessionExpiryHandler?.();
-      }
-    });
+    this.attachSessionListeners(this.client);
 
     return this.client;
   }
@@ -665,6 +659,12 @@ export class WalletConnectConnector implements UniversalConnector {
       }),
     });
     const data = await response.json();
+    if (data.error) {
+      throw new WalletError(
+        "rpc_error",
+        `RPC error: ${data.error.message ?? JSON.stringify(data.error)}`,
+      );
+    }
     return data.result;
   }
 
@@ -716,6 +716,19 @@ export class WalletConnectConnector implements UniversalConnector {
   /**
    * Determines if a chain ID is a Solana chain
    */
+  private attachSessionListeners(client: SignClient): void {
+    client.on("session_delete", (event: { topic: string }) => {
+      if (event.topic === this.lastSession?.topic) {
+        this.sessionExpiryHandler?.();
+      }
+    });
+    client.on("session_expire", (event: { topic: string }) => {
+      if (event.topic === this.lastSession?.topic) {
+        this.sessionExpiryHandler?.();
+      }
+    });
+  }
+
   private isSolanaChain(chainId: string | undefined): boolean {
     return chainId?.startsWith("solana:") ?? false;
   }

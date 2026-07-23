@@ -283,6 +283,10 @@ class XRPLConnectorImpl implements UniversalConnector {
       Destination: this.activeSession.wallet.address,
       Amount: "1",
       Fee: "12",
+      // XLS-0063 (XRPL SignIn) is stalled. This is a workaround using a
+      // self-directed Payment transaction with the message hex-encoded
+      // in the Memo field. The Amount/Fee values are the minimum viable
+      // XRP drops for transaction validity — no actual value is transferred.
       Memos: [
         {
           Memo: {

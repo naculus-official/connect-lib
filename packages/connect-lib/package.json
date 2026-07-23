@@ -25,6 +25,10 @@
     "@naculus/connector-evm-injected": "workspace:*",
     "@naculus/connector-embedded": "workspace:*",
     "@naculus/connector-passkeys": "workspace:*",
+    "@naculus/connector-solana": "workspace:*",
+    "@naculus/connector-xrpl": "workspace:*",
+    "@naculus/connector-safe": "workspace:*",
+    "@naculus/connector-coinbase": "workspace:*",
     "@naculus/siwx": "workspace:*",
     "@naculus/wallet-engine": "workspace:*"
   },

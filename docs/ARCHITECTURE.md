@@ -198,8 +198,6 @@ Issued At: ${issuedAt}
 ```
 Primary: window.addEventListener("eip6963:announceProvider")
          window.dispatchEvent(new Event("eip6963:requestProvider"))
-
-fallback (500ms timeout): window.ethereum
 ```
 
 ### Solana (Wallet Standard + legacy)
@@ -225,7 +223,7 @@ xaman://tx?xrt=${encodeURIComponent(txjson)}  (sign)
 | Standard | Status | Notes |
 |----------|--------|-------|
 | EIP-1193 | ✅ | `request({method, params})` + `on`/`removeListener` |
-| EIP-6963 | ✅ | Event-driven discovery + window.ethereum fallback |
+| EIP-6963 | ✅ | Event-driven discovery |
 | EIP-4361 / CAIP-122 | ✅ | Cross-chain SIWx message format |
 | Solana Wallet Standard | ✅ | `wallet-standard:register-wallet` event |
 | WalletConnect v2 (CAIP-25) | ✅ | Via @walletconnect/sign-client |

@@ -191,6 +191,6 @@ function App() {
 - [x] EIP-6963 connector package
 - [x] EIP-6963 discovery hook
 - [x] Multi-wallet selector UI
-- [ ] EIP-2255 permission system
-- [ ] SIWx message signing
-- [ ] Integration tests
+- [x] EIP-2255 permission system
+- [x] SIWx message signing
+- [x] Integration tests

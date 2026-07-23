@@ -362,9 +362,9 @@ describe("PocketWallet config", () => {
 // ── Error class tests ─────────────────────────────────────────────
 
 describe("WalletError", () => {
-  it("should set name to PocketWalletError", () => {
+  it("should set name to WalletError", () => {
     const err = new WalletError("test_code", "test message");
-    expect(err.name).toBe("PocketWalletError");
+    expect(err.name).toBe("WalletError");
   });
 
   it("should preserve code and cause", () => {

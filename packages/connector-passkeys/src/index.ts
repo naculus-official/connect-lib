@@ -178,8 +178,8 @@ class PasskeysConnectorImpl implements UniversalConnector {
       pkCred.response?.getPublicKey?.() ??
       pkCred.response?.publicKey ??
       new ArrayBuffer(0);
-    const { keccak_256 } = await import("@noble/hashes/sha3.js");
-    const { bytesToHex } = await import("@noble/hashes/utils.js");
+    const { keccak_256 } = await import("@noble/hashes/sha3");
+    const { bytesToHex } = await import("@noble/hashes/utils");
     const hash = keccak_256(new Uint8Array(publicKeyBytes));
     const address = `0x${bytesToHex(hash.slice(-20))}`;
 

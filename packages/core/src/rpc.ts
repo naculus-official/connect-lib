@@ -1,6 +1,6 @@
 export const DEFAULT_RPC_URLS: Record<string, string> = {
   "eip155:1": "https://eth.llamarpc.com",
-  "eip155:5": "https://goerli.llamarpc.com",
+  "eip155:17000": "https://holesky.llamarpc.com",
   "eip155:11155111": "https://sepolia.llamarpc.com",
   "eip155:137": "https://polygon.llamarpc.com",
   "eip155:10": "https://optimism.llamarpc.com",

@@ -18,7 +18,9 @@ export const SUPPORTED_NAMESPACES = [
  * Common EVM Chain IDs (CAIP-2 format)
  */
 export const EIP155_MAINNET = "eip155:1";
+/** @deprecated Goerli testnet was deprecated in early 2023. Use HOLESKY instead. */
 export const EIP155_GOERLI = "eip155:5";
+export const EIP155_HOLESKY = "eip155:17000";
 export const EIP155_SEPOLIA = "eip155:11155111";
 export const EIP155_POLYGON = "eip155:137";
 export const EIP155_MUMBAI = "eip155:80001";

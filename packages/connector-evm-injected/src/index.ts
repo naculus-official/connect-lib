@@ -181,7 +181,10 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     }
 
     const eip155Accounts = accounts.map((acc) => `eip155:${acc}`);
-    const chains = chainId ? [`eip155:${chainId}`] : ["eip155:1"];
+    const strippedChainId = chainId?.startsWith("eip155:")
+      ? chainId.split(":")[1]
+      : chainId;
+    const chains = strippedChainId ? [`eip155:${strippedChainId}`] : ["eip155:1"];
     const methods = [
       "eth_requestAccounts",
       "eth_sendTransaction",
@@ -733,9 +736,13 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     bundleHash: string,
   ): Promise<import("@naculus/connect-core").CallsStatus> {
     try {
-      const wallet = this.activeSessions.get(session.id);
-      if (!wallet?.wallet.provider?.request) throw new Error("no provider");
-      return (await wallet.wallet.provider.request({
+      const accounts = session.namespaces.eip155?.accounts ?? [];
+      const eip6963Session = Array.from(this.activeSessions.values()).find(
+        (s) => s.accounts.some((acc) => accounts.includes(acc)),
+      );
+      if (!eip6963Session?.wallet.provider?.request)
+        throw new Error("no provider");
+      return (await eip6963Session.wallet.provider.request({
         method: "wallet_getCallsStatus",
         params: [bundleHash],
       })) as import("@naculus/connect-core").CallsStatus;
@@ -761,7 +768,12 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   }
 
   async getBalance(chainId?: string): Promise<string> {
-    const session = this.activeSessions.values().next().value;
+    const activeWalletEntries = Array.from(this.activeSessions.values());
+    const session = chainId
+      ? activeWalletEntries.find((s) =>
+          s.chains.some((c) => c === chainId),
+        ) ?? activeWalletEntries[0]
+      : activeWalletEntries[0];
     if (!session)
       throw new WalletError(
         "session_expired",

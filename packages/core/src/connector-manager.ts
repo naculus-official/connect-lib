@@ -112,6 +112,7 @@ export class ConnectorManager {
       const session = await connector.connect(input);
       this.activeConnectorId = connector.id;
       this.activeSession = session;
+      session.connectorId = connector.id;
       return session;
     } finally {
       this._connecting = false;
@@ -132,7 +133,7 @@ export class ConnectorManager {
       }
 
       const connectorId =
-        this.activeConnectorId ?? this.connectors.keys().next().value;
+        this.activeConnectorId ?? session.connectorId ?? session.walletType;
       const connector = connectorId ? this.get(connectorId) : null;
 
       if (connector?.reconnect) {
@@ -243,7 +244,7 @@ export class ConnectorManager {
   }
 
   async sendCalls(
-    session: UniversalWalletSession,
+    _session: UniversalWalletSession,
     calls: BatchCall[],
     chainId?: string,
   ): Promise<string> {
@@ -256,11 +257,11 @@ export class ConnectorManager {
       throw new Error("sendCalls not supported by this connector");
     }
 
-    return connector.sendCalls(session, calls, chainId);
+    return connector.sendCalls(this.activeSession, calls, chainId);
   }
 
   async getCapabilities(
-    session: UniversalWalletSession,
+    _session: UniversalWalletSession,
   ): Promise<Record<string, WalletCapabilities>> {
     if (!this.activeConnectorId || !this.activeSession) {
       throw new Error("No active session");
@@ -271,7 +272,7 @@ export class ConnectorManager {
       throw new Error("getCapabilities not supported by this connector");
     }
 
-    return connector.getCapabilities(session);
+    return connector.getCapabilities(this.activeSession);
   }
 
   clear(): void {

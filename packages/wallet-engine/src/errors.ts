@@ -6,6 +6,6 @@ export class WalletError extends Error {
     public readonly cause?: unknown,
   ) {
     super(message);
-    this.name = "PocketWalletError";
+    this.name = "WalletError";
   }
 }
