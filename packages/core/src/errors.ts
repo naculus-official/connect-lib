@@ -35,7 +35,8 @@ export type WalletErrorCode =
   | "invalid_chain"
   | "no_solana_session"
   | "unsupported_chain"
-  | "fee_rpc_error";
+  | "fee_rpc_error"
+  | "rpc_error";
 
 export class WalletError extends Error {
   code: WalletErrorCode;

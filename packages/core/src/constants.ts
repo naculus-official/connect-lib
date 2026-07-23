@@ -25,9 +25,9 @@ export const EIP155_SEPOLIA = "eip155:11155111";
 export const EIP155_POLYGON = "eip155:137";
 export const EIP155_MUMBAI = "eip155:80001";
 export const EIP155_ARBITRUM = "eip155:42161";
-export const EIP155_ARBITRUM_GOERLI = "eip155:421613";
+export const EIP155_ARBITRUM_GOERLI = "eip155:421613"; // DEPRECATED
 export const EIP155_OPTIMISM = "eip155:10";
-export const EIP155_OPTIMISM_GOERLI = "eip155:420";
+export const EIP155_OPTIMISM_GOERLI = "eip155:420"; // DEPRECATED
 export const EIP155_BASE = "eip155:8453";
 
 /**

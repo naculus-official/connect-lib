@@ -20,6 +20,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@naculus/connect-core": "workspace:*",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^1.8.1",
     "@noble/hashes": "^1.7.1",

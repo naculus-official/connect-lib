@@ -277,12 +277,15 @@ class XRPLConnectorImpl implements UniversalConnector {
       .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
       .join("");
 
+    const XRPL_AMOUNT = "1";   // ponytail: minimum XRP drop
+    const XRPL_FEE = "12";     // ponytail: minimum XRP drop fee
+
     const tx: XRPLTransaction = {
       TransactionType: "Payment",
       Account: this.activeSession.wallet.address,
       Destination: this.activeSession.wallet.address,
-      Amount: "1",
-      Fee: "12",
+      Amount: XRPL_AMOUNT,
+      Fee: XRPL_FEE,
       // XLS-0063 (XRPL SignIn) is stalled. This is a workaround using a
       // self-directed Payment transaction with the message hex-encoded
       // in the Memo field. The Amount/Fee values are the minimum viable

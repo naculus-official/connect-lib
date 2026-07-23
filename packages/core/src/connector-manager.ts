@@ -251,6 +251,9 @@ export class ConnectorManager {
     if (!this.activeConnectorId || !this.activeSession) {
       throw new Error("No active session");
     }
+    if (this.activeSession && _session !== this.activeSession) {
+      throw new Error("sendCalls: provided session does not match active session");
+    }
 
     const connector = this.connectors.get(this.activeConnectorId);
     if (!connector?.sendCalls) {
@@ -265,6 +268,9 @@ export class ConnectorManager {
   ): Promise<Record<string, WalletCapabilities>> {
     if (!this.activeConnectorId || !this.activeSession) {
       throw new Error("No active session");
+    }
+    if (this.activeSession && _session !== this.activeSession) {
+      throw new Error("getCapabilities: provided session does not match active session");
     }
 
     const connector = this.connectors.get(this.activeConnectorId);

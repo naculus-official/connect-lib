@@ -60,6 +60,9 @@ importers:
       '@naculus/connect-core':
         specifier: workspace:*
         version: link:../core
+      '@naculus/connector-coinbase':
+        specifier: workspace:*
+        version: link:../connector-coinbase
       '@naculus/connector-embedded':
         specifier: workspace:*
         version: link:../connector-embedded
@@ -69,9 +72,18 @@ importers:
       '@naculus/connector-passkeys':
         specifier: workspace:*
         version: link:../connector-passkeys
+      '@naculus/connector-safe':
+        specifier: workspace:*
+        version: link:../connector-safe
+      '@naculus/connector-solana':
+        specifier: workspace:*
+        version: link:../connector-solana
       '@naculus/connector-walletconnect':
         specifier: workspace:*
         version: link:../connector-walletconnect
+      '@naculus/connector-xrpl':
+        specifier: workspace:*
+        version: link:../connector-xrpl
       '@naculus/siwx':
         specifier: workspace:*
         version: link:../siwx
@@ -309,6 +321,9 @@ importers:
 
   packages/wallet-engine:
     dependencies:
+      '@naculus/connect-core':
+        specifier: workspace:*
+        version: link:../core
       '@noble/ciphers':
         specifier: ^2.2.0
         version: 2.2.0
@@ -325,9 +340,6 @@ importers:
         specifier: ^1.5.4
         version: 1.6.0
     devDependencies:
-      '@naculus/connect-core':
-        specifier: workspace:*
-        version: link:../core
       fake-indexeddb:
         specifier: ^6.2.5
         version: 6.2.5
