@@ -121,10 +121,29 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     if (!input) {
       const wallets = this.getDiscoveredWallets();
       if (wallets.length === 0) {
-        throw new WalletError(
-          "wallet_unavailable",
-          "No wallets discovered. Please call startDiscovery() to find available wallets.",
-        );
+        // Wait up to 500ms for EIP-6963 announcements
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
+        const afterWait = this.getDiscoveredWallets();
+        if (afterWait.length > 0) {
+          wallet = afterWait[0];
+        } else if (
+          typeof window !== "undefined" &&
+          (window as unknown as { ethereum?: { isMetaMask?: boolean } }).ethereum
+        ) {
+          wallet = {
+            id: "window-ethereum",
+            name: "Browser Wallet",
+            icon: "",
+            rdns: "io.metamask",
+            provider: (window as unknown as { ethereum: Record<string, unknown> })
+              .ethereum as unknown as Eip6963EthereumProvider,
+          };
+        } else {
+          throw new WalletError(
+            "wallet_unavailable",
+            "No wallet available. Install MetaMask or another EIP-6963 wallet.",
+          );
+        }
       }
       wallet = wallets[0];
     } else if (typeof input === "string") {
