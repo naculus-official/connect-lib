@@ -59,8 +59,8 @@ jobs:
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
         run: |
           VERSION=$(node -p "require('./packages/core/package.json').version")
-          git tag "v$VERSION"
-          git push origin "v$VERSION"
-          gh release create "v$VERSION" --generate-notes --verify-tag
+          git tag "v$VERSION" 2>/dev/null || echo "🏷️  v$VERSION tag already exists"
+          git push origin "v$VERSION" 2>/dev/null || echo "🏷️  v$VERSION tag already pushed"
+          gh release create "v$VERSION" --generate-notes --verify-tag 2>/dev/null || echo "📦 Release v$VERSION already exists"
         env:
           GH_TOKEN: ${{ github.token }}
