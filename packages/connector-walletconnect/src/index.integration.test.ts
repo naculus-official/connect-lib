@@ -28,6 +28,7 @@ function createMockSignClient() {
     },
     request: vi.fn().mockResolvedValue("0xsignature"),
     disconnect: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
   };
 }
 

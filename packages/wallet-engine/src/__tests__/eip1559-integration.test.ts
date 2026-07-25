@@ -7,6 +7,16 @@ import type { StorageAdapter } from "../storage/types";
 // Mock the core fee estimation module
 vi.mock("@naculus/connect-core", () => ({
   estimateFees: vi.fn(),
+  WalletError: class WalletError extends Error {
+    code: string;
+    cause?: unknown;
+    constructor(code: string, message?: string, details?: unknown, cause?: unknown) {
+      super(message ?? code);
+      this.name = "WalletError";
+      this.code = code;
+      this.cause = cause;
+    }
+  },
 }));
 
 import { estimateFees } from "@naculus/connect-core";

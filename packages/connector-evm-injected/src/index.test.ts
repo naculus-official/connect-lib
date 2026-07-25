@@ -151,7 +151,7 @@ describe("EIP6963Connector", () => {
 
     it("should throw when no wallet discovered", async () => {
       const c = new EIP6963Connector();
-      await expect(c.connect()).rejects.toThrow("No wallets discovered");
+      await expect(c.connect()).rejects.toThrow("No wallet available");
     });
   });
 

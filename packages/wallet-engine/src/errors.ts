@@ -1,2 +1,3 @@
-/** Re-export core WalletError for unified error handling */
-export { WalletError } from "@naculus/connect-core";
+import { WalletError as CoreWalletError } from "@naculus/connect-core";
+
+export class WalletError extends CoreWalletError {}

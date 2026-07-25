@@ -68,12 +68,19 @@ export type WalletErrorCode =
 export class WalletError extends Error {
   code: WalletErrorCode;
   details?: unknown;
+  cause?: unknown;
 
-  constructor(code: WalletErrorCode, message?: string, details?: unknown) {
+  constructor(code: WalletErrorCode, message?: string, details?: unknown, cause?: unknown) {
     super(message ?? code);
     this.name = "WalletError";
     this.code = code;
-    this.details = details;
+    if (details instanceof Error) {
+      this.cause = details;
+      this.details = details;
+    } else {
+      this.details = details;
+    }
+    if (cause) this.cause = cause;
   }
 }
 
