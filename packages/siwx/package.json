@@ -28,5 +28,9 @@
     "tweetnacl": "^1.0.3",
     "typescript": "^5.9.3"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/naculus-official/connect-lib"
+  }
 }
