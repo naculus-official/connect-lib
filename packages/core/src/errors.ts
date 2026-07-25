@@ -51,7 +51,19 @@ export type WalletErrorCode =
   | "timeout"
   | "worker_error"
   | "decryption_failed"
-  | "storage_quota";
+  | "storage_quota"
+  | "storage_read_failed"
+  | "storage_write_failed"
+  | "storage_clear_failed"
+  | "derivation_failed"
+  | "invalid_fee"
+  | "invalid_key"
+  | "invalid_mnemonic"
+  | "invalid_multiplier"
+  | "rpc_timeout"
+  | "simulation_malicious"
+  | "simulation_reverted"
+  | "fee_estimation_failed";
 
 export class WalletError extends Error {
   code: WalletErrorCode;
