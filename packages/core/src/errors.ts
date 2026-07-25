@@ -50,7 +50,8 @@ export type WalletErrorCode =
   | "test_code"
   | "timeout"
   | "worker_error"
-  | "decryption_failed";
+  | "decryption_failed"
+  | "storage_quota";
 
 export class WalletError extends Error {
   code: WalletErrorCode;
