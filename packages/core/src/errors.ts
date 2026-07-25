@@ -39,7 +39,18 @@ export type WalletErrorCode =
   | "rpc_error"
   | "session_not_found"
   | "session_inactive"
-  | "session_scope_exceeded";
+  | "session_scope_exceeded"
+  | "invalid_scope"
+  | "bad_stuff"
+  | "no_rpc"
+  | "not_initialized"
+  | "no_wallet"
+  | "storage_unavailable"
+  | "terminated"
+  | "test_code"
+  | "timeout"
+  | "worker_error"
+  | "decryption_failed";
 
 export class WalletError extends Error {
   code: WalletErrorCode;
