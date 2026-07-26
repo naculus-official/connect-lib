@@ -1,6 +1,6 @@
 import { ERC20TokenHelper, parseUnits } from "@naculus/connect-core";
 import type { WalletData } from "@naculus/wallet-engine";
-import { PocketWallet, type StorageAdapter } from "@naculus/wallet-engine";
+import { PocketWallet, type StorageAdapter, type StorageType } from "@naculus/wallet-engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── Crypto Mocks ──────────────────────────────────────────────
@@ -53,7 +53,7 @@ vi.mock("@scure/bip32", () => ({
 
 class MockStorage implements StorageAdapter {
   private data: WalletData | null = null;
-  type = "memory";
+  readonly type: StorageType = "memory";
   isAvailable() {
     return true;
   }
