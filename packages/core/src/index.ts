@@ -16,6 +16,7 @@ export * from "./notification";
 export * from "./permissions";
 export * from "./platform";
 export * from "./resolver";
+export { RouteEngine } from "./routes/RouteEngine";
 export type { ChainInfo, Token } from "./routes/types";
 export * from "./rpc";
 export * from "./session";
