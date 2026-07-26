@@ -337,8 +337,8 @@ importers:
         specifier: ^1.6.2
         version: 1.7.0
       '@scure/bip39':
-        specifier: ^1.5.4
-        version: 1.6.0
+        specifier: ^2.2.0
+        version: 2.2.0
     devDependencies:
       fake-indexeddb:
         specifier: ^6.2.5
@@ -1445,6 +1445,9 @@ packages:
 
   '@scure/bip39@1.6.0':
     resolution: {integrity: sha512-+lF0BbLiJNwVlev4eKelw1WWLaiKXw7sSl8T6FvBlWkdX+94aGJ4o8XjUdlyhTCjd8c+B3KT3JfS8P0bLRNU6A==}
+
+  '@scure/bip39@2.2.0':
+    resolution: {integrity: sha512-T/Bj/YvYMNkIPq6EENO6/rcs2e7qTNuyoUXf0KBFDmp0ZDu0H2X4Lq6yC3i0c8PcWkov5EbW+yQZZbdMmk154A==}
 
   '@solana-program/system@0.10.0':
     resolution: {integrity: sha512-Go+LOEZmqmNlfr+Gjy5ZWAdY5HbYzk2RBewD9QinEU/bBSzpFfzqDRT55JjFRBGJUvMgf3C2vfXEGT4i8DSI4g==}
@@ -6063,6 +6066,11 @@ snapshots:
     dependencies:
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
+
+  '@scure/bip39@2.2.0':
+    dependencies:
+      '@noble/hashes': 1.8.0
+      '@scure/base': 2.2.0
 
   '@solana-program/system@0.10.0(@solana/kit@5.5.1(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2))':
     dependencies:
