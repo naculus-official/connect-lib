@@ -29,5 +29,13 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "safe",
+    "gnosis-safe",
+    "smart-wallet"
+  ],
+  "description": "Gnosis Safe SDK connector"
 }

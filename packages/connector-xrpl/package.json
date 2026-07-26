@@ -33,5 +33,13 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "xrp",
+    "xrpl",
+    "xaman"
+  ],
+  "description": "XRPL wallet connector (Xaman deeplink)"
 }

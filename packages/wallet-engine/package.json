@@ -2,7 +2,7 @@
   "name": "@naculus/wallet-engine",
   "version": "0.1.1",
   "type": "module",
-  "description": "Embedded wallet for non-web3 users. Low barrier entry — like an EasyCard for crypto.",
+  "description": "Embedded wallet engine (BIP39, HD keys, signing)",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -38,5 +38,14 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "wallet",
+    "hd-wallet",
+    "bip39",
+    "bip32",
+    "embedded"
+  ]
 }

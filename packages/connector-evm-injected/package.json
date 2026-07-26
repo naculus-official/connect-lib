@@ -28,5 +28,13 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "eip6963",
+    "evm",
+    "injected-provider"
+  ],
+  "description": "EIP-6963 browser wallet connector"
 }

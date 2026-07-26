@@ -29,5 +29,12 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "embedded-wallet",
+    "wallet"
+  ],
+  "description": "Embedded wallet connector (PocketWallet bridge)"
 }

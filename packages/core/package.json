@@ -29,5 +29,14 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "blockchain",
+    "ethereum",
+    "wallet",
+    "connect"
+  ],
+  "description": "Core interfaces and connector manager for Naculus Connect"
 }

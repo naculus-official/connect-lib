@@ -29,5 +29,13 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "coinbase",
+    "wallet",
+    "coinbase-wallet-sdk"
+  ],
+  "description": "Coinbase Wallet SDK connector"
 }

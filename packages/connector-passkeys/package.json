@@ -28,5 +28,13 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/naculus-official/connect-lib"
-  }
+  },
+  "license": "MIT",
+  "keywords": [
+    "web3",
+    "passkeys",
+    "webauthn",
+    "wallet"
+  ],
+  "description": "Passkeys/WebAuthn connector"
 }
