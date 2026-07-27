@@ -175,7 +175,7 @@ describe("EVM Injected Financial Integration: Chain Operations", () => {
     const provider = createMockEIP6963Provider(["0x" + "ab".repeat(20)], "0x1");
     const chainId = await provider.request({ method: "eth_chainId" });
     expect(chainId).toBe("0x1");
-    expect(Number(BigInt(chainId))).toBe(1);
+    expect(Number(BigInt(chainId as string))).toBe(1);
   });
 
   it("switches to Polygon (0x89)", async () => {
@@ -185,7 +185,7 @@ describe("EVM Injected Financial Integration: Chain Operations", () => {
     );
     const chainId = await provider.request({ method: "eth_chainId" });
     expect(chainId).toBe("0x89");
-    expect(Number(BigInt(chainId))).toBe(137);
+    expect(Number(BigInt(chainId as string))).toBe(137);
   });
 });
 
