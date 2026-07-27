@@ -41,9 +41,9 @@ function createSession(): UniversalWalletSession {
     connectorId: "coinbase",
     walletId: "test-wallet",
     walletType: "coinbase_wallet",
-    platform: "test",
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    platform: "desktop-web",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
     namespaces: {
       eip155: {
         chains: ["eip155:1"],

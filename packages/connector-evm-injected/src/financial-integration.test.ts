@@ -66,7 +66,7 @@ describe("EVM Injected Financial Integration", () => {
   it("connects and returns accounts", async () => {
     const result = await provider.request({ method: "eth_requestAccounts" });
     expect(result).toEqual(accounts);
-    expect(result[0]).toMatch(/^0x[0-9a-fA-F]{40}$/);
+    expect((result as string[])[0]).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
   it("signs message and returns hex signature", async () => {
