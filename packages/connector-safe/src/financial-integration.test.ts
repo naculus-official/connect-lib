@@ -34,6 +34,11 @@ function createMockSession() {
   return {
     id: "safe-test-session",
     connectorId: "safe",
+    walletId: "safe-wallet",
+    walletType: "safe",
+    platform: "desktop-web",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
     namespaces: {
       eip155: {
         chains: ["eip155:1"],
