@@ -40,9 +40,10 @@ const SEPOLIA_RPC_URLS = [
 ];
 
 // ── Mock Storage ───────────────────────────────────────────────────
-
 class MockStorage implements StorageAdapter {
   private data: WalletData | null = null;
+  readonly type = "memory" as const;
+
   isAvailable(): boolean {
     return true;
   }
@@ -627,7 +628,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
 
 describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should create wallet in secure mode and sign successfully", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, memoryIsolation: "secure" });
+    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
     await w.generate();
 
     // In secure mode, secrets should be encrypted
@@ -647,8 +648,8 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   });
 
   it("should produce same signatures as memory mode", async () => {
-    const wMem = new PocketWallet({ storage: new MockStorage(), autoSave: false, memoryIsolation: "memory" });
-    const wSec = new PocketWallet({ storage: new MockStorage(), autoSave: false, memoryIsolation: "secure" });
+    const wMem = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const wSec = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
 
     await wMem.importMnemonic(TEST_MNEMONIC);
     await wSec.importMnemonic(TEST_MNEMONIC);
@@ -660,7 +661,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   });
 
   it("should import from private key in secure mode", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, memoryIsolation: "secure" });
+    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
     const pk = `0x${'ab'.repeat(32)}` as `0x${string}`;
     await w.importPrivateKey(pk);
 
@@ -674,7 +675,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   });
 
   it("should properly clean decrypted data after signing", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, memoryIsolation: "secure" });
+    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
     await w.importMnemonic(TEST_MNEMONIC);
 
     // Sign once
@@ -686,7 +687,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   });
 
   it("should handle secure mode with destroySession", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, memoryIsolation: "secure" });
+    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
     await w.importMnemonic(TEST_MNEMONIC);
 
     // Should be functional
@@ -705,8 +706,8 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should be configurable via PocketConfig", async () => {
     const configs = [
       { autoSave: false },
-      { autoSave: false, memoryIsolation: "memory" as const },
-      { autoSave: false, memoryIsolation: "secure" as const },
+      { autoSave: false },
+      { autoSave: false, isolation: "secure" as const },
     ];
 
     for (const cfg of configs) {
@@ -720,12 +721,12 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
 
   it("should load from storage in secure mode", async () => {
     const storage = new MockStorage();
-    const w1 = new PocketWallet({ storage, autoSave: true, memoryIsolation: "secure" });
+    const w1 = new PocketWallet({ storage, autoSave: true, isolation: "secure" });
     await w1.generate();
     const originalAddr = w1.address;
 
     // Load into new instance
-    const w2 = new PocketWallet({ storage, autoSave: false, memoryIsolation: "secure" });
+    const w2 = new PocketWallet({ storage, autoSave: false, isolation: "secure" });
     const loaded = await w2.load();
     expect(loaded).toBe(true);
     expect(w2.address?.toLowerCase()).toBe(originalAddr?.toLowerCase());
@@ -743,7 +744,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should work without Web Crypto (graceful fallback)", async () => {
     // In environments without Web Crypto, secure mode sealSecrets is a no-op
     // but the wallet should still function normally
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, memoryIsolation: "secure" });
+    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
     await w.importMnemonic(TEST_MNEMONIC);
 
     const sig = await w.signMessage("no-webcrypto test");

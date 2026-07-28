@@ -153,7 +153,7 @@ describe("InAppChannel", () => {
         removeItem: vi.fn(async (key: string): Promise<void> => {
           store.delete(key);
         }),
-      };
+      } as any;
 
       const ch1 = new InAppChannel({ storage });
       await ch1.send(makePayload({ id: "persist1" }));
@@ -196,7 +196,7 @@ describe("TelegramChannel", () => {
   });
 
   it("should use transport when provided", async () => {
-    const transport = vi.fn(async () => {});
+    const transport = vi.fn(async (_payload: NotificationPayload, _msg: string) => {});
     const ch = new TelegramChannel({
       botToken: "abc",
       chatId: "123",
@@ -215,7 +215,7 @@ describe("TelegramChannel", () => {
   });
 
   it("should format failed notifications with red emoji", async () => {
-    const transport = vi.fn(async () => {});
+    const transport = vi.fn(async (_payload: NotificationPayload, _msg: string) => {});
     const ch = new TelegramChannel({
       botToken: "abc",
       chatId: "123",
@@ -228,7 +228,7 @@ describe("TelegramChannel", () => {
   });
 
   it("should format pending notifications with hourglass emoji", async () => {
-    const transport = vi.fn(async () => {});
+    const transport = vi.fn(async (_payload: NotificationPayload, _msg: string) => {});
     const ch = new TelegramChannel({
       botToken: "abc",
       chatId: "123",
@@ -241,7 +241,7 @@ describe("TelegramChannel", () => {
   });
 
   it("should include explorer link when available", async () => {
-    const transport = vi.fn(async () => {});
+    const transport = vi.fn(async (_payload: NotificationPayload, _msg: string) => {});
     const ch = new TelegramChannel({
       botToken: "abc",
       chatId: "123",
@@ -259,7 +259,7 @@ describe("TelegramChannel", () => {
   });
 
   it("should shorten long tx hashes", async () => {
-    const transport = vi.fn(async () => {});
+    const transport = vi.fn(async (_payload: NotificationPayload, _msg: string) => {});
     const ch = new TelegramChannel({
       botToken: "abc",
       chatId: "123",

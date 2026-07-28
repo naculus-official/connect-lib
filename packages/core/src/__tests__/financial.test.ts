@@ -420,9 +420,9 @@ describe("ABI — ERC-20 RPC payload construction", () => {
       method: "eth_call" as const,
       params: [
         { to: usdcAddress, data },
-        "latest",
+        "latest" as const,
       ],
-    };
+    } as const;
 
     expect(rpcPayload.method).toBe("eth_call");
     expect(rpcPayload.params[0].to).toBe(usdcAddress);

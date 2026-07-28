@@ -98,9 +98,9 @@ describe("WalletConnect Financial Integration", () => {
 
       const result = await connector.sendTransaction(session, {
         transaction: {
-          to: "0x" + "ab".repeat(20),
+          to: "0x" + "ab".repeat(20) as `0x${string}`,
           value: "1000000000000000000",
-          data: "0x",
+          data: "0x" as `0x${string}`,
         },
         chainId: "eip155:1",
       });
@@ -123,9 +123,9 @@ describe("WalletConnect Financial Integration", () => {
 
       await connector.sendTransaction(session, {
         transaction: {
-          to: "0x" + "ab".repeat(20),
+          to: "0x" + "ab".repeat(20) as `0x${string}`,
           value: "0x1234",
-          data: "0x",
+          data: "0x" as `0x${string}`,
         },
         chainId: "eip155:1",
       });
@@ -145,7 +145,7 @@ describe("WalletConnect Financial Integration", () => {
       const session = createMockSession();
 
       await connector.sendTransaction(session, {
-        transaction: { to: "0x" + "ab".repeat(20), value: "0", data: "0x" },
+        transaction: { to: "0x" + "ab".repeat(20) as `0x${string}`, value: "0", data: "0x" as `0x${string}` },
         chainId: "eip155:1",
       });
 
@@ -165,7 +165,7 @@ describe("WalletConnect Financial Integration", () => {
       const session = createMockSession();
 
       const hash = await connector.sendTransaction(session, {
-        transaction: { to: "0x" + "ab".repeat(20), value: "0x1", data: "0x" },
+        transaction: { to: "0x" + "ab".repeat(20) as `0x${string}`, value: "0x1", data: "0x" as `0x${string}` },
         chainId: "eip155:1",
       });
 
@@ -301,8 +301,8 @@ describe("WalletConnect Financial Integration", () => {
       const result = await connector.sendCalls(
         session,
         [
-          { to: "0x" + "ab".repeat(20), value: "0x1", data: "0x" },
-          { to: "0x" + "cd".repeat(20), value: "0x2", data: "0x" },
+          { to: "0x" + "ab".repeat(20) as `0x${string}`, value: "0x1", data: "0x" as `0x${string}` },
+          { to: "0x" + "cd".repeat(20) as `0x${string}`, value: "0x2", data: "0x" as `0x${string}` },
         ],
         "eip155:1",
       );
@@ -336,7 +336,7 @@ describe("WalletConnect Financial Integration", () => {
 
       const result = await connector.sendCalls(
         session,
-        [{ to: "0x" + "ab".repeat(20), value: "0x1", data: "0x" }],
+        [{ to: "0x" + "ab".repeat(20) as `0x${string}`, value: "0x1", data: "0x" as `0x${string}` }],
         "eip155:1",
       );
 
@@ -357,7 +357,7 @@ describe("WalletConnect Financial Integration", () => {
 
       const result = await connector.sendCalls(
         session,
-        [{ to: "0x" + "ab".repeat(20), value: "0x1", data: "0x" }],
+        [{ to: "0x" + "ab".repeat(20) as `0x${string}`, value: "0x1", data: "0x" as `0x${string}` }],
         "eip155:1",
       );
 
@@ -379,8 +379,8 @@ describe("WalletConnect Financial Integration", () => {
       const result = await connector.sendCalls(
         session,
         [
-          { to: "0x" + "ab".repeat(20), value: "0x1", data: "0x" },
-          { to: "0x" + "cd".repeat(20), value: "0x2", data: "0x" },
+          { to: "0x" + "ab".repeat(20) as `0x${string}`, value: "0x1", data: "0x" as `0x${string}` },
+          { to: "0x" + "cd".repeat(20) as `0x${string}`, value: "0x2", data: "0x" as `0x${string}` },
         ],
         "eip155:1",
       );

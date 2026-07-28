@@ -26,11 +26,11 @@ const USDC_ETH: Token = {
 function createMockWalletClient(): ViemWalletClient {
   return {
     sendTransaction: async (args) => {
-      return '0x' + 'a'.repeat(64)
+      return '0x' + 'a'.repeat(64) as `0x${string}`
     },
     estimateGas: async () => 100_000n,
     writeContract: async (args) => {
-      return '0x' + 'b'.repeat(64)
+      return '0x' + 'b'.repeat(64) as `0x${string}`
     },
   }
 }
@@ -162,7 +162,9 @@ describe('EVMRouteExecutor', () => {
 
   it('throws if writeContract is not available for approve', async () => {
     const client: ViemWalletClient = {
-      sendTransaction: async () => '0x' + 'a'.repeat(64),
+      sendTransaction: async (args) => {
+        return ('0x' + 'a'.repeat(64)) as `0x${string}`
+      },
     }
 
     const executor = new EVMRouteExecutor(client)

@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { PocketWallet, EvmWalletError } from "../wallet";
-import type { StorageAdapter, WalletData } from "../wallet";
+import { PocketWallet } from "../wallet";
+import { WalletError } from "../errors";
+import type { StorageAdapter } from "../storage/types";
+import type { WalletData } from "../wallet";
 
 class VoidStorage implements StorageAdapter {
   private d: WalletData | null = null;
+  readonly type = "memory" as const;
   isAvailable() { return true; }
   async load() { return this.d; }
   async save(data: WalletData) { this.d = data; }

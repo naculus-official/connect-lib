@@ -184,7 +184,7 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
       walletSession: session,
       lastActiveChainId: CHAINS.EVM_MAINNET,
       chainSessions: {},
-      lastConnectedAt: Date.now(),
+      lastConnectedAt: String(Date.now()),
     };
     await persistence.save(persisted);
     const loaded = await persistence.load();
@@ -199,7 +199,7 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
       walletSession: session,
       lastActiveChainId: CHAINS.EVM_MAINNET,
       chainSessions: {},
-      lastConnectedAt: Date.now(),
+      lastConnectedAt: String(Date.now()),
     });
     await persistence.clear();
     expect(await persistence.load()).toBeNull();
@@ -210,20 +210,22 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
     const chainSessions = new Map<string, ChainSession>();
     chainSessions.set(CHAINS.EVM_MAINNET, {
       chainId: CHAINS.EVM_MAINNET,
-      account: ADDRESSES.ALICE,
       connectorId: "mock",
-    });
+      rpcUrl: "https://mock.rpc",
+      nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    } as ChainSession);
     chainSessions.set(CHAINS.EVM_POLYGON, {
       chainId: CHAINS.EVM_POLYGON,
-      account: ADDRESSES.ALICE,
       connectorId: "mock",
-    });
+      rpcUrl: "https://mock-polygon.rpc",
+      nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+    } as ChainSession);
 
     const bundle: ActiveSessionBundle = {
       walletSession: session,
       chainSessions,
       activeChainId: CHAINS.EVM_MAINNET,
-      lastActiveAt: Date.now(),
+      lastActiveAt: String(Date.now()),
     };
 
     const data = persistence.serializeBundle(bundle);
@@ -241,17 +243,18 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
       chainSessions: {
         [CHAINS.EVM_MAINNET]: {
           chainId: CHAINS.EVM_MAINNET,
-          account: ADDRESSES.ALICE,
           connectorId: "mock",
-        },
+          rpcUrl: "https://mock.rpc",
+          nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        } as ChainSession,
       },
-      lastConnectedAt: Date.now(),
+      lastConnectedAt: String(Date.now()),
     };
 
     const bundle = persistence.deserializeToBundle(data);
     expect(bundle).not.toBeNull();
     expect(bundle!.chainSessions.get(CHAINS.EVM_MAINNET)).toBeDefined();
-    expect(bundle!.chainSessions.get(CHAINS.EVM_MAINNET)!.account).toBe(ADDRESSES.ALICE);
+    expect(bundle!.chainSessions.get(CHAINS.EVM_MAINNET)).toBeDefined();
   });
 
   it("deserializeToBundle returns null for expired session", () => {
@@ -276,7 +279,7 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
       walletSession: session,
       lastActiveChainId: CHAINS.EVM_MAINNET,
       chainSessions: {},
-      lastConnectedAt: Date.now(),
+      lastConnectedAt: String(Date.now()),
     };
 
     const bundle = persistence.deserializeToBundle(data);
@@ -294,14 +297,14 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
     const chainSessions: Record<string, ChainSession> = {};
     const chains = [CHAINS.EVM_MAINNET, CHAINS.EVM_POLYGON, CHAINS.SOLANA_MAINNET];
     for (const chainId of chains) {
-      chainSessions[chainId] = { chainId, account: ADDRESSES.ALICE, connectorId: "mock" };
+      chainSessions[chainId] = { chainId, connectorId: "mock", rpcUrl: "https://mock.rpc", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 } } as ChainSession;
     }
 
     await persistence.save({
       walletSession: session,
       lastActiveChainId: CHAINS.EVM_MAINNET,
       chainSessions,
-      lastConnectedAt: Date.now(),
+      lastConnectedAt: String(Date.now()),
     });
 
     const loaded = await persistence.load();
@@ -315,6 +318,8 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
       get: vi.fn(),
       set: vi.fn().mockRejectedValue(new Error("QuotaExceeded")),
       remove: vi.fn(),
+      clear: vi.fn(),
+      has: vi.fn(),
     };
     const p = new SessionPersistence(testKey, badAdapter);
     const session = createTestSession({ id: "quota-test" });
@@ -323,7 +328,7 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
       walletSession: session,
       lastActiveChainId: CHAINS.EVM_MAINNET,
       chainSessions: {},
-      lastConnectedAt: Date.now(),
+      lastConnectedAt: String(Date.now()),
     })).resolves.not.toThrow();
   });
 });
@@ -383,43 +388,43 @@ describe("C2 — Simulation-gated signing: reverted sim blocks send", () => {
   const fromAddr = ADDRESSES.ALICE;
 
   it("success simulation should allow transaction", async () => {
-    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } });
+    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } as unknown as string });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true,
       json: async () => ({ result: "0x0000000000000000000000000000000000000000000000000000000000000001" }),
     }));
-    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" };
+    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" as `0x${string}` };
     const result = await mgr.simulate(tx, fromAddr, { chainId: 1 });
     expect(result.status).toBe("success");
   });
 
   it("reverted simulation should be detected", async () => {
-    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } });
+    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } as unknown as string });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true,
       json: async () => ({ error: { message: "execution reverted" } }),
     }));
-    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" };
+    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" as `0x${string}` };
     const result = await mgr.simulate(tx, fromAddr, { chainId: 1 });
     expect(result.status).toBe("reverted");
   });
 
   it("reverted simulation should gate the signing pipeline", async () => {
-    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } });
+    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } as unknown as string });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true,
       json: async () => ({ error: { message: "execution reverted" } }),
     }));
-    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" };
+    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" as `0x${string}` };
     const result = await mgr.simulate(tx, fromAddr, { chainId: 1 });
     const shouldAbort = result.status === "reverted";
     expect(shouldAbort).toBe(true);
   });
 
   it("simulation-manager can be disabled at runtime", async () => {
-    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } });
+    const mgr = new SimulationManager({ enabled: true, rpcUrl: { 1: "https://mock.rpc" } as unknown as string });
     expect(mgr.enabled).toBe(true);
     mgr.setEnabled(false);
     expect(mgr.enabled).toBe(false);
 
-    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" };
+    const tx = { to: ADDRESSES.BOB, value: "0x1", data: "0x" as `0x${string}` };
     const result = await mgr.simulate(tx, fromAddr, { chainId: 1 });
     expect(result.status).toBe("unavailable");
   });

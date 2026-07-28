@@ -329,7 +329,6 @@ describe("Notifier", () => {
         status: "confirmed",
         title: "Direct",
         body: "Direct notification",
-        timestamp: Date.now(),
       });
 
       expect(spyChannel.send).toHaveBeenCalledTimes(1);
@@ -350,7 +349,6 @@ describe("Notifier", () => {
           status: "confirmed",
           title: "Ch",
           body: "Channel-specific",
-          timestamp: Date.now(),
         },
         ["noop"],
       );
@@ -512,7 +510,7 @@ describe("Notifier", () => {
 
   describe("persistence", () => {
     it("should persist and restore preferences", async () => {
-      const storage = createMockStorage();
+      const storage = createMockStorage() as any;
       const n1 = new Notifier({ storage });
       n1.setPreferences("u1", { frequency: "per-tx" });
 
@@ -523,7 +521,7 @@ describe("Notifier", () => {
     });
 
     it("should persist and restore watches", async () => {
-      const storage = createMockStorage();
+      const storage = createMockStorage() as any;
       const n1 = new Notifier({ storage });
       n1.watchTx("0xpersist", "eip155:1", { userId: "u1" });
 
@@ -533,7 +531,7 @@ describe("Notifier", () => {
     });
 
     it("should not restore resolved watches", async () => {
-      const storage = createMockStorage();
+      const storage = createMockStorage() as any;
       const n1 = new Notifier({ storage });
       n1.watchTx("0xresolved", "eip155:1", { userId: "u1" });
       n1.unregisterTxWatch("0xresolved");
@@ -544,7 +542,7 @@ describe("Notifier", () => {
     });
 
     it("should persist and restore mute rules", async () => {
-      const storage = createMockStorage();
+      const storage = createMockStorage() as any;
       const n1 = new Notifier({ storage });
       n1.addMuteRule("u1", {
         id: "r_persist",

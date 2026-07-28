@@ -20,6 +20,11 @@ function createMockConnector(name: string, namespace: string): UniversalConnecto
         connectorId: `mock-${name}`,
         namespaces: { [namespace]: { chains: [`${namespace}:1`], accounts: [`${namespace}:1:0xdead`], methods: [], events: [] } },
         expiry: Date.now() + 300_000,
+        walletId: name,
+        walletType: "mock",
+        platform: "desktop-web",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
       return session;
     },
@@ -87,7 +92,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
     const session = await manager.connect("mock-test");
-    const sig = await manager.signMessage(session, "hello");
+    const sig = await manager.signMessage({ message: "hello" });
     expect(sig).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
@@ -96,7 +101,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
     const session = await manager.connect("mock-test");
-    const hash = await manager.sendTransaction(session, { to: "0xdead", value: "0x1" });
+    const hash = await manager.sendTransaction({ to: "0xdead", value: "0x1" });
     expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
@@ -118,7 +123,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
     const session = await manager.connect("mock-test");
-    const balance = await manager.getBalance?.(session);
+    const balance = await manager.getBalance!();
     expect(balance).toBe("1000000000000000000");
     expect(() => BigInt(balance!)).not.toThrow();
   });
@@ -128,7 +133,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
     const session = await manager.connect("mock-test");
-    await manager.disconnect(session);
+    await manager.disconnect();
     expect(manager.getActiveSession()).toBeNull();
   });
 
@@ -137,7 +142,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
     const session = await manager.connect("mock-test");
-    await expect(manager.switchChain(session, "eip155:137")).resolves.not.toThrow();
+    await expect(manager.switchChain("eip155:137")).resolves.not.toThrow();
   });
 });
 

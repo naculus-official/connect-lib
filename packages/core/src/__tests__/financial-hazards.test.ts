@@ -217,7 +217,7 @@ describe("Gap 3 — Concurrency: parallel sendTransaction", () => {
     const session = await manager.connect(connector.id);
 
     for (let i = 0; i < 10; i++) {
-      const hash = await connector.sendTransaction(session, {
+      const hash = await connector.sendTransaction!(session, {
         to: ADDRESSES.BOB,
         value: "0x" + i.toString(16),
       });
@@ -232,7 +232,7 @@ describe("Gap 3 — Concurrency: parallel sendTransaction", () => {
     const session = await manager.connect(connector.id);
 
     const tasks = Array.from({ length: 5 }, (_, i) =>
-      connector.sendTransaction(session, {
+      connector.sendTransaction!(session, {
         to: ADDRESSES.BOB,
         value: "0x" + i.toString(16),
       })
@@ -477,17 +477,17 @@ describe("Gap 7 — Compliance: session expiry", () => {
 
   it("active session with future expiry is considered valid", () => {
     const session = createTestSession({ expiry: NOW + SESSION_TIMEOUT_MS });
-    expect(session.expiry! > NOW).toBe(true);
+    expect(Number(session.expiry!) > NOW).toBe(true);
   });
 
   it("expired session should be rejected by signMessage guard", () => {
     const session = createExpiredTestSession();
-    expect(session.expiry! < NOW).toBe(true);
+    expect(Number(session.expiry!) < NOW).toBe(true);
   });
 
   it("expired session should be rejected by sendTransaction guard", () => {
     const session = createExpiredTestSession();
-    const isValid = session.expiry! > NOW;
+    const isValid = Number(session.expiry!) > NOW;
     expect(isValid).toBe(false);
   });
 
@@ -495,7 +495,7 @@ describe("Gap 7 — Compliance: session expiry", () => {
     const expiry = NOW;
     const session = createTestSession({ expiry });
     // At exact boundary, strict > rejects, >= accepts
-    const strictCheck = session.expiry! > NOW;
+    const strictCheck = Number(session.expiry!) > NOW;
     expect(strictCheck).toBe(false);
   });
 
@@ -594,7 +594,7 @@ describe("Cross-Gap — Financial Safety Patterns", () => {
     const connector = createMockConnector({ id: "sig-format" });
     const session = await connector.connect();
     for (let i = 0; i < 20; i++) {
-      const sig = await connector.signMessage(session, { message: `msg${i}` });
+      const sig = await connector.signMessage!(session, { message: `msg${i}` });
       expect(sig).toMatch(/^0x[0-9a-f]+$/i);
     }
   });
@@ -603,7 +603,7 @@ describe("Cross-Gap — Financial Safety Patterns", () => {
     const connector = createMockConnector({ id: "tx-format" });
     const session = await connector.connect();
     for (let i = 0; i < 20; i++) {
-      const hash = await connector.sendTransaction(session, {
+      const hash = await connector.sendTransaction!(session, {
         to: fuzzer.address(),
         value: "0x1",
       });
