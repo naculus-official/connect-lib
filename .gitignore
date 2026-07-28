@@ -1,7 +1,33 @@
 node_modules/
 dist/
-coverage/
-temp/
+.pnpm-store
+*.log
 .DS_Store
+.env
+.env.local
+coverage
+.vscode
+.idea
+*.opencode-panes.sh
+.codegraph/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Python linter cache
+.ruff_cache/
+
+# Scratch / temp
+tmp/
+temp/
+ladle-build/
+test_err*
+packages/*/pnpm-lock.yaml
+
+# TypeScript incremental build cache
 *.tsbuildinfo
 !__snapshots__/
+
+# Turborepo cache
+.turbo/
