@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { PocketWallet } from "../wallet";
-import type { WalletData, SendTransactionResult } from "../wallet";
+import type { WalletData } from "../wallet";
 import type { StorageAdapter } from "../storage/types";
 import { buildTransaction, cloneForBumping } from "../transaction";
 import {
@@ -54,6 +54,7 @@ const RECIPIENT2 = "0x" + "cd".repeat(20) as `0x${string}`;
 
 class MockStorage implements StorageAdapter {
   private data: WalletData | null = null;
+  readonly type = "memory" as const;
   isAvailable() { return true; }
   async load() { return this.data; }
   async save(data: WalletData) { this.data = data; }
@@ -216,7 +217,7 @@ describe("Financial Integration: Fee Oracle", () => {
       vi.mocked(estimateFees).mockResolvedValueOnce({ type: "eip1559", maxFeePerGas: 50_000_000_000n, maxPriorityFeePerGas: 1_000_000_000n });
       const r = await resolveFeeOptions({}, MOCK_RPC, "eip155:1");
       expect(r.type).toBe("eip1559");
-      expect(BigInt(r.maxFeePerGas)).toBe(50_000_000_000n);
+      expect(BigInt((r as any).maxFeePerGas)).toBe(50_000_000_000n);
     });
 
     it("falls back to legacy gasPrice when estimation fails", async () => {
@@ -224,7 +225,7 @@ describe("Financial Integration: Fee Oracle", () => {
       const spy = mockFetchRpc((m) => m === "eth_gasPrice" ? "0x9502f900" : null);
       const r = await resolveFeeOptions({}, MOCK_RPC);
       expect(r.type).toBe("legacy");
-      expect(r.gasPrice).toBe("0x9502f900");
+      expect((r as any).gasPrice).toBe("0x9502f900");
       spy.mockRestore();
     });
   });

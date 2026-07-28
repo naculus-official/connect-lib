@@ -4,8 +4,8 @@ import type { TransactionRequest } from "../signers/types";
 import { WalletError } from "../errors";
 
 const signer = new EVMSigner();
-const TEST_KEY = "0x" + "ab".repeat(32);
-const TEST_TO = "0x" + "cd".repeat(20);
+const TEST_KEY = "0x" + "ab".repeat(32) as `0x${string}`;
+const TEST_TO = "0x" + "cd".repeat(20) as `0x${string}`;
 
 /**
  * Helper: parse a hex string into a Uint8Array

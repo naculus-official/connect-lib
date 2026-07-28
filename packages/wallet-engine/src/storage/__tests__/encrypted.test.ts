@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import { EncryptedStorageAdapter } from "../encrypted";
 import { IndexedDbStorageAdapter } from "../indexed-db";
-import type { StorageAdapter, WalletData } from "../../wallet";
+import type { StorageAdapter } from "../../storage/types";
+import type { WalletData } from "../../wallet";
 
 const PASSPHRASE = "correct-horse-battery-stable-2026";
 
@@ -14,6 +15,7 @@ const mockData: WalletData = {
 
 class MockStorage implements StorageAdapter {
   private d: any = null;
+  readonly type = "memory" as const;
   isAvailable() { return true; }
   async load() { return this.d; }
   async save(data: any) { this.d = data; }

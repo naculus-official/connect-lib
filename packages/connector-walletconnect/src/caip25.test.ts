@@ -194,7 +194,7 @@ describe("validateCAIP25Proposal", () => {
         solana: {
           chains: [],
           methods: ["solana_signMessage"],
-        } as CAIP25NamespaceProposal,
+        } as unknown as CAIP25NamespaceProposal,
       },
     };
     const result = validateCAIP25Proposal(proposal);

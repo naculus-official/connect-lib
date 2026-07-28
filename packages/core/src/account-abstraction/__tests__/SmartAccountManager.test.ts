@@ -680,7 +680,8 @@ describe("estimateUserOperationGas", () => {
     vi.stubGlobal("JSON", {
       parse: JSON.parse,
       stringify(value: unknown, replacer?: unknown, space?: unknown) {
-        return origStringify(value, (key: string, val: unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return (origStringify as any)(value, (key: string, val: unknown) => {
           if (typeof val === "bigint") return `0x${val.toString(16)}`;
           return typeof replacer === "function" ? (replacer as (key: string, val: unknown) => unknown)(key, val) : val;
         }, space);

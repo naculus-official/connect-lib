@@ -98,7 +98,7 @@ describe("Stress: storage persistence under concurrent load", () => {
         walletSession: { id: o.id } as any,
         lastActiveChainId: "eip155:1",
         chainSessions: {},
-        lastConnectedAt: o.timestamp,
+        lastConnectedAt: String(o.timestamp),
       })
     ));
 

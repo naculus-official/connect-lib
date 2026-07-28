@@ -37,9 +37,10 @@ function fromBigInt(value: bigint, decimals: number): string {
 
 describe("A — Storage Security: localStorage vs IndexedDB", () => {
   const walletData: WalletData = {
-    version: 1,
     mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    accounts: [{ address: ADDRESSES.ALICE, path: "m/44'/60'/0'/0/0", index: 0 }],
+    privateKey: "0x" + "ab".repeat(32),
+    address: ADDRESSES.ALICE,
+    createdAt: Date.now(),
   };
 
   it("localStorage adapter stores as base64-encoded plaintext", async () => {
@@ -101,9 +102,10 @@ describe("A — Storage Security: localStorage vs IndexedDB", () => {
 
 describe("B — IndexedDbStorageAdapter: save → load → clear", () => {
   const walletData: WalletData = {
-    version: 1,
     mnemonic: "test test test test test test test test test test test junk",
-    accounts: [{ address: ADDRESSES.ALICE, path: "m/44'/60'/0'/0/0", index: 0 }],
+    privateKey: "0x" + "ab".repeat(32),
+    address: ADDRESSES.ALICE,
+    createdAt: Date.now(),
   };
 
   it("load returns null when IndexedDB is not available (Node env)", async () => {

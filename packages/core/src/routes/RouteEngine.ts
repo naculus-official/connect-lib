@@ -407,3 +407,4 @@ export class RouteEngine {
     };
   }
 }
+export { RouteEngineError } from "./types";

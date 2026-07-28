@@ -6,7 +6,7 @@
 
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { detectTokenInfo, clearAutoDetectCache } from "../auto-detect";
 
 /**
@@ -54,7 +54,7 @@ function mockFetchForRpc(): void {
 /**
  * Mock fetch with a counter to verify the cache prevents re-fetches.
  */
-function mockFetchWithCounter(): { fetchSpy: vi.Mock; getCallCount: () => number } {
+function mockFetchWithCounter(): { fetchSpy: Mock; getCallCount: () => number } {
   let callCount = 0;
   const fn = vi.fn(
     async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {

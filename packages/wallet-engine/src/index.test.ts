@@ -8,6 +8,7 @@ import { PocketWallet, type WalletData } from "./wallet";
 
 class MockStorage implements StorageAdapter {
   private data: WalletData | null = null;
+  readonly type = "memory" as const;
 
   isAvailable(): boolean {
     return true;

@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PocketWallet } from "../wallet";
-import type { StorageAdapter, WalletData } from "../wallet";
+import type { StorageAdapter } from "../storage/types";
+import type { WalletData } from "../wallet";
 import { IsolatedSigner } from "../signers/isolated-signer";
 
 const TEST_MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 class MockStorage implements StorageAdapter {
   private d: WalletData | null = null;
+  readonly type = "memory" as const;
   isAvailable() { return true; }
   async load() { return this.d; }
   async save(data: WalletData) { this.d = data; }

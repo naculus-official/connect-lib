@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { TxMonitor } from "../TxMonitor";
 import { TxHistoryStore, MemoryHistoryStorage } from "../TxHistoryStore";
-import type { ProviderLike } from "../types";
+import type { ProviderLike, TxStatus } from "../types";
 
 class MockProvider {
   private receipts = new Map<string, any>();
@@ -666,7 +666,7 @@ describe("TxMonitor - Lifecycle & Error Handling", () => {
       from: "0x" + "xx".repeat(20),
       to: "0x" + "yy".repeat(20),
       value: "0x0",
-      status: "confirmed",
+      status: "confirmed" as TxStatus,
       createdAt: Date.now() - 40 * 24 * 60 * 60 * 1000,
       updatedAt: Date.now(),
       replacementCount: 0,
