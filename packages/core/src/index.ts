@@ -11,6 +11,7 @@ export * from "./connector-manager";
 export * from "./constants";
 export * from "./errors";
 export * from "./fee-estimation";
+export * from "./hex";
 export * from "./logger";
 export * from "./notification";
 export * from "./permissions";

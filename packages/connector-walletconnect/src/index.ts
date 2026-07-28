@@ -13,6 +13,7 @@ import {
   detectPlatform,
   EIP155_MAINNET,
   extractAccounts,
+  hexEncode,
   WalletError,
   WC_DISCONNECT_USER,
 } from "@naculus/connect-core";
@@ -316,11 +317,11 @@ export class WalletConnectConnector implements UniversalConnector {
     for (const tryMethod of tryMethods) {
       let tryParams: unknown[];
       if (tryMethod === "personal_sign") {
-        tryParams = [address, this.hexEncode(message)];
+        tryParams = [address, hexEncode(message)];
       } else if (tryMethod === "eth_sign") {
         // eth_sign takes [address, messageToSign]
         // Use the raw hex-encoded message; wallets will show a hash
-        tryParams = [address, this.hexEncode(message)];
+        tryParams = [address, hexEncode(message)];
       } else {
         // eth_signTypedData_v4
         tryParams = [message, address];
@@ -731,22 +732,6 @@ export class WalletConnectConnector implements UniversalConnector {
 
   private isSolanaChain(chainId: string | undefined): boolean {
     return chainId?.startsWith("solana:") ?? false;
-  }
-
-  /**
-   * Hex-encodes a message for Ethereum JSON-RPC personal_sign
-   * Converts a UTF-8 string to a 0x-prefixed hex string
-   */
-  private hexEncode(message: string): string {
-    // Already hex-encoded
-    if (/^0x[0-9a-fA-F]*$/.test(message)) return message;
-
-    const bytes = new TextEncoder().encode(message);
-    let hex = "0x";
-    for (let i = 0; i < bytes.length; i++) {
-      hex += bytes[i].toString(16).padStart(2, "0");
-    }
-    return hex;
   }
 
   /**

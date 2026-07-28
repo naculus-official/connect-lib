@@ -400,22 +400,6 @@ export class SessionManager extends SessionEventEmitter {
     return true;
   }
 
-  // ── Event Emitter (re-expose for public API) ────────────────────────
-
-  override on<E extends SessionEvent>(
-    event: E,
-    handler: SessionEventHandler<E>,
-  ): void {
-    super.on(event, handler);
-  }
-
-  override off<E extends SessionEvent>(
-    event: E,
-    handler: SessionEventHandler<E>,
-  ): void {
-    super.off(event, handler);
-  }
-
   // ── Internal Helpers ────────────────────────────────────────────────
 
   /**

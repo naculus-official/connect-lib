@@ -12,6 +12,7 @@ import {
   extractAccountsFromPermissions,
   getPermissions,
   hasPermission,
+  hexEncode,
   requestPermissions,
   WalletError,
 } from "@naculus/connect-core";
@@ -338,11 +339,8 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   }
 
   private handleDisconnect(session: UniversalWalletSession): void {
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      session.namespaces.eip155?.accounts.some((acc) =>
-        s.accounts.includes(acc),
-      ),
-    );
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (eip6963Session) {
       this.removeEventListeners(eip6963Session.wallet);
@@ -362,12 +360,18 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     }
   }
 
-  async disconnect(session: UniversalWalletSession): Promise<void> {
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      session.namespaces.eip155?.accounts.some((acc) =>
-        s.accounts.includes(acc),
-      ),
+  /**
+   * Find the active EIP-6963 session that owns any of the given accounts.
+   */
+  private findActiveSession(accounts: string[]): EIP6963Session | undefined {
+    return Array.from(this.activeSessions.values()).find((s) =>
+      s.accounts.some((acc) => accounts.includes(acc)),
     );
+  }
+
+  async disconnect(session: UniversalWalletSession): Promise<void> {
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (eip6963Session) {
       this.removeEventListeners(eip6963Session.wallet);
@@ -422,9 +426,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      s.accounts.some((acc) => accounts.includes(acc)),
-    );
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -433,14 +435,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    // Hex-encode the message for personal_sign
-    const hexMessage =
-      rawMessage.startsWith("0x") && /^0x[0-9a-fA-F]*$/.test(rawMessage)
-        ? rawMessage
-        : "0x" +
-          Array.from(new TextEncoder().encode(rawMessage))
-            .map((b) => b.toString(16).padStart(2, "0"))
-            .join("");
+    const hexMessage = hexEncode(rawMessage);
 
     const result = await eip6963Session.wallet.provider.request({
       method: "personal_sign",
@@ -478,9 +473,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      s.accounts.some((acc) => accounts.includes(acc)),
-    );
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -536,9 +529,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      s.accounts.some((acc) => accounts.includes(acc)),
-    );
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -578,9 +569,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      s.accounts.some((acc) => accounts.includes(acc)),
-    );
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -653,9 +642,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      s.accounts.some((acc) => accounts.includes(acc)),
-    );
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -706,11 +693,8 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   async getCapabilities(
     session: UniversalWalletSession,
   ): Promise<Record<string, WalletCapabilities>> {
-    const eip6963Session = Array.from(this.activeSessions.values()).find((s) =>
-      session.namespaces.eip155?.accounts.some((acc) =>
-        s.accounts.includes(acc),
-      ),
-    );
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    const eip6963Session = this.findActiveSession(accounts);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -756,9 +740,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   ): Promise<import("@naculus/connect-core").CallsStatus> {
     try {
       const accounts = session.namespaces.eip155?.accounts ?? [];
-      const eip6963Session = Array.from(this.activeSessions.values()).find(
-        (s) => s.accounts.some((acc) => accounts.includes(acc)),
-      );
+      const eip6963Session = this.findActiveSession(accounts);
       if (!eip6963Session?.wallet.provider?.request)
         throw new Error("no provider");
       return (await eip6963Session.wallet.provider.request({

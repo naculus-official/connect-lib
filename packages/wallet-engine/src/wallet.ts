@@ -537,15 +537,22 @@ export class PocketWallet {
     }
   }
 
+  /**
+   * Generate crypto-random hex string of given byte length.
+   * Used for secure data wiping — overwrites sensitive strings
+   * with unpredictable bytes before discarding.
+   */
+  private randomHex(len: number): string {
+    return Array.from(crypto.getRandomValues(new Uint8Array(len)), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("");
+  }
+
   /** Overwrite sensitive data then clear (for secure wipe) */
   async wipe(): Promise<void> {
     if (this.data) {
-      const randomHex = (len: number) =>
-        Array.from(crypto.getRandomValues(new Uint8Array(len)), (b) =>
-          b.toString(16).padStart(2, "0"),
-        ).join("");
-      this.data.mnemonic = randomHex(256);
-      this.data.privateKey = randomHex(128);
+      this.data.mnemonic = this.randomHex(256);
+      this.data.privateKey = this.randomHex(128);
     }
     this.data = null;
     await this._storage.clear();
@@ -558,15 +565,8 @@ export class PocketWallet {
    */
   destroySession(): void {
     if (this.data) {
-      // Overwrite with crypto-random data before nulling.
-      // V8 strings are immutable so the old value persists until GC,
-      // but this makes recovery harder than a static padEnd pattern.
-      const randomHex = (len: number) =>
-        Array.from(crypto.getRandomValues(new Uint8Array(len)), (b) =>
-          b.toString(16).padStart(2, "0"),
-        ).join("");
-      this.data.mnemonic = randomHex(256);
-      this.data.privateKey = randomHex(128);
+      this.data.mnemonic = this.randomHex(256);
+      this.data.privateKey = this.randomHex(128);
     }
     this.data = null;
   }

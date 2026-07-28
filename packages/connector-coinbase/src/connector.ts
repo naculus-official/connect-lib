@@ -14,6 +14,7 @@ import {
   detectPlatform,
   EIP155_MAINNET,
   extractAccounts,
+  hexEncode,
   WalletError,
 } from "@naculus/connect-core";
 import { CoinbaseProviderAdapter } from "./provider";
@@ -322,9 +323,9 @@ export class CoinbaseConnector implements UniversalConnector {
     for (const tryMethod of tryMethods) {
       let params: unknown[];
       if (tryMethod === "personal_sign") {
-        params = [this.hexEncode(message), address];
+        params = [hexEncode(message), address];
       } else if (tryMethod === "eth_sign") {
-        params = [address, this.hexEncode(message)];
+        params = [address, hexEncode(message)];
       } else {
         // eth_signTypedData_v4
         params = [address, message];
@@ -773,20 +774,6 @@ export class CoinbaseConnector implements UniversalConnector {
     }
 
     return EIP155_MAINNET;
-  }
-
-  /**
-   * Hex-encode a string for Ethereum JSON-RPC methods.
-   */
-  private hexEncode(message: string): `0x${string}` {
-    if (/^0x[0-9a-fA-F]*$/.test(message)) return message as `0x${string}`;
-
-    const bytes = new TextEncoder().encode(message);
-    let hex = "0x";
-    for (let i = 0; i < bytes.length; i++) {
-      hex += bytes[i].toString(16).padStart(2, "0");
-    }
-    return hex as `0x${string}`;
   }
 }
 

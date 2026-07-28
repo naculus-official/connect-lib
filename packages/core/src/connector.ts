@@ -83,38 +83,37 @@ export interface UniversalConnector {
   getBalance?(chainId?: string): Promise<string>;
 }
 
+function extractFromNamespaces<K extends keyof SessionNamespace>(
+  namespaces: Record<Namespace, SessionNamespace>,
+  key: K,
+): SessionNamespace[K] extends (infer T)[] ? T[] : never {
+  const result = new Set<unknown>();
+  Object.values(namespaces).forEach((ns) => {
+    (ns[key] as unknown[]).forEach((v) => result.add(v));
+  });
+  return Array.from(result) as any;
+}
+
 export function extractAccounts(
   namespaces: Record<Namespace, SessionNamespace>,
 ): string[] {
-  return Object.values(namespaces).flatMap((namespace) => namespace.accounts);
+  return extractFromNamespaces(namespaces, "accounts");
 }
 
 export function getChainsFromNamespaces(
   namespaces: Record<Namespace, SessionNamespace>,
 ): string[] {
-  const chains = new Set<string>();
-  Object.values(namespaces).forEach((namespace) => {
-    namespace.chains.forEach((chain) => chains.add(chain));
-  });
-  return Array.from(chains);
+  return extractFromNamespaces(namespaces, "chains");
 }
 
 export function getMethodsFromNamespaces(
   namespaces: Record<Namespace, SessionNamespace>,
 ): string[] {
-  const methods = new Set<string>();
-  Object.values(namespaces).forEach((namespace) => {
-    namespace.methods.forEach((method) => methods.add(method));
-  });
-  return Array.from(methods);
+  return extractFromNamespaces(namespaces, "methods");
 }
 
 export function getEventsFromNamespaces(
   namespaces: Record<Namespace, SessionNamespace>,
 ): string[] {
-  const events = new Set<string>();
-  Object.values(namespaces).forEach((namespace) => {
-    namespace.events.forEach((event) => events.add(event));
-  });
-  return Array.from(events);
+  return extractFromNamespaces(namespaces, "events");
 }

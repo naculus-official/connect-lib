@@ -113,76 +113,6 @@ function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
  */
 function encodeExecuteBatch(calls: Call[]): Hex {
   const selector = "0x47e1da2a";
-  // Build the ABI-encoded arrays
-  const numCalls = calls.length;
-
-  // offsets and lengths
-  const toOffset = 32; // after numCalls word
-  const valuesOffset = toOffset + 32 * numCalls + 32; // after to array
-  const datasOffset = valuesOffset + 32 * numCalls + 32; // after values array
-
-  const toPart =
-    numCalls.toString(16).padStart(64, "0") +
-    calls
-      .map((c) => c.to.toLowerCase().replace("0x", "").padStart(64, "0"))
-      .join("");
-
-  const valuePart =
-    numCalls.toString(16).padStart(64, "0") +
-    calls.map((c) => c.value.toString(16).padStart(64, "0")).join("");
-
-  // Datas: dynamic array of dynamic bytes
-  const dataLengths = calls.map((c) => c.data.replace("0x", "").length / 2);
-  const dataBody = calls
-    .map(
-      (c, i) =>
-        dataLengths[i].toString(16).padStart(64, "0") +
-        c.data.replace("0x", ""),
-    )
-    .join("");
-
-  // Compute total data body length for the outer array
-  const totalDataLength = 32 + dataBody.length / 2; // length word + data
-  const dataArrayLengthWord = numCalls.toString(16).padStart(64, "0");
-
-  const dataPart = dataArrayLengthWord + dataBody;
-
-  // Locations (offsets from start of encoded data):
-  // 0x00: numCalls
-  // 0x20: to array offset (= 32)
-  // 0x40: values array offset (= 32 + to array total size)
-  // 0x60: datas array offset (= values array offset + values array total size)
-
-  // Recalculate precisely:
-  // Each array: 32 bytes for length + 32*N bytes for elements
-  // But values are uint256 so 32 bytes each, to addresses are address so also padded to 32
-  const toArraySize = 32 + numCalls * 32;
-  const valuesArraySize = 32 + numCalls * 32;
-  const datasArraySize = 32 + dataBody.length / 2;
-
-  const toArrOffset = 32 + 32 + 32; // after the 3 offset words + numCalls
-  // Actually the outer encoding:
-  // [0x00-0x1f] = offset to to[] array
-  // [0x20-0x3f] = offset to values[] array
-  // [0x40-0x5f] = offset to datas[] array
-  // Wait executeBatch(address[],uint256[],bytes[]) takes 3 tuple args
-  // Actually executeBatch is: function executeBatch(address[] calldata dest, uint256[] calldata val, bytes[] calldata data)
-
-  // Let me use a simpler but correct encoding:
-  // Head section: 3 offsets (32 bytes each) = 96 bytes
-  // Then each array follows at those offsets
-
-  const headSize = 96; // 3 * 32
-  const toArrOffset2 = 0x20; // first array starts at offset 32 (after first 32 bytes which is the offset)
-  const valuesArrOffset2 = headSize + toArraySize; // values array starts after to array
-  // Hmm this is getting complex. Let me use a cleaner approach.
-
-  // Actually for executeBatch, the selector is the first 4 bytes of keccak256("executeBatch(address[],uint256[],bytes[])")
-  // The ABI encoding for 3 dynamic arrays:
-  // offset_to[] (32 bytes) = 0x60 (start of to array data after all 3 offsets)
-  // offset_values[] (32 bytes) = 0x60 + to_array_size
-  // offset_datas[] (32 bytes) = 0x60 + to_array_size + values_array_size
-
   return `${selector}${encodeExecuteBatchCalls(calls)}` as Hex;
 }
 
@@ -558,16 +488,8 @@ export class SmartAccountManager {
    */
   async getNonce(entryPoint: Address, sender: Address): Promise<bigint> {
     const key = "0x" + "0".repeat(64); // default key (0)
-    const data =
-      `0x35567e1a${sender.replace("0x", "").padStart(64, "0")}${key.replace("0x", "")}` as Hex;
-    // Actually the getNonce function selector = 0x35567e1a
-    // getNonce(address sender, uint192 key)
-    const selector = "0x35567e1a";
+    const selector = "0x35567e1a"; // getNonce(address,uint192)
     const senderArg = sender.toLowerCase().replace("0x", "").padStart(64, "0");
-    const keyArg = key.replace("0x", "").padStart(48, "0"); // uint192 = 24 bytes
-    const callData = `${selector}${senderArg}${keyArg}` as Hex;
-
-    // Ensure keyArg is padded to 32 bytes for ABI encoding - uint192 is 24 bytes padded to 32
     const keyArg32 = key.replace("0x", "").padStart(64, "0");
 
     const result = await rpcCall<string>(this.config.rpcUrl, "eth_call", [
