@@ -49,7 +49,7 @@ describe("createNaculusConnector", () => {
     });
 
     const connector = fn({
-      chains: [],
+      chains: [] as any,
       emitter: createMockEmitter() as any,
       providers: [],
     });
@@ -73,7 +73,7 @@ describe("createNaculusConnector", () => {
     });
 
     const connector = fn({
-      chains: [],
+      chains: [] as any,
       emitter: createMockEmitter() as any,
       providers: [],
     });
@@ -88,7 +88,7 @@ describe("createNaculusConnector", () => {
     });
 
     const connector = fn({
-      chains: [],
+      chains: [] as any,
       emitter: createMockEmitter() as any,
       providers: [],
     });
@@ -103,7 +103,7 @@ describe("createNaculusConnector", () => {
     });
 
     const connector = fn({
-      chains: [],
+      chains: [] as any,
       emitter: createMockEmitter() as any,
       providers: [],
     });
