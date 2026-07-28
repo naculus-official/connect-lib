@@ -1,4 +1,4 @@
-import type { BatchCall } from "@naculus/connect-core";
+import type { BatchCall, UniversalWalletSession } from "@naculus/connect-core";
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,7 +30,7 @@ function createTestConnector() {
   return new SafeConnector(undefined, true);
 }
 
-function createMockSession() {
+function createMockSession(): UniversalWalletSession {
   return {
     id: "safe-test-session",
     connectorId: "safe",
