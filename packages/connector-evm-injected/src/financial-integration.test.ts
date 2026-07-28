@@ -342,7 +342,7 @@ describe("EVM Injected Financial Integration: getBalance", () => {
     });
     expect(typeof balance).toBe("string");
     expect(balance).toMatch(/^0x[0-9a-fA-F]+$/);
-    const asBigInt = BigInt(balance);
+    const asBigInt = BigInt(balance as string);
     expect(asBigInt).toBeGreaterThan(0n);
     expect(typeof asBigInt).toBe("bigint");
   });
@@ -359,7 +359,7 @@ describe("EVM Injected Financial Integration: getBalance", () => {
       method: "eth_getBalance",
       params: ["0x" + "ab".repeat(20), "latest"],
     });
-    expect(BigInt(balance)).toBe(0n);
+    expect(BigInt(balance as string)).toBe(0n);
   });
 
   it("parses large balance as bigint without precision loss", async () => {
@@ -375,7 +375,7 @@ describe("EVM Injected Financial Integration: getBalance", () => {
       method: "eth_getBalance",
       params: ["0x" + "ab".repeat(20), "latest"],
     });
-    const asBigInt = BigInt(balance);
+    const asBigInt = BigInt(balance as string);
     expect(asBigInt).toBeGreaterThan(BigInt(Number.MAX_SAFE_INTEGER));
     expect(asBigInt.toString()).toBe("340282366920938463463374607431768211455");
   });

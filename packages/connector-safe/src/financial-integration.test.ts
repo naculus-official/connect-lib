@@ -69,7 +69,7 @@ beforeEach(() => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("Safe Financial: sendTransaction value passthrough", () => {
-  let connector: SafeConnector;
+  let connector: InstanceType<typeof SafeConnector>;
 
   beforeEach(async () => {
     connector = createTestConnector();
@@ -150,7 +150,7 @@ describe("Safe Financial: sendTransaction value passthrough", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("Safe Financial: safeTxHash return format", () => {
-  let connector: SafeConnector;
+  let connector: InstanceType<typeof SafeConnector>;
 
   beforeEach(async () => {
     connector = createTestConnector();
@@ -179,7 +179,7 @@ describe("Safe Financial: safeTxHash return format", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("Safe Financial: sendCalls batch values", () => {
-  let connector: SafeConnector;
+  let connector: InstanceType<typeof SafeConnector>;
 
   beforeEach(async () => {
     connector = createTestConnector();
@@ -240,7 +240,7 @@ describe("Safe Financial: sendCalls batch values", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("Safe Financial: sendTransactions batch values", () => {
-  let connector: SafeConnector;
+  let connector: InstanceType<typeof SafeConnector>;
 
   beforeEach(async () => {
     connector = createTestConnector();
@@ -289,7 +289,7 @@ describe("Safe Financial: sendTransactions batch values", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("Safe Financial: signTransaction delegation", () => {
-  let connector: SafeConnector;
+  let connector: InstanceType<typeof SafeConnector>;
 
   beforeEach(async () => {
     connector = createTestConnector();
@@ -310,7 +310,7 @@ describe("Safe Financial: signTransaction delegation", () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe("Safe Financial: validation", () => {
-  let connector: SafeConnector;
+  let connector: InstanceType<typeof SafeConnector>;
 
   beforeEach(async () => {
     connector = createTestConnector();
@@ -361,7 +361,7 @@ describe("Safe Financial: validation", () => {
 });
 
 describe("Safe Financial: user rejection", () => {
-  let connector: SafeConnector;
+  let connector: InstanceType<typeof SafeConnector>;
 
   beforeEach(async () => {
     connector = createTestConnector();
