@@ -45,7 +45,7 @@ Core abstractions and utilities:
 
 **Types:** `UniversalWalletSession`, `UniversalConnector`, `ConnectorSupport`, `StorageAdapter`, `WalletErrorCode`, `Namespace`, `SessionNamespace`
 
-> `@naculus/connect-react` and `@naculus/connect-ui` are documented in the [connect-react](../connect-react/) repo.
+> `@naculus/connect-appkit-react` and `@naculus/connect-appkit-ui` are documented in the [connect-appkit](../connect-appkit/) repo.
 
 ### `@naculus/connector-walletconnect`
 
