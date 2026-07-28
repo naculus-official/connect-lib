@@ -32,7 +32,7 @@ describe("createNaculusConnector", () => {
     });
 
     const connector = fn({
-      chains: [],
+      chains: [] as any,
       emitter: createMockEmitter() as any,
       providers: [],
     });
