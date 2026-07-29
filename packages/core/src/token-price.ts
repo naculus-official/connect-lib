@@ -18,7 +18,7 @@ function caip2ToChainId(caip2: string): number {
  * Get the USD price of a native token (e.g. ETH, MATIC) by chain ID.
  *
  * This function was missing from the source but exists in the dist build.
- * It was added to the Ladle Vite bridge to unblock storybook-based testing.
+ * It was added to the Storybook Vite bridge to unblock storybook-based testing.
  *
  * @param chain - EIP-155 chain ID (e.g. "eip155:1")
  * @param rpcUrl - Optional RPC URL for on-chain price lookup
