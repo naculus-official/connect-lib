@@ -24,7 +24,7 @@
     "xrpl": "^4.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.9.0",
+    "@types/node": "^26.1.2",
     "tsup": "^8.3.6",
     "typescript": "^5.9.3",
     "vitest": "^3.1.3"

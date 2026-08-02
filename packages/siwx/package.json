@@ -21,7 +21,7 @@
     "viem": "^2.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22.19.18",
+    "@types/node": "^26.1.2",
     "bs58": "^6.0.0",
     "ripple-keypairs": "^2.0.0",
     "tsup": "^8.3.6",
