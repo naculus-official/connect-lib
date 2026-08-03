@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit dependencies
+        run: pnpm audit
+
       - name: Build packages first (needed for dist/ resolution)
         run: pnpm -r --filter=!@naculus/connector-wagmi build
 
@@ -92,3 +95,15 @@ jobs:
         with:
           name: coverage-report
           path: ./coverage/
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@v3
