@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connect",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Convenience umbrella \u2014 installs all @naculus/connect-* packages",
   "type": "module",
   "main": "./index.js",
