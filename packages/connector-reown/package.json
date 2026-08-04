@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connector-reown",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -46,5 +46,7 @@
     "reown",
     "wallet"
   ],
-  "description": "Reown (AppKit) connector adapter"
+  "description": "Reown (AppKit) connector adapter",
+  "homepage": "https://github.com/naculus-official/connect-lib#readme",
+  "bugs": "https://github.com/naculus-official/connect-lib/issues"
 }

@@ -1,6 +1,6 @@
 {
   "name": "@naculus/siwx",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -41,5 +41,7 @@
     "siwe",
     "authentication"
   ],
-  "description": "Sign-In With X (CAIP-122) library"
+  "description": "Sign-In With X (CAIP-122) library",
+  "homepage": "https://github.com/naculus-official/connect-lib#readme",
+  "bugs": "https://github.com/naculus-official/connect-lib/issues"
 }

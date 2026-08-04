@@ -46,7 +46,7 @@ jobs:
 
       - name: Publish packages
         run: |
-          if [ "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run }}" = "true" ]; then
+          if [ "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}" = "true" ]; then
             echo "🧪 Dry run — would publish:"
             pnpm -r publish --dry-run --access public --no-git-checks --provenance
           else

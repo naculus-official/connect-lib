@@ -30,3 +30,7 @@ import { WalletConnectConnector } from "@naculus/connector-walletconnect";
 ```
 
 Or install only the packages you need.
+
+## License
+
+MIT

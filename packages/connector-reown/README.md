@@ -1,6 +1,8 @@
 # @naculus/connector-reown
 
-Reown (AppKit) connector adapter
+Reown (AppKit) connector adapter for Naculus Connect — wraps the Reown AppKit SDK as a Naculus Connect connector.
+
+> **Part of [@naculus/connect](https://www.npmjs.com/package/@naculus/connect)** — install the umbrella package to get all connectors at once.
 
 ## Install
 

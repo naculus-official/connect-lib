@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connector-solana",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -44,5 +44,7 @@
     "solana",
     "wallet"
   ],
-  "description": "Solana wallet connector (Wallet Standard)"
+  "description": "Solana wallet connector (Wallet Standard)",
+  "homepage": "https://github.com/naculus-official/connect-lib#readme",
+  "bugs": "https://github.com/naculus-official/connect-lib/issues"
 }

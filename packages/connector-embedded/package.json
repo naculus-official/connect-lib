@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connector-embedded",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -36,5 +36,7 @@
     "embedded-wallet",
     "wallet"
   ],
-  "description": "Embedded wallet connector (PocketWallet bridge)"
+  "description": "Embedded wallet connector (PocketWallet bridge)",
+  "homepage": "https://github.com/naculus-official/connect-lib#readme",
+  "bugs": "https://github.com/naculus-official/connect-lib/issues"
 }

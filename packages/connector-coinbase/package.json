@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connector-coinbase",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -37,5 +37,7 @@
     "wallet",
     "coinbase-wallet-sdk"
   ],
-  "description": "Coinbase Wallet SDK connector"
+  "description": "Coinbase Wallet SDK connector",
+  "homepage": "https://github.com/naculus-official/connect-lib#readme",
+  "bugs": "https://github.com/naculus-official/connect-lib/issues"
 }

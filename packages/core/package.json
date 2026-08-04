@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connect-core",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,5 +38,7 @@
     "wallet",
     "connect"
   ],
-  "description": "Core interfaces and connector manager for Naculus Connect"
+  "description": "Core interfaces and connector manager for Naculus Connect",
+  "homepage": "https://github.com/naculus-official/connect-lib#readme",
+  "bugs": "https://github.com/naculus-official/connect-lib/issues"
 }
