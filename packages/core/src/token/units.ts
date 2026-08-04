@@ -156,7 +156,9 @@ export function formatUnits(amount: bigint, decimals: number): string {
   let fractionalPart = padded.slice(dotPos);
 
   // Remove trailing zeros from fractional part
-  fractionalPart = fractionalPart.replace(/0+$/, "");
+  while (fractionalPart.endsWith("0")) {
+    fractionalPart = fractionalPart.slice(0, -1);
+  }
 
   // Remove leading zeros (but keep at least "0")
   integerPart = integerPart.replace(/^0+/, "") || "0";

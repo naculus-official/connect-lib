@@ -165,7 +165,7 @@ async function detectViaHandshake(timeoutMs: number): Promise<boolean> {
     try {
       window.parent.postMessage(
         { source: "sdk", method: "ready", messageId: safeUUID() },
-        "*",
+        window.location.ancestorOrigins?.[0] || "*",
       );
     } catch {
       cleanup();
@@ -224,7 +224,7 @@ async function handshakeForSafeInfo(
           method: "getEnvInfo",
           messageId: safeUUID(),
         },
-        "*",
+        window.location.ancestorOrigins?.[0] || "*",
       );
     } catch {
       cleanup();
