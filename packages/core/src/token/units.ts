@@ -66,12 +66,16 @@ export function parseUnits(
     );
   }
 
-  // Validate characters
-  if (!/^[0-9]*\.?[0-9]*$/.test(str)) {
-    throw new ERC20TokenError(
-      "invalid_amount",
-      `Amount contains invalid characters: "${amount}"`,
-    );
+  // Validate characters — character loop avoids ReDoS from ambiguous regex quantifiers
+  let hasDot = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === ".") {
+      if (hasDot) throw new ERC20TokenError("invalid_amount", `Multiple decimal points in amount: "${amount}"`);
+      hasDot = true;
+    } else if (ch < "0" || ch > "9") {
+      throw new ERC20TokenError("invalid_amount", `Amount contains invalid character '${ch}': "${amount}"`);
+    }
   }
 
   // Handle negative (should not happen after trimming, but just in case)

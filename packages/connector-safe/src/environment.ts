@@ -134,6 +134,9 @@ async function detectViaHandshake(timeoutMs: number): Promise<boolean> {
     }, timeoutMs);
 
     const handler = (event: MessageEvent) => {
+      // Only accept messages from the parent frame (Safe interface)
+      const parentOrigin = window.location.ancestorOrigins?.[0];
+      if (parentOrigin && event.origin !== parentOrigin) return;
       // Safe App messages have a specific data structure.
       // We look for Safe environment data messages.
       const data = event.data;
@@ -188,6 +191,9 @@ async function handshakeForSafeInfo(
     }, timeoutMs);
 
     const handler = (event: MessageEvent) => {
+      // Only accept messages from the parent frame (Safe interface)
+      const parentOrigin = window.location.ancestorOrigins?.[0];
+      if (parentOrigin && event.origin !== parentOrigin) return;
       const data = event.data;
       if (data && typeof data === "object") {
         // Look for Safe environment info response

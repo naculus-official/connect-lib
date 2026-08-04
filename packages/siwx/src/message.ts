@@ -122,13 +122,15 @@ export function parseSiwxMessage(raw: string): SiwxMessage | null {
 
     // Line 1: "{domain} wants you to sign in with your {blockchain} account:"
     // OR legacy: "{domain} wants you to sign in with your account:"
+    // Split on literal delimiter to avoid ReDoS from nested greedy regex quantifiers
     const firstLine = lines[0];
-    const wantsMatch = firstLine.match(
-      /^(.+) wants you to sign in with your( (.+))? account:$/,
-    );
-    if (!wantsMatch) return null;
-    const domain = wantsMatch[1].trim();
-    const blockchain = wantsMatch[3]?.trim() || "blockchain";
+    const PREFIX = " wants you to sign in with your";
+    const prefixIdx = firstLine.indexOf(PREFIX);
+    if (prefixIdx === -1) return null;
+    const domain = firstLine.slice(0, prefixIdx).trim();
+    const rest = firstLine.slice(prefixIdx + PREFIX.length);
+    const blockMatch = rest.match(/^ (.+) account:$/);
+    const blockchain = blockMatch?.[1]?.trim() || "blockchain";
 
     // Line 2: blockchain address
     const address = lines[1].trim();

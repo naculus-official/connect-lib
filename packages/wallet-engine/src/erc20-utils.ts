@@ -95,7 +95,14 @@ export function parseUnits(amount: string, decimals: number): bigint {
     throw new WalletError("invalid_input", "Amount must be a string.");
   }
   const trimmed = amount.trim();
-  if (!/^[0-9]*\.?[0-9]*$/.test(trimmed) || trimmed === "" || trimmed === ".") {
+  // Character loop avoids ReDoS from ambiguous regex quantifiers
+  let hasDot = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (ch === ".") { if (hasDot) throw new WalletError("invalid_input", `Multiple decimal points in amount: ${amount}`); hasDot = true; }
+    else if (ch < "0" || ch > "9") throw new WalletError("invalid_input", `Invalid character '${ch}' in amount: ${amount}`);
+  }
+  if (trimmed === "" || trimmed === ".") {
     throw new WalletError("invalid_input", `Invalid amount: ${amount}`);
   }
   const parts = trimmed.split(".");

@@ -393,11 +393,14 @@ export class SimulationManager {
       throw new Error("Amount must be a string");
     }
     const trimmed = amount.trim();
-    if (
-      !/^[0-9]*\.?[0-9]*$/.test(trimmed) ||
-      trimmed === "" ||
-      trimmed === "."
-    ) {
+    // Character loop avoids ReDoS from ambiguous regex quantifiers
+    let hasDot = false;
+    for (let i = 0; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (ch === ".") { if (hasDot) throw new Error(`Invalid amount: ${amount}`); hasDot = true; }
+      else if (ch < "0" || ch > "9") throw new Error(`Invalid amount: ${amount}`);
+    }
+    if (trimmed === "" || trimmed === ".") {
       throw new Error(`Invalid amount: ${amount}`);
     }
 
