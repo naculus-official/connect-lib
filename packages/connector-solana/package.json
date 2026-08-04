@@ -36,7 +36,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/naculus-official/connect-lib"
+    "url": "https://github.com/naculus-official/connect-lib.git"
   },
   "license": "MIT",
   "keywords": [
