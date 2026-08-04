@@ -31,7 +31,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Audit dependencies
-        run: pnpm audit
+        run: pnpm audit --audit-level=critical
 
       - name: Build packages first (needed for dist/ resolution)
         run: pnpm -r --filter=!@naculus/connector-wagmi build
