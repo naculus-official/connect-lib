@@ -99,21 +99,3 @@ export function extractAccounts(
 ): string[] {
   return extractFromNamespaces(namespaces, "accounts");
 }
-
-export function getChainsFromNamespaces(
-  namespaces: Record<Namespace, SessionNamespace>,
-): string[] {
-  return extractFromNamespaces(namespaces, "chains");
-}
-
-export function getMethodsFromNamespaces(
-  namespaces: Record<Namespace, SessionNamespace>,
-): string[] {
-  return extractFromNamespaces(namespaces, "methods");
-}
-
-export function getEventsFromNamespaces(
-  namespaces: Record<Namespace, SessionNamespace>,
-): string[] {
-  return extractFromNamespaces(namespaces, "events");
-}

@@ -67,14 +67,3 @@ export const DEFAULT_XRPL_NETWORK = XRPL_MAINNET;
 export const WC_DISCONNECT_USER = 6000;
 export const WC_DISCONNECT_TIMEOUT = 6001;
 export const WC_DISCONNECT_SESSION_EXPIRED = 6002;
-
-/**
- * Nonce configuration
- */
-export const DEFAULT_NONCE_LENGTH = 16;
-
-/**
- * Session timeout values (in milliseconds)
- */
-export const SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-export const AUTO_RECONNECT_TIMEOUT_MS = 30 * 1000; // 30 seconds

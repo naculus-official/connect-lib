@@ -2,9 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  AUTO_RECONNECT_TIMEOUT_MS,
   DEFAULT_EVM_CHAIN,
-  DEFAULT_NONCE_LENGTH,
   DEFAULT_SOLANA_CLUSTER,
   DEFAULT_XRPL_NETWORK,
   EIP155_ARBITRUM,
@@ -16,7 +14,6 @@ import {
   NAMESPACE_EIP155,
   NAMESPACE_SOLANA,
   NAMESPACE_XRPL,
-  SESSION_TIMEOUT_MS,
   SOLANA_DEVNET,
   SOLANA_MAINNET,
   SOLANA_TESTNET,
@@ -139,21 +136,5 @@ describe("WalletConnect disconnect codes", () => {
 
   it("should have correct session expired code", () => {
     expect(WC_DISCONNECT_SESSION_EXPIRED).toBe(6002);
-  });
-});
-
-describe("nonce configuration", () => {
-  it("should have correct default nonce length", () => {
-    expect(DEFAULT_NONCE_LENGTH).toBe(16);
-  });
-});
-
-describe("session timeout values", () => {
-  it("should have correct session timeout", () => {
-    expect(SESSION_TIMEOUT_MS).toBe(5 * 60 * 1000); // 5 minutes
-  });
-
-  it("should have correct auto-reconnect timeout", () => {
-    expect(AUTO_RECONNECT_TIMEOUT_MS).toBe(30 * 1000); // 30 seconds
   });
 });
