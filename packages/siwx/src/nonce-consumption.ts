@@ -22,6 +22,8 @@ export interface SiwxNonceStorage {
   has(nonce: string): Promise<boolean>;
   /** Mark a nonce as consumed */
   consume(nonce: string): Promise<void>;
+  /** Atomically consume if issued and not yet consumed — true only for the first consumer */
+  tryConsume(nonce: string): Promise<boolean>;
   /** Check if a nonce has already been consumed */
   isConsumed(nonce: string): Promise<boolean>;
   /** Remove a nonce from tracking (e.g. after expiry) */
@@ -53,6 +55,12 @@ export function createMemoryNonceStorage(): SiwxNonceStorage {
 
     async consume(nonce: string): Promise<void> {
       consumed.add(nonce);
+    },
+
+    async tryConsume(nonce: string): Promise<boolean> {
+      if (!issued.has(nonce) || consumed.has(nonce)) return false;
+      consumed.add(nonce);
+      return true;
     },
 
     async isConsumed(nonce: string): Promise<boolean> {
@@ -121,6 +129,11 @@ export async function issueNonce(nonce: string): Promise<void> {
  */
 export async function consumeNonce(nonce: string): Promise<void> {
   await activeStorage.consume(nonce);
+}
+
+/** Atomically consume an issued nonce — returns true only for the first consumer. */
+export async function tryConsumeNonce(nonce: string): Promise<boolean> {
+  return activeStorage.tryConsume(nonce);
 }
 
 /**
