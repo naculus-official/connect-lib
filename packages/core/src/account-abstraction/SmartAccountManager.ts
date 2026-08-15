@@ -35,7 +35,12 @@ import {
   type UserOperationReceipt,
   type UserOperationResponse,
 } from "./types";
-import { buildUserOperation, signUserOperation } from "./user-operation";
+import {
+  buildUserOperation,
+  encodeExecute,
+  encodeExecuteBatch,
+  signUserOperation,
+} from "./user-operation";
 
 /**
  * Hash map of known factory addresses for each account type.
@@ -85,72 +90,7 @@ function encodeCreateAccount(owner: Address, salt: bigint): Hex {
   return `${selector}${ownerArg}${saltArg}` as Hex;
 }
 
-/**
- * Encode the execute call for SimpleAccount.
- * execute(address,uint256,bytes) selector = 0xb61d27f6
- */
-function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
-  const selector = "0xb61d27f6";
-  const toArg = to.toLowerCase().replace("0x", "").padStart(64, "0");
-  const valueArg = value.toString(16).padStart(64, "0");
-  // Dynamic bytes: offset + length + data
-  const dataOffset = toArg.length / 2 + valueArg.length / 2 + 64; // 32 bytes for offset
-  const dataLen = data.startsWith("0x")
-    ? (data.length - 2) / 2
-    : data.length / 2;
-  const offsetArg = `00000000000000000000000000000000000000000000000000000000000000${dataOffset.toString(16).padStart(2, "0")}`;
-  const lengthArg = dataLen.toString(16).padStart(64, "0");
-  const dataRaw = data.replace("0x", "");
-  return `${selector}${toArg}${valueArg}${offsetArg}${lengthArg}${dataRaw}` as Hex;
-}
-
-/**
- * Encode batch execute for SimpleAccount.
- * executeBatch(address[],uint256[],bytes[]) selector = 0x47e1da2a
- *
- * For simplicity, we only pass one array of calldata elements.
- */
-function encodeExecuteBatch(calls: Call[]): Hex {
-  const selector = "0x47e1da2a";
-  return `${selector}${encodeExecuteBatchCalls(calls)}` as Hex;
-}
-
-function encodeExecuteBatchCalls(calls: Call[]): string {
-  const n = calls.length;
-  const nWord = n.toString(16).padStart(64, "0");
-
-  // Each array: [length(32B)] + [n elements padded to 32B each]
-  const toArray =
-    nWord +
-    calls
-      .map((c) => c.to.toLowerCase().replace("0x", "").padStart(64, "0"))
-      .join("");
-  const valuesArray =
-    nWord + calls.map((c) => c.value.toString(16).padStart(64, "0")).join("");
-  // Datas: dynamic bytes array
-  const datDatas = calls
-    .map((c) => {
-      const rawData = c.data.replace("0x", "");
-      const dataLen = rawData.length / 2;
-      return dataLen.toString(16).padStart(64, "0") + rawData;
-    })
-    .join("");
-  const datasArray = nWord + datDatas;
-
-  const toArrayLen = 32 + n * 32;
-  const valuesArrayLen = 32 + n * 32;
-  const datasArrayLen = 32 + datDatas.length / 2;
-
-  const toOffset = (96).toString(16).padStart(64, "0"); // after 3 head words
-  const valuesOffset = (96 + toArrayLen).toString(16).padStart(64, "0");
-  const datasOffset = (96 + toArrayLen + valuesArrayLen)
-    .toString(16)
-    .padStart(64, "0");
-
-  return (
-    toOffset + valuesOffset + datasOffset + toArray + valuesArray + datasArray
-  );
-}
+// encodeExecute / encodeExecuteBatch are imported from ./user-operation (single source of truth).
 
 /**
  * Check if a contract is deployed at the given address.
