@@ -418,7 +418,7 @@ describe("getDeployCallData", () => {
     const manager = new SmartAccountManager(createTestConfig());
     const result = await manager.getDeployCallData(createAccountConfig());
     expect(result.to).toBe("0x9406Cc6185a346906296840746125a0E44976454");
-    expect(result.data).toContain("0xcf7aba77");
+    expect(result.data).toContain("0x5fbfb9cf");
     expect(result.value).toBe(0n);
   });
 
@@ -427,7 +427,7 @@ describe("getDeployCallData", () => {
     const result = await manager.getDeployCallData(createAccountConfig({ salt: 7n }));
     const ownerPadded = TEST_OWNER.toLowerCase().replace("0x", "").padStart(64, "0");
     expect(result.data).toBe(
-      `0xcf7aba77${ownerPadded}0000000000000000000000000000000000000000000000000000000000000007`,
+      `0x5fbfb9cf${ownerPadded}0000000000000000000000000000000000000000000000000000000000000007`,
     );
   });
 });

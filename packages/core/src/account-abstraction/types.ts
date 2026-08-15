@@ -222,15 +222,15 @@ export const AA_SUPPORTED_CHAINS: Record<
 > = {
   "eip155:1": { entryPoint: ENTRY_POINT_V0_7, factory: SIMPLE_ACCOUNT_FACTORY }, // Ethereum
   "eip155:137": {
-    entryPoint: ENTRY_POINT_V0_6,
+    entryPoint: ENTRY_POINT_V0_7,
     factory: SIMPLE_ACCOUNT_FACTORY,
   }, // Polygon
   "eip155:10": {
-    entryPoint: ENTRY_POINT_V0_6,
+    entryPoint: ENTRY_POINT_V0_7,
     factory: SIMPLE_ACCOUNT_FACTORY,
   }, // Optimism
   "eip155:42161": {
-    entryPoint: ENTRY_POINT_V0_6,
+    entryPoint: ENTRY_POINT_V0_7,
     factory: SIMPLE_ACCOUNT_FACTORY,
   }, // Arbitrum
   "eip155:8453": {
