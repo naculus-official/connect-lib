@@ -10,6 +10,7 @@
  * @see packages/core/src/storage/encrypted-storage.ts
  */
 
+import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils";
 import { WalletError } from "../errors";
 import type { WalletData } from "../wallet";
 import type { StorageAdapter } from "./types";
@@ -18,26 +19,8 @@ const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const KEY_ITERATIONS = 600_000;
 
-function textEncode(s: string): Uint8Array {
-  return new TextEncoder().encode(s);
-}
-
 function textDecode(b: Uint8Array): string {
   return new TextDecoder().decode(b);
-}
-
-function buf2hex(buf: ArrayBuffer | Uint8Array): string {
-  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function hex2buf(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++)
-    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-  return bytes;
 }
 
 async function deriveKey(
@@ -46,7 +29,7 @@ async function deriveKey(
 ): Promise<CryptoKey> {
   const key = await crypto.subtle.importKey(
     "raw",
-    textEncode(passphrase) as any,
+    utf8ToBytes(passphrase) as any,
     "PBKDF2",
     false,
     ["deriveKey"],
@@ -96,10 +79,10 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     }
 
     const passphrase = await this.getPassphrase();
-    const salt = hex2buf(encrypted.salt);
-    const iv = hex2buf(encrypted.iv);
+    const salt = hexToBytes(encrypted.salt);
+    const iv = hexToBytes(encrypted.iv);
     const key = await deriveKey(passphrase, salt);
-    const ciphertext = hex2buf(encrypted.ciphertext);
+    const ciphertext = hexToBytes(encrypted.ciphertext);
 
     try {
       const decrypted = await crypto.subtle.decrypt(
@@ -122,7 +105,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const key = await deriveKey(passphrase, salt);
 
-    const encoded = textEncode(JSON.stringify(data));
+    const encoded = utf8ToBytes(JSON.stringify(data));
     const ciphertext = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv: iv as any },
       key,
@@ -131,9 +114,9 @@ export class EncryptedStorageAdapter implements StorageAdapter {
 
     return this.inner.save({
       _encrypted: {
-        salt: buf2hex(salt),
-        iv: buf2hex(iv),
-        ciphertext: buf2hex(ciphertext),
+        salt: bytesToHex(salt),
+        iv: bytesToHex(iv),
+        ciphertext: bytesToHex(new Uint8Array(ciphertext)),
       },
     } as any);
   }

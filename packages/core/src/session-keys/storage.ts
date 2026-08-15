@@ -15,10 +15,11 @@
  * @see docs/features/session-keys.md §6
  */
 
-import { hmac } from "@noble/hashes/hmac";
 import { pbkdf2 } from "@noble/hashes/pbkdf2";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils";
+import { gcm } from "@noble/ciphers/aes.js";
+import { secp256k1 } from "@noble/curves/secp256k1";
 
 import type { StorageAdapter } from "../storage";
 import { MemoryStorageAdapter } from "../storage";
@@ -34,20 +35,6 @@ const DEFAULT_PBKDF2_ITERATIONS = 600_000;
 const STORAGE_KEY = "session_keys";
 const ENCRYPTION_KEY_STORAGE_KEY = "session_key_encryption_salt";
 
-// ─── AES-256-GCM using @noble/hashes (pure JS, no Web Crypto dependency) ──
-// We implement AES-256-GCM manually using noble/hashes primitives.
-
-/**
- * Simple XOR-based stream cipher using HMAC-SHA256 as a PRF (CTR mode).
- * This avoids the dependency on Web Crypto API for environments
- * where it's not available (Node.js < 15, test runners, etc.).
- *
- * Security note: This is NOT production-grade AES-GCM. For production
- * use with real assets, integrate with Web Crypto API's subtle.crypto
- * for hardware-backed AES-GCM. This implementation provides reasonable
- * protection against casual access but should be upgraded for mainnet.
- */
-
 function deriveEncryptionKey(
   password: string,
   salt: Uint8Array,
@@ -57,117 +44,6 @@ function deriveEncryptionKey(
     c: iterations ?? DEFAULT_PBKDF2_ITERATIONS,
     dkLen: KEY_LENGTH,
   });
-}
-
-function aes256ctrEncrypt(
-  plaintext: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array,
-): { ciphertext: Uint8Array; tag: Uint8Array } {
-  const blockSize = 16;
-
-  // Generate keystream blocks using HMAC-SHA256 as PRF
-  const numBlocks = Math.ceil((plaintext.length + blockSize) / blockSize);
-  const keystream = new Uint8Array(numBlocks * 32); // each HMAC output is 32 bytes
-  const counter = new Uint8Array(iv);
-  // Convert IV bytes to a BigInt counter
-  let ctrValue = 0n;
-  for (let i = 0; i < iv.length; i++) {
-    ctrValue = (ctrValue << 8n) | BigInt(iv[i]);
-  }
-
-  for (let b = 0; b < numBlocks; b++) {
-    const counterBytes = new Uint8Array(8);
-    let blockCtr = ctrValue + BigInt(b);
-    for (let i = 7; i >= 0; i--) {
-      counterBytes[i] = Number(blockCtr & 0xffn);
-      blockCtr >>= 8n;
-    }
-
-    // Combine IV (first 4 bytes) with counter
-    const input = new Uint8Array(iv.length + 8);
-    input.set(iv.slice(0, 4), 0);
-    input.set(counterBytes, 4);
-
-    const blockKey = hmac(sha256, key, input);
-    keystream.set(blockKey, b * 32);
-  }
-
-  // XOR plaintext with keystream
-  const ciphertext = new Uint8Array(plaintext.length);
-  for (let i = 0; i < plaintext.length; i++) {
-    ciphertext[i] = plaintext[i] ^ keystream[i];
-  }
-
-  // Compute authentication tag: HMAC of iv + ciphertext (binds IV to auth)
-  const authData = new Uint8Array(iv.length + ciphertext.length);
-  authData.set(iv);
-  authData.set(ciphertext, iv.length);
-  const tag = hmac(sha256, key, authData).slice(0, 16);
-
-  return { ciphertext, tag };
-}
-
-function aes256ctrDecrypt(
-  ciphertext: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array,
-  tag: Uint8Array,
-): Uint8Array {
-  // Verify authentication tag (binds IV to auth)
-  const authData = new Uint8Array(iv.length + ciphertext.length);
-  authData.set(iv);
-  authData.set(ciphertext, iv.length);
-  const expectedTag = hmac(sha256, key, authData).slice(0, 16);
-  let tagValid = tag.length === expectedTag.length;
-  if (tagValid) {
-    for (let i = 0; i < tag.length; i++) {
-      if (tag[i] !== expectedTag[i]) {
-        tagValid = false;
-        break;
-      }
-    }
-  }
-
-  if (!tagValid) {
-    throw createSessionKeyError(
-      "session_key_encryption_failed",
-      "Tag verification failed",
-    );
-  }
-
-  // Same CTR decryption (XOR is symmetric)
-  const blockSize = 16;
-  const numBlocks = Math.ceil(ciphertext.length / blockSize);
-  const keystream = new Uint8Array(numBlocks * 32);
-
-  let ctrValue = 0n;
-  for (let i = 0; i < iv.length; i++) {
-    ctrValue = (ctrValue << 8n) | BigInt(iv[i]);
-  }
-
-  for (let b = 0; b < numBlocks; b++) {
-    const counterBytes = new Uint8Array(8);
-    let blockCtr = ctrValue + BigInt(b);
-    for (let i = 7; i >= 0; i--) {
-      counterBytes[i] = Number(blockCtr & 0xffn);
-      blockCtr >>= 8n;
-    }
-
-    const input = new Uint8Array(iv.length + 8);
-    input.set(iv.slice(0, 4), 0);
-    input.set(counterBytes, 4);
-
-    const blockKey = hmac(sha256, key, input);
-    keystream.set(blockKey, b * 32);
-  }
-
-  const plaintext = new Uint8Array(ciphertext.length);
-  for (let i = 0; i < ciphertext.length; i++) {
-    plaintext[i] = ciphertext[i] ^ keystream[i];
-  }
-
-  return plaintext;
 }
 
 // ─── API ───────────────────────────────────────────────────────────────
@@ -192,19 +68,20 @@ export function encryptPrivateKey(
   const iv = randomBytes(IV_LENGTH);
   const key = deriveEncryptionKey(password, actualSalt, iterations);
 
-  const { ciphertext, tag } = aes256ctrEncrypt(pkBytes, key, iv);
+  // Standard AES-256-GCM (AEAD) — noble appends the 16-byte tag to the ciphertext.
+  const ciphertext = gcm(key, iv).encrypt(pkBytes);
 
-  // Concatenate tag + ciphertext for storage
-  const combined = new Uint8Array(tag.length + ciphertext.length);
-  combined.set(tag, 0);
-  combined.set(ciphertext, tag.length);
-
+  // Derive the public key from the private key; never fall back to the
+  // private-key bytes as a "publicKey" (that leaked the secret material).
   const resultPublicKey =
-    publicKeyHex ?? (`0x${bytesToHex(pkBytes)}` as `0x${string}`);
+    publicKeyHex ??
+    (pkBytes.length === 32
+      ? (`0x${bytesToHex(secp256k1.getPublicKey(pkBytes, true))}` as `0x${string}`)
+      : ("0x" as `0x${string}`));
 
   return {
     publicKey: resultPublicKey,
-    encryptedPrivateKey: bytesToHex(combined),
+    encryptedPrivateKey: bytesToHex(ciphertext),
     iv: bytesToHex(iv),
     salt: bytesToHex(actualSalt),
   };
@@ -223,14 +100,20 @@ export function decryptPrivateKey(
   password: string,
   iterations?: number,
 ): `0x${string}` {
-  const combined = hexToBytes(encrypted.encryptedPrivateKey);
-  const tag = combined.slice(0, 16);
-  const ciphertext = combined.slice(16);
+  const ciphertext = hexToBytes(encrypted.encryptedPrivateKey);
   const iv = hexToBytes(encrypted.iv);
   const salt = hexToBytes(encrypted.salt);
   const key = deriveEncryptionKey(password, salt, iterations);
 
-  const plaintext = aes256ctrDecrypt(ciphertext, key, iv, tag);
+  let plaintext: Uint8Array;
+  try {
+    plaintext = gcm(key, iv).decrypt(ciphertext);
+  } catch {
+    throw createSessionKeyError(
+      "session_key_encryption_failed",
+      "Tag verification failed (wrong password or corrupted data)",
+    );
+  }
 
   return `0x${bytesToHex(plaintext)}`;
 }

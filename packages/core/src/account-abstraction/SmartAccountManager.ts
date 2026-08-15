@@ -11,6 +11,7 @@
  * @see docs/features/account-abstraction.md
  */
 
+import { abortableFetch } from "../abortable-fetch";
 import { type AAErrorCode, AccountAbstractionError } from "./errors";
 import { PaymasterService } from "./paymaster";
 import {
@@ -23,8 +24,6 @@ import {
   DEFAULT_ENTRY_POINT,
   DEFAULT_PRE_VERIFICATION_GAS,
   DEFAULT_VERIFICATION_GAS_LIMIT,
-  ENTRY_POINT_V0_6,
-  ENTRY_POINT_V0_7,
   type Hex,
   type PaymasterConfig,
   type SendUserOpOptions,
@@ -36,7 +35,12 @@ import {
   type UserOperationReceipt,
   type UserOperationResponse,
 } from "./types";
-import { buildUserOperation, signUserOperation } from "./user-operation";
+import {
+  buildUserOperation,
+  encodeExecute,
+  encodeExecuteBatch,
+  signUserOperation,
+} from "./user-operation";
 
 /**
  * Hash map of known factory addresses for each account type.
@@ -86,72 +90,7 @@ function encodeCreateAccount(owner: Address, salt: bigint): Hex {
   return `${selector}${ownerArg}${saltArg}` as Hex;
 }
 
-/**
- * Encode the execute call for SimpleAccount.
- * execute(address,uint256,bytes) selector = 0xb61d27f6
- */
-function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
-  const selector = "0xb61d27f6";
-  const toArg = to.toLowerCase().replace("0x", "").padStart(64, "0");
-  const valueArg = value.toString(16).padStart(64, "0");
-  // Dynamic bytes: offset + length + data
-  const dataOffset = toArg.length / 2 + valueArg.length / 2 + 64; // 32 bytes for offset
-  const dataLen = data.startsWith("0x")
-    ? (data.length - 2) / 2
-    : data.length / 2;
-  const offsetArg = `00000000000000000000000000000000000000000000000000000000000000${dataOffset.toString(16).padStart(2, "0")}`;
-  const lengthArg = dataLen.toString(16).padStart(64, "0");
-  const dataRaw = data.replace("0x", "");
-  return `${selector}${toArg}${valueArg}${offsetArg}${lengthArg}${dataRaw}` as Hex;
-}
-
-/**
- * Encode batch execute for SimpleAccount.
- * executeBatch(address[],uint256[],bytes[]) selector = 0x47e1da2a
- *
- * For simplicity, we only pass one array of calldata elements.
- */
-function encodeExecuteBatch(calls: Call[]): Hex {
-  const selector = "0x47e1da2a";
-  return `${selector}${encodeExecuteBatchCalls(calls)}` as Hex;
-}
-
-function encodeExecuteBatchCalls(calls: Call[]): string {
-  const n = calls.length;
-  const nWord = n.toString(16).padStart(64, "0");
-
-  // Each array: [length(32B)] + [n elements padded to 32B each]
-  const toArray =
-    nWord +
-    calls
-      .map((c) => c.to.toLowerCase().replace("0x", "").padStart(64, "0"))
-      .join("");
-  const valuesArray =
-    nWord + calls.map((c) => c.value.toString(16).padStart(64, "0")).join("");
-  // Datas: dynamic bytes array
-  const datDatas = calls
-    .map((c) => {
-      const rawData = c.data.replace("0x", "");
-      const dataLen = rawData.length / 2;
-      return dataLen.toString(16).padStart(64, "0") + rawData;
-    })
-    .join("");
-  const datasArray = nWord + datDatas;
-
-  const toArrayLen = 32 + n * 32;
-  const valuesArrayLen = 32 + n * 32;
-  const datasArrayLen = 32 + datDatas.length / 2;
-
-  const toOffset = (96).toString(16).padStart(64, "0"); // after 3 head words
-  const valuesOffset = (96 + toArrayLen).toString(16).padStart(64, "0");
-  const datasOffset = (96 + toArrayLen + valuesArrayLen)
-    .toString(16)
-    .padStart(64, "0");
-
-  return (
-    toOffset + valuesOffset + datasOffset + toArray + valuesArray + datasArray
-  );
-}
+// encodeExecute / encodeExecuteBatch are imported from ./user-operation (single source of truth).
 
 /**
  * Check if a contract is deployed at the given address.
@@ -175,44 +114,31 @@ async function rpcCall<T>(
   method: string,
   params: unknown[],
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  const response = await abortableFetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
 
-  try {
-    const response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method,
-        params,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new AccountAbstractionError(
-        "aa_rpc_error",
-        `RPC returned status ${response.status}`,
-      );
-    }
-
-    const json = (await response.json()) as {
-      result?: T;
-      error?: { code: number; message: string };
-    };
-
-    if (json.error) {
-      throw new AccountAbstractionError("aa_rpc_error", json.error.message, {
-        code: json.error.code,
-      });
-    }
-
-    return json.result as T;
-  } finally {
-    clearTimeout(timeoutId);
+  if (!response.ok) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      `RPC returned status ${response.status}`,
+    );
   }
+
+  const json = (await response.json()) as {
+    result?: T;
+    error?: { code: number; message: string };
+  };
+
+  if (json.error) {
+    throw new AccountAbstractionError("aa_rpc_error", json.error.message, {
+      code: json.error.code,
+    });
+  }
+
+  return json.result as T;
 }
 
 // ─── SmartAccountManager ───────────────────────────────────────────────

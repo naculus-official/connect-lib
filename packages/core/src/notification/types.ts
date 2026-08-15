@@ -12,6 +12,7 @@
  */
 export type TxStatus =
   | "pending"
+  | "confirming"
   | "confirmed"
   | "failed"
   | "reorg"

@@ -10,11 +10,15 @@
  *
  * Equivalent to installing all of the following:
  * - @naculus/connect-core
- * - @naculus/connector-walletconnect
- * - @naculus/connector-evm-injected
+ * - @naculus/connector-coinbase
  * - @naculus/connector-embedded
+ * - @naculus/connector-evm-injected
  * - @naculus/connector-passkeys
+ * - @naculus/connector-reown
+ * - @naculus/connector-safe
  * - @naculus/connector-solana
+ * - @naculus/connector-wagmi
+ * - @naculus/connector-walletconnect
  * - @naculus/connector-xrpl
  * - @naculus/siwx
  * - @naculus/wallet-engine

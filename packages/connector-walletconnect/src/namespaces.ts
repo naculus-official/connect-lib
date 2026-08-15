@@ -45,7 +45,6 @@ export const DEFAULT_EVM_METHODS = [
   "eth_accounts",
   "eth_requestAccounts",
   "personal_sign",
-  "eth_sign",
   "eth_signTransaction",
   "eth_sendTransaction",
   "eth_sendRawTransaction",
@@ -232,9 +231,9 @@ export function buildRequiredNamespaces(): ProposalTypes.RequiredNamespaces {
     },
     solana: {
       chains: [
-        "solana:0", // Solana Mainnet
-        "solana:1", // Solana Devnet
-        "solana:2", // Solana Testnet
+        "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", // Solana Mainnet (genesis hash)
+        "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1", // Solana Devnet
+        "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z", // Solana Testnet
       ],
       methods: [...DEFAULT_SOLANA_METHODS],
       events: [...DEFAULT_SOLANA_EVENTS],

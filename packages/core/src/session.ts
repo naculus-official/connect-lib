@@ -91,11 +91,29 @@ export function isSessionExpired(
   session: UniversalWalletSession,
   now: Date,
 ): boolean {
-  if (!session.auth?.expiresAt) {
-    return false;
+  const nowMs = now.getTime();
+
+  if (session.auth?.expiresAt) {
+    if (new Date(session.auth.expiresAt).getTime() <= nowMs) {
+      return true;
+    }
   }
 
-  return new Date(session.auth.expiresAt).getTime() <= now.getTime();
+  // Session-key manager also sets a top-level `expiry`.
+  // ponytail: number is treated as unix seconds (matches SessionKeyScope.expiry),
+  // string as an ISO datetime. Unit is undocumented on the field — normalize if
+  // a caller starts passing millis.
+  if (session.expiry != null) {
+    const expiryMs =
+      typeof session.expiry === "number"
+        ? session.expiry * 1000
+        : new Date(session.expiry).getTime();
+    if (expiryMs <= nowMs) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

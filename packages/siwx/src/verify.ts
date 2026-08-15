@@ -26,11 +26,7 @@
  */
 
 import { parseSiwxMessage } from "./message";
-import {
-  consumeNonce,
-  isNonceConsumed,
-  isNonceIssued,
-} from "./nonce-consumption";
+import { isNonceIssued, tryConsumeNonce } from "./nonce-consumption";
 import type { SiwxMessage, SiwxVerificationResult } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -138,7 +134,7 @@ export async function verifySiwxMessage(
 
   // 4. Compare addresses (case-insensitive for hex addresses)
   const expected = params.expectedAddress ?? parsed.address;
-  const addressesMatch = compareAddresses(recoveredAddress, expected);
+  const addressesMatch = compareAddresses(recoveredAddress, expected, parsed.chainId);
 
   if (!addressesMatch) {
     return {
@@ -152,26 +148,22 @@ export async function verifySiwxMessage(
     };
   }
 
-  // 5. Validate and consume nonce to prevent replay attacks
+  // 5. Atomically validate + consume nonce to prevent replay attacks.
+  //    tryConsume is a single check-and-consume: only the first caller wins,
+  //    closing the check-then-consume race window.
   if (parsed.nonce) {
-    // Nonce must have been issued by this system (not arbitrary)
-    const wasIssued = await isNonceIssued(parsed.nonce);
-    if (!wasIssued) {
+    const consumed = await tryConsumeNonce(parsed.nonce);
+    if (!consumed) {
+      // Best-effort distinction for a clearer error (not security-critical).
+      const wasIssued = await isNonceIssued(parsed.nonce);
       return {
         address: recoveredAddress,
         isValid: false,
-        error: `unissued nonce: nonce="${parsed.nonce}" was not issued by this system`,
+        error: wasIssued
+          ? `replay: nonce already consumed for nonce="${parsed.nonce}"`
+          : `unissued nonce: nonce="${parsed.nonce}" was not issued by this system`,
       };
     }
-    const alreadyConsumed = await isNonceConsumed(parsed.nonce);
-    if (alreadyConsumed) {
-      return {
-        address: recoveredAddress,
-        isValid: false,
-        error: `replay: nonce already consumed for nonce="${parsed.nonce}"`,
-      };
-    }
-    await consumeNonce(parsed.nonce);
   }
 
   return {
@@ -261,11 +253,15 @@ function validateConstraints(
 // ---------------------------------------------------------------------------
 
 /**
- * Compare two blockchain addresses case-insensitively.
- * Handles Ethereum addresses (case-insensitive hex) and Solana base58 addresses.
+ * Compare two blockchain addresses, honoring each chain's address encoding.
+ * base58 (Solana/XRPL) and SS58 (Polkadot) are case-sensitive; hex (EVM/Starknet)
+ * and bech32 (Cosmos) are not.
  */
-function compareAddresses(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
+function compareAddresses(a: string, b: string, chainId?: string): boolean {
+  const namespace = chainId?.split(":")[0];
+  const caseSensitive =
+    namespace === "solana" || namespace === "xrpl" || namespace === "polkadot";
+  return caseSensitive ? a === b : a.toLowerCase() === b.toLowerCase();
 }
 
 // ---------------------------------------------------------------------------

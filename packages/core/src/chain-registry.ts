@@ -16,6 +16,7 @@ export interface ChainInfo {
   usdcDecimals?: number; // USDC decimals (defaults to 6)
   usdtAddress?: string; // ERC-20 USDT address (undefined = no USDT on this chain)
   usdtDecimals?: number; // USDT decimals (defaults to 6)
+  tokens?: Record<string, string>; // additional ERC-20 tokens keyed by symbol (DAI, WETH, WMATIC, ...)
   entryPoint?: string; // ERC-4337 EntryPoint address (undefined = AA not supported)
   factoryAddress?: string; // Account factory address
   explorerUrl?: string; // Block explorer base URL (undefined = use default)
@@ -32,6 +33,10 @@ export const CHAINS: Record<number, ChainInfo> = {
     axelarName: "ethereum",
     usdcAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     usdtAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+    tokens: {
+      DAI: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+      WETH: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    },
     entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
     explorerUrl: "https://etherscan.io",
@@ -43,6 +48,10 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     usdcAddress: "0x7F5c764cBc14f9669B88837ca1490cCa17c31607",
     usdtAddress: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+    tokens: {
+      DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+      WETH: "0x4200000000000000000000000000000000000006",
+    },
     entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
     explorerUrl: "https://optimistic.etherscan.io",
@@ -75,6 +84,10 @@ export const CHAINS: Record<number, ChainInfo> = {
     axelarName: "polygon",
     usdcAddress: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
     usdtAddress: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+    tokens: {
+      DAI: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
+      WMATIC: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
+    },
     entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
     explorerUrl: "https://polygonscan.com",
@@ -107,6 +120,9 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     axelarName: "base",
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    tokens: {
+      WETH: "0x4200000000000000000000000000000000000006",
+    },
     entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
     explorerUrl: "https://basescan.org",
@@ -118,6 +134,10 @@ export const CHAINS: Record<number, ChainInfo> = {
     axelarName: "arbitrum",
     usdcAddress: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     usdtAddress: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
+    tokens: {
+      DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+      WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+    },
     entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
     explorerUrl: "https://arbiscan.io",
@@ -168,4 +188,68 @@ export function getChainInfo(chainId: number): ChainInfo {
     );
   }
   return info;
+}
+
+// ─── Token resolution helpers (single source of truth for token addresses) ──
+
+/** Zero address, representing the native gas token (ETH / MATIC / BNB / ...) */
+export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function findChainInfo(chainRef: string | number): ChainInfo | undefined {
+  if (typeof chainRef === "number") return CHAINS[chainRef];
+  return Object.values(CHAINS).find((c) => c.caip2Id === chainRef);
+}
+
+/**
+ * Resolve a token symbol (or pass through an address) to its on-chain address.
+ * Accepts a numeric chainId or a CAIP-2 id (e.g. "eip155:1").
+ * Returns the input unchanged if the chain or token is unknown.
+ */
+export function resolveTokenAddress(
+  chainRef: string | number,
+  symbolOrAddress: string,
+): string {
+  if (symbolOrAddress.startsWith("0x") && symbolOrAddress.length === 42) {
+    return symbolOrAddress;
+  }
+  const info = findChainInfo(chainRef);
+  if (!info) return symbolOrAddress;
+
+  const symbol = symbolOrAddress.toUpperCase();
+  if (symbol === "USDC") return info.usdcAddress ?? symbolOrAddress;
+  if (symbol === "USDT") return info.usdtAddress ?? symbolOrAddress;
+  if (symbol === info.nativeCurrency.symbol.toUpperCase()) return ZERO_ADDRESS;
+  return info.tokens?.[symbol] ?? symbolOrAddress;
+}
+
+/**
+ * Reverse of resolveTokenAddress: map an on-chain address back to its symbol.
+ * Falls back to a truncated address if the token is unknown.
+ */
+export function resolveTokenSymbol(
+  chainRef: string | number,
+  address: string,
+): string {
+  const info = findChainInfo(chainRef);
+  const addr = address.toLowerCase();
+  const fallback = address.startsWith("0x") ? address.slice(0, 10) : address;
+
+  if (addr === ZERO_ADDRESS) return info?.nativeCurrency.symbol ?? "UNKNOWN";
+  if (!info) return fallback;
+  if (info.usdcAddress?.toLowerCase() === addr) return "USDC";
+  if (info.usdtAddress?.toLowerCase() === addr) return "USDT";
+  for (const [symbol, a] of Object.entries(info.tokens ?? {})) {
+    if (a.toLowerCase() === addr) return symbol;
+  }
+  return fallback;
+}
+
+/** Native gas token symbol for a chain (defaults to "ETH"). */
+export function getNativeTokenSymbol(chainRef: string | number): string {
+  return findChainInfo(chainRef)?.nativeCurrency.symbol ?? "ETH";
+}
+
+/** Native gas token decimals for a chain (defaults to 18). */
+export function getNativeTokenDecimals(chainRef: string | number): number {
+  return findChainInfo(chainRef)?.nativeCurrency.decimals ?? 18;
 }

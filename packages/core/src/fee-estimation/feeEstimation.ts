@@ -7,6 +7,7 @@
  * @see SRS-001 §6.1
  */
 
+import { abortableFetch } from "../abortable-fetch";
 import { logger } from "../logger";
 import { FEE_ERROR_MESSAGES, FeeEstimationError } from "./errors";
 import type {
@@ -54,44 +55,31 @@ async function rpcCall<T>(
   method: string,
   params: unknown[],
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  const response = await abortableFetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
 
-  try {
-    const response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method,
-        params,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new FeeEstimationError(
-        "fee_rpc_error",
-        `RPC returned status ${response.status}`,
-      );
-    }
-
-    const json = (await response.json()) as {
-      result?: T;
-      error?: { code: number; message: string };
-    };
-
-    if (json.error) {
-      throw new FeeEstimationError("fee_rpc_error", json.error.message, {
-        code: json.error.code,
-      });
-    }
-
-    return json.result as T;
-  } finally {
-    clearTimeout(timeoutId);
+  if (!response.ok) {
+    throw new FeeEstimationError(
+      "fee_rpc_error",
+      `RPC returned status ${response.status}`,
+    );
   }
+
+  const json = (await response.json()) as {
+    result?: T;
+    error?: { code: number; message: string };
+  };
+
+  if (json.error) {
+    throw new FeeEstimationError("fee_rpc_error", json.error.message, {
+      code: json.error.code,
+    });
+  }
+
+  return json.result as T;
 }
 
 /**

@@ -21,6 +21,8 @@
  * @see docs/features/session-keys.md
  */
 
+import { bytesToHex, hexToBytes, utf8ToBytes } from "@noble/hashes/utils";
+
 // ─── Constants ─────────────────────────────────────────────────────────
 
 const SALT_LENGTH = 16;
@@ -29,27 +31,8 @@ const KEY_ITERATIONS = 600_000;
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
-function textEncode(s: string): Uint8Array {
-  return new TextEncoder().encode(s);
-}
-
 function textDecode(b: Uint8Array): string {
   return new TextDecoder().decode(b);
-}
-
-function buf2hex(buf: ArrayBuffer | Uint8Array): string {
-  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function hex2buf(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }
 
 async function deriveKey(
@@ -142,7 +125,7 @@ export class WebCryptoEncryptedStorageAdapter
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const derivedKey = await deriveKey(key, salt);
 
-    const encoded = textEncode(value);
+    const encoded = utf8ToBytes(value);
     const ciphertext = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv: iv as any },
       derivedKey,
@@ -150,9 +133,9 @@ export class WebCryptoEncryptedStorageAdapter
     );
 
     const payload: EncryptedPayload = {
-      salt: buf2hex(salt),
-      iv: buf2hex(iv),
-      ciphertext: buf2hex(new Uint8Array(ciphertext)),
+      salt: bytesToHex(salt),
+      iv: bytesToHex(iv),
+      ciphertext: bytesToHex(new Uint8Array(ciphertext)),
     };
 
     return JSON.stringify(payload);
@@ -184,9 +167,9 @@ export class WebCryptoEncryptedStorageAdapter
       );
     }
 
-    const salt = hex2buf(payload.salt);
-    const iv = hex2buf(payload.iv);
-    const encrypted = hex2buf(payload.ciphertext);
+    const salt = hexToBytes(payload.salt);
+    const iv = hexToBytes(payload.iv);
+    const encrypted = hexToBytes(payload.ciphertext);
 
     const derivedKey = await deriveKey(key, salt);
 

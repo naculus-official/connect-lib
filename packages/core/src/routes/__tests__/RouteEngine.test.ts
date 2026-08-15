@@ -1,11 +1,11 @@
 /**
- * RouteEngine Tests
+ * CrossChainRouteEngine Tests
  */
 
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { RouteEngine, RouteEngineError } from '../RouteEngine'
+import { CrossChainRouteEngine, RouteEngineError } from '../RouteEngine'
 import type { SwapProvider, BridgeProvider, RouteQuote, Route, Token } from '../types'
 
 // ─── Mock Providers ────────────────────────────────────────────────────
@@ -96,11 +96,11 @@ function createMockBridgeProvider(name: string, cost: bigint = 1_000_000n, timeM
 
 // ─── Tests ─────────────────────────────────────────────────────────────
 
-describe('RouteEngine', () => {
-  let engine: RouteEngine
+describe('CrossChainRouteEngine', () => {
+  let engine: CrossChainRouteEngine
 
   beforeEach(() => {
-    engine = new RouteEngine()
+    engine = new CrossChainRouteEngine()
   })
 
   describe('provider registration', () => {

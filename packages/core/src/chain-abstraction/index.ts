@@ -12,7 +12,10 @@ export { AxelarProvider, LiFiProvider } from "./providers";
 export type { AxelarProviderConfig } from "./providers/AxelarProvider";
 export type { LiFiProviderConfig } from "./providers/LiFiProvider";
 // ─── Route Engine ──────────────────────────────────────────────────────
-export { createRouteEngine, RouteEngine } from "./route-engine";
+export {
+  createChainAbstractionRouteEngine,
+  ChainAbstractionRouteEngine,
+} from "./route-engine";
 // ─── Types ─────────────────────────────────────────────────────────────
 export type {
   BridgeProvider,

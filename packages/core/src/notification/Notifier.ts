@@ -195,6 +195,7 @@ export class Notifier {
       watch.frequency,
       status,
       receipt?.confirmations,
+      watch.confirmInterval,
     );
 
     if (shouldNotify) {
@@ -393,10 +394,11 @@ export class Notifier {
     frequency: NotificationFrequency,
     status: TxStatus,
     confirmations?: number,
+    confirmInterval?: number,
   ): boolean {
     if (frequency === "muted") return false;
 
-    // Terminal states always fire in per-tx and final-only
+    // Terminal states always fire (per-tx / per-confirm / final-only)
     if (status === "confirmed" || status === "failed") return true;
 
     // Error/reorg/speedup/cancel always fire (important events)
@@ -406,6 +408,17 @@ export class Notifier {
     // Pending only fires in per-tx mode
     if (status === "pending") {
       return frequency === "per-tx";
+    }
+
+    // Confirming (mined, accumulating confirmations): per-confirm fires every N
+    if (status === "confirming") {
+      if (frequency === "per-tx") return true;
+      if (frequency === "per-confirm") {
+        const interval = confirmInterval ?? 6;
+        const confs = confirmations ?? 0;
+        return confs > 0 && confs % interval === 0;
+      }
+      return false; // final-only: wait for the terminal "confirmed"
     }
 
     return false;
@@ -425,6 +438,10 @@ export class Notifier {
       pending: {
         title: "Transaction Pending",
         body: "Your transaction has been broadcast and is waiting for confirmation.",
+      },
+      confirming: {
+        title: "Transaction Confirming",
+        body: "Your transaction has been mined and is accumulating confirmations.",
       },
       confirmed: {
         title: "Transaction Confirmed",

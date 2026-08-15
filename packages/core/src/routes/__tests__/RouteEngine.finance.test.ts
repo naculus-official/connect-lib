@@ -1,5 +1,5 @@
 /**
- * RouteEngine — Financial-Grade Tests
+ * CrossChainRouteEngine — Financial-Grade Tests
  *
  * Covers bigint boundary conditions, USDC/USDT edge cases,
  * provider failure handling, mock integration with fetch,
@@ -9,7 +9,7 @@
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { RouteEngine } from '../RouteEngine'
+import { CrossChainRouteEngine } from '../RouteEngine'
 import { RouteEngineError, isRouteEngineError } from '../types'
 import { decodeGasLimits } from '../../account-abstraction/SmartAccountManager'
 import { encodeGasLimits } from '../../account-abstraction/user-operation'
@@ -168,11 +168,11 @@ describe('encodeGasLimits — bigint boundaries', () => {
   })
 })
 
-describe('RouteEngine — financial boundary conditions', () => {
-  let engine: RouteEngine
+describe('CrossChainRouteEngine — financial boundary conditions', () => {
+  let engine: CrossChainRouteEngine
 
   beforeEach(() => {
-    engine = new RouteEngine()
+    engine = new CrossChainRouteEngine()
   })
 
   it('output amount is 0n when cost >= amount', async () => {
@@ -248,10 +248,10 @@ describe('RouteEngine — financial boundary conditions', () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe('USDC/USDT — token construction and chain support', () => {
-  let engine: RouteEngine
+  let engine: CrossChainRouteEngine
 
   beforeEach(() => {
-    engine = new RouteEngine()
+    engine = new CrossChainRouteEngine()
   })
 
   it('buildUSDCToken on BSC (chain 56) returns USDC with 18 decimals', async () => {
@@ -417,7 +417,7 @@ describe('USDC/USDT — token construction and chain support', () => {
     // try USDC first, see high slippage, then fail on USDT
     // The getBestRouteWithUSDCPriority catches the error from the USDT path
     // and has no provider for it. Let's use chain 999 that has no USDC or USDT
-    const engine2 = new RouteEngine()
+    const engine2 = new CrossChainRouteEngine()
     engine2.registerSwapProvider(createMockSwapProvider('LiFi'))
 
     await expect(engine2.getBestRouteWithUSDCPriority({
@@ -433,7 +433,7 @@ describe('USDC/USDT — token construction and chain support', () => {
     // This tests the fix: USDC should always be 6 decimals
     // The private method isn't directly accessible, so we verify via
     // getBestRouteWithUSDCPriority output
-    const engine = new RouteEngine()
+    const engine = new CrossChainRouteEngine()
     engine.registerSwapProvider(createMockSwapProvider('Test'))
     // Testing the fix indirectly — buildUSDCToken now always uses 6 not inputToken.decimals
     // We trust the implementation; previous test b1 already validates this via output
@@ -449,7 +449,7 @@ describe('USDC/USDT — token construction and chain support', () => {
   })
 
   it('USDC/USDT decimals resolve from chain-registry usdcDecimals/usdtDecimals (default 6)', async () => {
-    const engine = new RouteEngine()
+    const engine = new CrossChainRouteEngine()
     engine.registerSwapProvider(createMockSwapProvider('Test'))
 
     const route = await engine.getBestRouteWithUSDCPriority({
@@ -490,10 +490,10 @@ describe('USDC/USDT — token construction and chain support', () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe('Provider failure handling', () => {
-  let engine: RouteEngine
+  let engine: CrossChainRouteEngine
 
   beforeEach(() => {
-    engine = new RouteEngine()
+    engine = new CrossChainRouteEngine()
   })
 
   it('all swap providers throw → returns null', async () => {
@@ -756,10 +756,10 @@ describe('Mock integration — LiFi API', () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe('buildRouteFromQuote — output amount correctness', () => {
-  let engine: RouteEngine
+  let engine: CrossChainRouteEngine
 
   beforeEach(() => {
-    engine = new RouteEngine()
+    engine = new CrossChainRouteEngine()
   })
 
   it('amount > totalCost → output = amount - totalCost', async () => {

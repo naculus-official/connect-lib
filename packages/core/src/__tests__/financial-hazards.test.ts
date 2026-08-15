@@ -23,10 +23,7 @@ import { decodeGasLimits } from "../account-abstraction/SmartAccountManager";
 import { ERC20TokenError } from "../token/errors";
 import { WalletError } from "../errors";
 import { ConnectorManager, createConnectorManager } from "../connector-manager";
-import {
-  NAMESPACE_EIP155,
-  SESSION_TIMEOUT_MS,
-} from "../constants";
+import { NAMESPACE_EIP155 } from "../constants";
 import type { UniversalWalletSession } from "../session";
 import type { BatchCall } from "../connector";
 
@@ -476,7 +473,7 @@ describe("Gap 7 — Compliance: session expiry", () => {
   const NOW = Date.now();
 
   it("active session with future expiry is considered valid", () => {
-    const session = createTestSession({ expiry: NOW + SESSION_TIMEOUT_MS });
+    const session = createTestSession({ expiry: NOW + 5 * 60 * 1000 });
     expect(Number(session.expiry!) > NOW).toBe(true);
   });
 

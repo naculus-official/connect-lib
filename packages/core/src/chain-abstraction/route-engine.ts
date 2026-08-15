@@ -10,6 +10,11 @@
  * @see docs/features/chain-abstraction.md §3
  */
 
+import {
+  getNativeTokenDecimals,
+  getNativeTokenSymbol,
+  resolveTokenSymbol,
+} from "../chain-registry";
 import { logger } from "../logger";
 import { formatUnits } from "../token/units";
 import type {
@@ -36,40 +41,6 @@ const DEFAULT_QUOTE_CACHE_TTL = 30_000; // 30 seconds
 const DEFAULT_STATUS_POLL_INTERVAL = 2_000; // 2 seconds
 const DEFAULT_SLIPPAGE = 0.5; // 0.5%
 
-// ─── Known native token symbols per chain ──────────────────────────────
-
-const NATIVE_TOKEN_SYMBOLS: Record<string, string> = {
-  "eip155:1": "ETH",
-  "eip155:10": "ETH",
-  "eip155:42161": "ETH",
-  "eip155:8453": "ETH",
-  "eip155:137": "MATIC",
-  "eip155:43114": "AVAX",
-  "eip155:56": "BNB",
-  "eip155:250": "FTM",
-  "eip155:324": "ETH",
-  "eip155:59144": "ETH",
-  "eip155:534352": "ETH",
-  "eip155:100": "xDai",
-  "eip155:1101": "ETH",
-};
-
-const NATIVE_TOKEN_DECIMALS: Record<string, number> = {
-  "eip155:1": 18,
-  "eip155:10": 18,
-  "eip155:42161": 18,
-  "eip155:8453": 18,
-  "eip155:137": 18,
-  "eip155:43114": 18,
-  "eip155:56": 18,
-  "eip155:250": 18,
-  "eip155:324": 18,
-  "eip155:59144": 18,
-  "eip155:534352": 18,
-  "eip155:100": 18,
-  "eip155:1101": 18,
-};
-
 // ─── Cache entry for quotes ────────────────────────────────────────────
 
 interface CachedQuote {
@@ -82,9 +53,9 @@ interface CachedQuote {
   amount: string;
 }
 
-// ─── RouteEngine ───────────────────────────────────────────────────────
+// ─── ChainAbstractionRouteEngine ───────────────────────────────────────────────────────
 
-export class RouteEngine {
+export class ChainAbstractionRouteEngine {
   private providers: Map<BridgeProviderId, BridgeProvider> = new Map();
   private config: Required<
     Pick<
@@ -480,9 +451,9 @@ export class RouteEngine {
     options?: QuoteOptions,
   ): Quote[] {
     const fromDecimals =
-      NATIVE_TOKEN_DECIMALS[routes[0]?.fromChain ?? "eip155:1"] ?? 18;
+      getNativeTokenDecimals(routes[0]?.fromChain ?? "eip155:1");
     const toDecimals =
-      NATIVE_TOKEN_DECIMALS[routes[0]?.toChain ?? "eip155:1"] ?? 18;
+      getNativeTokenDecimals(routes[0]?.toChain ?? "eip155:1");
 
     const quotes: Quote[] = routes.map((route) => {
       const toAmount = BigInt(route.toAmount);
@@ -511,11 +482,11 @@ export class RouteEngine {
         provider: route.provider,
         fromChain: route.fromChain,
         toChain: route.toChain,
-        fromTokenSymbol: this.resolveTokenSymbol(
+        fromTokenSymbol: resolveTokenSymbol(
           route.fromChain,
           route.fromToken,
         ),
-        toTokenSymbol: this.resolveTokenSymbol(route.toChain, route.toToken),
+        toTokenSymbol: resolveTokenSymbol(route.toChain, route.toToken),
         fromAmountFormatted: fromFormatted,
         toAmountFormatted: toFormatted,
         toAmountMinFormatted: toMinFormatted,
@@ -568,30 +539,6 @@ export class RouteEngine {
     }
 
     return sorted;
-  }
-
-  /**
-   * Resolve a token symbol from a chain and token address.
-   */
-  private resolveTokenSymbol(chain: string, token: string): string {
-    // Check if it's a native token
-    if (token === "0x0000000000000000000000000000000000000000") {
-      return NATIVE_TOKEN_SYMBOLS[chain] ?? "UNKNOWN";
-    }
-
-    // Check known tokens
-    for (const [chainId, tokens] of Object.entries(KNOWN_TOKEN_LIST)) {
-      if (chainId === chain) {
-        for (const [symbol, address] of Object.entries(tokens)) {
-          if (address.toLowerCase() === token.toLowerCase()) {
-            return symbol;
-          }
-        }
-      }
-    }
-
-    // Fall back to the token address abbreviation
-    return token.startsWith("0x") ? token.slice(0, 10) : token;
   }
 
   /**
@@ -657,7 +604,7 @@ export class RouteEngine {
     options?: CostComparisonOptions,
   ): Promise<CostComparison> {
     const chainName = this.getChainName(chain);
-    const nativeSymbol = NATIVE_TOKEN_SYMBOLS[chain] ?? "ETH";
+    const nativeSymbol = getNativeTokenSymbol(chain);
 
     // Simulate gas cost estimation based on operation type
     const gasUnits = this.getEstimatedGasUnits(operation);
@@ -784,43 +731,10 @@ export class RouteEngine {
   }
 }
 
-// ─── Known token list for symbol resolution ────────────────────────────
-
-const KNOWN_TOKEN_LIST: Record<string, Record<string, string>> = {
-  "eip155:1": {
-    USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    DAI: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-    WETH: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-  },
-  "eip155:137": {
-    USDC: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-    USDT: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-    DAI: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063",
-    WMATIC: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270",
-  },
-  "eip155:10": {
-    USDC: "0x7F5c764cBc14f9669B88837ca1490cCa17c31607",
-    USDT: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
-    DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
-    WETH: "0x4200000000000000000000000000000000000006",
-  },
-  "eip155:42161": {
-    USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-    USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
-    DAI: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
-    WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
-  },
-  "eip155:8453": {
-    USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    WETH: "0x4200000000000000000000000000000000000006",
-  },
-};
-
 // ─── Factory function ──────────────────────────────────────────────────
 
-export function createRouteEngine(
+export function createChainAbstractionRouteEngine(
   config?: ChainAbstractionConfig,
-): RouteEngine {
-  return new RouteEngine(config);
+): ChainAbstractionRouteEngine {
+  return new ChainAbstractionRouteEngine(config);
 }

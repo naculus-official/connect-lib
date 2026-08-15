@@ -10,6 +10,7 @@
  * @see https://docs.axelar.dev/dev/general-message-passing
  */
 
+import { resolveTokenAddress } from "../../chain-registry";
 import { logger } from "../../logger";
 import type {
   BridgeProvider,
@@ -47,33 +48,13 @@ function toAxelarChain(chainId: string): string | undefined {
 
 const SUPPORTED_AXELAR_CHAINS = new Set(Object.keys(AXELAR_CHAIN_MAP));
 
-// ─── Known token addresses for Axelar-supported tokens ─────────────────
+// ─── Tokens Axelar can bridge (symbols; addresses resolve via chain-registry) ──
 
-const KNOWN_TOKENS: Record<string, Record<string, string>> = {
-  "eip155:1": {
-    USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-    USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-    DAI: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-    WETH: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-    aUSDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-  },
-  "eip155:137": {
-    USDC: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-    USDT: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
-    aUSDC: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-  },
-  "eip155:10": {
-    USDC: "0x7F5c764cBc14f9669B88837ca1490cCa17c31607",
-    aUSDC: "0x7F5c764cBc14f9669B88837ca1490cCa17c31607",
-  },
+const SUPPORTED_TOKENS: Record<string, string[]> = {
+  "eip155:1": ["USDC", "USDT", "DAI", "WETH"],
+  "eip155:137": ["USDC", "USDT"],
+  "eip155:10": ["USDC"],
 };
-
-function resolveTokenAddress(chain: string, token: string): string {
-  const chainTokens = KNOWN_TOKENS[chain];
-  if (!chainTokens) return token;
-  if (token.startsWith("0x") && token.length === 42) return token;
-  return chainTokens[token.toUpperCase()] ?? token;
-}
 
 // ─── AxelarProvider ────────────────────────────────────────────────────
 
@@ -332,12 +313,15 @@ export class AxelarProvider implements BridgeProvider {
   }
 
   supportsToken(chain: string, token: string): boolean {
-    const chainTokens = KNOWN_TOKENS[chain];
-    if (!chainTokens) return false;
+    const supported = SUPPORTED_TOKENS[chain];
+    if (!supported) return false;
     if (token.startsWith("0x") && token.length === 42) {
-      return Object.values(chainTokens).includes(token.toLowerCase());
+      const addr = token.toLowerCase();
+      return supported.some(
+        (s) => resolveTokenAddress(chain, s).toLowerCase() === addr,
+      );
     }
-    return Object.keys(chainTokens).includes(token.toUpperCase());
+    return supported.includes(token.toUpperCase());
   }
 
   private getAxelarGateway(chainId: string): string {

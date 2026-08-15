@@ -129,7 +129,7 @@ export function buildCallData(calls: Call[]): Hex {
 /**
  * Encode a single execute call for SimpleAccount.
  */
-function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
+export function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
   const selector = "0xb61d27f6"; // execute(address,uint256,bytes)
   const toArg = to.toLowerCase().replace("0x", "").padStart(64, "0");
   const valueArg = value.toString(16).padStart(64, "0");
@@ -156,7 +156,7 @@ function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
  * Encode a batch execute call for SimpleAccount.
  * executeBatch(address[],uint256[],bytes[])
  */
-function encodeExecuteBatch(calls: Call[]): Hex {
+export function encodeExecuteBatch(calls: Call[]): Hex {
   const selector = "0x47e1da2a";
   const n = calls.length;
   const nWord = n.toString(16).padStart(64, "0");
