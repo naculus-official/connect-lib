@@ -15,7 +15,7 @@ export type { LiFISwapProviderConfig } from "./providers/LiFISwapProvider";
 // ─── Providers ─────────────────────────────────────────────────────────
 export { LiFISwapProvider } from "./providers/LiFISwapProvider";
 // ─── Route Engine ──────────────────────────────────────────────────────
-export { RouteEngine } from "./RouteEngine";
+export { CrossChainRouteEngine } from "./RouteEngine";
 // ─── Types ─────────────────────────────────────────────────────────────
 export type {
   BridgeProvider,

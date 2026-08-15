@@ -258,7 +258,7 @@ export interface ChainAbstractionConfig {
 /**
  * Abstract interface for a cross-chain bridge provider.
  * Each provider (LiFi, Axelar, Socket, Across) implements this
- * to be registered with the RouteEngine.
+ * to be registered with the ChainAbstractionRouteEngine.
  */
 export interface BridgeProvider {
   /** Unique provider identifier */

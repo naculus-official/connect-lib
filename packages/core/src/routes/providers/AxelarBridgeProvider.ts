@@ -108,7 +108,7 @@ export class AxelarBridgeProvider implements BridgeProvider {
     // In production, construct and send the Axelar GMP deposit transaction
     throw new RouteEngineError(
       "execution_failed",
-      "Axelar direct execution not yet implemented — use RouteEngine.executeRoute with an EVMRouteExecutor",
+      "Axelar direct execution not yet implemented — use CrossChainRouteEngine.executeRoute with an EVMRouteExecutor",
     );
   }
 }

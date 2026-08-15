@@ -190,7 +190,7 @@ export class LiFISwapProvider implements SwapProvider {
     // For now, return a placeholder execution
     throw new RouteEngineError(
       "execution_failed",
-      "LiFi direct execution not yet implemented — use RouteEngine.executeRoute with an EVMRouteExecutor",
+      "LiFi direct execution not yet implemented — use CrossChainRouteEngine.executeRoute with an EVMRouteExecutor",
     );
   }
 }

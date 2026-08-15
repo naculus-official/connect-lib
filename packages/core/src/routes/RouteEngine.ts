@@ -1,5 +1,5 @@
 /**
- * RouteEngine
+ * CrossChainRouteEngine
  *
  * Cross-chain routing engine with provider-agnostic swap and bridge providers.
  *
@@ -25,9 +25,9 @@ import type {
 } from "./types";
 import { RouteEngineError } from "./types";
 
-// ─── RouteEngine ───────────────────────────────────────────────────────
+// ─── CrossChainRouteEngine ────────────────────────────────────────────
 
-export class RouteEngine {
+export class CrossChainRouteEngine {
   private swapProviders: Map<string, SwapProvider> = new Map();
   private bridgeProviders: Map<string, BridgeProvider> = new Map();
   private executor: EVMRouteExecutor | null = null;

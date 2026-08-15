@@ -82,9 +82,9 @@ interface CachedQuote {
   amount: string;
 }
 
-// ─── RouteEngine ───────────────────────────────────────────────────────
+// ─── ChainAbstractionRouteEngine ───────────────────────────────────────────────────────
 
-export class RouteEngine {
+export class ChainAbstractionRouteEngine {
   private providers: Map<BridgeProviderId, BridgeProvider> = new Map();
   private config: Required<
     Pick<
@@ -819,8 +819,8 @@ const KNOWN_TOKEN_LIST: Record<string, Record<string, string>> = {
 
 // ─── Factory function ──────────────────────────────────────────────────
 
-export function createRouteEngine(
+export function createChainAbstractionRouteEngine(
   config?: ChainAbstractionConfig,
-): RouteEngine {
-  return new RouteEngine(config);
+): ChainAbstractionRouteEngine {
+  return new ChainAbstractionRouteEngine(config);
 }
