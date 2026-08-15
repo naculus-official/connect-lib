@@ -76,11 +76,11 @@ async function keccak256(data: Hex): Promise<Hex> {
  * Encode the createAccount call data for the SimpleAccountFactory.
  * The factory's `createAccount(address owner, uint256 salt)` returns the account address.
  *
- * ABI: createAccount(address,uint256) = 0xcf7aba77
+ * ABI: createAccount(address,uint256) = 0x5fbfb9cf
  * Args: owner (left-padded to 32 bytes) + salt (left-padded to 32 bytes)
  */
 function encodeCreateAccount(owner: Address, salt: bigint): Hex {
-  const selector = "0xcf7aba77";
+  const selector = "0x5fbfb9cf";
   const ownerArg = owner.toLowerCase().replace("0x", "").padStart(64, "0");
   const saltArg = salt.toString(16).padStart(64, "0");
   return `${selector}${ownerArg}${saltArg}` as Hex;
