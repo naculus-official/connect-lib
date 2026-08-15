@@ -194,7 +194,12 @@ export const DEFAULT_ENTRY_POINT = ENTRY_POINT_V0_7;
 
 /**
  * SimpleAccount Factory address (eth-infinitism).
- * Deployed at the same address on all supported chains via CREATE2.
+ *
+ * ponytail: this is the v0.6 SimpleAccountFactory — it deploys v0.6
+ * SimpleAccounts (v0.6 validateUserOp signature), incompatible with the
+ * v0.7 EntryPoint used by AA_SUPPORTED_CHAINS. eth-infinitism's v0.7 release
+ * shipped no replacement factory (it's a "sample" contract), so enabling AA
+ * requires deploying/choosing a v0.7 account factory and updating this address.
  */
 export const SIMPLE_ACCOUNT_FACTORY: Address =
   "0x9406Cc6185a346906296840746125a0E44976454";
