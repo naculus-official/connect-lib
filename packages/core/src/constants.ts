@@ -69,15 +69,6 @@ export const WC_DISCONNECT_TIMEOUT = 6001;
 export const WC_DISCONNECT_SESSION_EXPIRED = 6002;
 
 /**
- * Storage keys used across connectors
- */
-export const STORAGE_KEYS = {
-  SESSION: "naculus_web3_session",
-  POCKET: "naculus_pocket",
-  PASSKEYS_CREDENTIAL: "naculus_passkeys_credential",
-} as const;
-
-/**
  * Nonce configuration
  */
 export const DEFAULT_NONCE_LENGTH = 16;
