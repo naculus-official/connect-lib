@@ -34,7 +34,7 @@ jobs:
         run: pnpm audit --audit-level=critical
 
       - name: Build packages first (needed for dist/ resolution)
-        run: pnpm -r --filter=!@naculus/connector-wagmi build
+        run: pnpm -r build
 
       - name: TypeScript check
         run: npx tsc --noEmit
@@ -86,7 +86,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build packages first (needed for dist/ resolution)
-        run: pnpm -r --filter=!@naculus/connector-wagmi build
+        run: pnpm -r build
 
       - name: Run coverage
         run: pnpm test:coverage
