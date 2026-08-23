@@ -299,10 +299,35 @@ export function createEVMVerifier(): (params: {
 }
 
 /**
+ * Rethrow a failed dynamic import with a message that names the real cause.
+ *
+ * The packages guarded this way are declared dependencies of `@naculus/siwx`
+ * and are installed alongside it, so reaching this path means module
+ * resolution broke — a `pnpm.overrides` entry, a broken hoist, a bundler
+ * `external` rule. It does not mean the consumer forgot to install something,
+ * and the message must not tell them to.
+ */
+function moduleLoadFailed(pkg: string, err: unknown): never {
+  throw new Error(
+    `Could not load "${pkg}", a dependency of @naculus/siwx. It ships with ` +
+      `this package, so this is a module resolution failure, not a missing ` +
+      `install.`,
+    { cause: err },
+  );
+}
+
+/**
  * Create a Solana (SIWS) verifier using tweetnacl and bs58.
  *
- * Requires `tweetnacl` and `bs58` to be installed.
- * Throws if dependencies cannot be imported.
+ * Both ship as dependencies of this package; a consumer does not install them
+ * separately.
+ *
+ * Only the imports are guarded. Decoding and verification failures belong to
+ * the caller's input and propagate unchanged: an invalid base58 string throws
+ * `Non-base58 character` from bs58, and a wrong-length signature or key throws
+ * `bad signature size` / `bad public key size` from tweetnacl. Translating
+ * those into "install the package" was wrong — it named a cause that was never
+ * true and sent the reader looking in the wrong place.
  */
 export function createSolanaVerifier(): (params: {
   message: string;
@@ -310,25 +335,24 @@ export function createSolanaVerifier(): (params: {
   publicKey: string;
 }) => Promise<boolean> {
   return async ({ message, signature, publicKey }) => {
-    try {
-      const nacl = await import("tweetnacl");
-      const bs58 = await import("bs58");
+    const nacl = (
+      await import("tweetnacl").catch((err) =>
+        moduleLoadFailed("tweetnacl", err),
+      )
+    ).default;
+    const bs58 = (
+      await import("bs58").catch((err) => moduleLoadFailed("bs58", err))
+    ).default;
 
-      const messageBytes = new TextEncoder().encode(message);
-      const signatureBytes = bs58.default.decode(signature);
-      const publicKeyBytes = bs58.default.decode(publicKey);
+    const messageBytes = new TextEncoder().encode(message);
+    const signatureBytes = bs58.decode(signature);
+    const publicKeyBytes = bs58.decode(publicKey);
 
-      return nacl.default.sign.detached.verify(
-        messageBytes,
-        signatureBytes,
-        publicKeyBytes,
-      );
-    } catch {
-      throw new Error(
-        "tweetnacl and bs58 are required for Solana SIWx verification. " +
-          "Install them via: pnpm add tweetnacl bs58",
-      );
-    }
+    return nacl.sign.detached.verify(
+      messageBytes,
+      signatureBytes,
+      publicKeyBytes,
+    );
   };
 }
 

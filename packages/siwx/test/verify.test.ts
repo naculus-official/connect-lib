@@ -381,6 +381,149 @@ describe("createSolanaVerifier", () => {
 });
 
 // ---------------------------------------------------------------------------
+// createSolanaVerifier — the returned closure, against real tweetnacl + bs58
+//
+// The tests above only assert that the factory and its closure are functions,
+// so nothing here ever loaded bs58 or tweetnacl. These do: every vector below
+// was produced with the installed packages from the fixed ed25519 seed
+// Uint8Array[1..32] (and [255..224] for the second key), so they are
+// reproducible rather than copied from somewhere.
+// ---------------------------------------------------------------------------
+
+const SOL = {
+  message: "naculus.example wants you to sign in with your Solana account",
+  publicKey: "9C6hybhQ6Aycep9jaUnP6uL9ZYvDjUp1aSkFWPUFJtpj",
+  signature:
+    "4bQhyiVVns6LPhsB9G4AyPG7mmj9T5YMichfurRvsN5Ar6EgTcdb4VGVkK5gx2qLEkcECV6WGVudyQhPAQHgdV4Z",
+  /** SOL.signature with the first byte flipped. */
+  tamperedSignature:
+    "4aFT4iR9RUCBGeSQgAxD3MMknW1KqaaytdY1F3rKbs9SbBbeGRrvyTDqaoAyZtDPucRBDSuCZEEDY9y5Vm45UPf3",
+  /** A different key pair's public key. */
+  otherPublicKey: "Dav6Vxmr7BEgvQW4osrzWutwgPEqQ4Ji3zWxKp6nX9AD",
+  /** Valid base58, but 10 bytes — neither a signature (64) nor a key (32). */
+  tenBytesA: "PuA8sodkHm3qY",
+  tenBytesB: "WSdbz2xXoQVWG",
+};
+
+/**
+ * The regression this suite exists for: every failure below used to be
+ * rewritten as "install tweetnacl and bs58", which was never the cause.
+ */
+const DEPENDENCY_WORDING = /dependenc|install|pnpm add|npm install/i;
+
+describe("createSolanaVerifier — verification behaviour", () => {
+  it("loads bs58 and tweetnacl as real modules", async () => {
+    const bs58 = (await import("bs58")).default;
+    const nacl = (await import("tweetnacl")).default;
+    expect(typeof bs58.decode).toBe("function");
+    expect(typeof nacl.sign.detached.verify).toBe("function");
+  });
+
+  it("returns true for a valid signature", async () => {
+    const { createSolanaVerifier } = await import("../src/verify");
+    const verifier = createSolanaVerifier();
+    await expect(
+      verifier({
+        message: SOL.message,
+        signature: SOL.signature,
+        publicKey: SOL.publicKey,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("returns false for a tampered signature", async () => {
+    const { createSolanaVerifier } = await import("../src/verify");
+    const verifier = createSolanaVerifier();
+    await expect(
+      verifier({
+        message: SOL.message,
+        signature: SOL.tamperedSignature,
+        publicKey: SOL.publicKey,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("returns false when the message does not match the signature", async () => {
+    const { createSolanaVerifier } = await import("../src/verify");
+    const verifier = createSolanaVerifier();
+    await expect(
+      verifier({
+        message: SOL.message + "!",
+        signature: SOL.signature,
+        publicKey: SOL.publicKey,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("returns false for a different public key", async () => {
+    const { createSolanaVerifier } = await import("../src/verify");
+    const verifier = createSolanaVerifier();
+    await expect(
+      verifier({
+        message: SOL.message,
+        signature: SOL.signature,
+        publicKey: SOL.otherPublicKey,
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
+describe("createSolanaVerifier — malformed input is not a dependency problem", () => {
+  const cases: Array<{
+    name: string;
+    params: { message: string; signature: string; publicKey: string };
+    expected: RegExp;
+  }> = [
+    {
+      name: "signature is not base58",
+      params: {
+        message: SOL.message,
+        signature: "0OIl",
+        publicKey: SOL.publicKey,
+      },
+      expected: /Non-base58 character/,
+    },
+    {
+      name: "public key is not base58",
+      params: {
+        message: SOL.message,
+        signature: SOL.signature,
+        publicKey: "abc!",
+      },
+      expected: /Non-base58 character/,
+    },
+    {
+      name: "signature decodes to the wrong length",
+      params: {
+        message: SOL.message,
+        signature: SOL.tenBytesA,
+        publicKey: SOL.publicKey,
+      },
+      expected: /bad signature size/,
+    },
+    {
+      name: "public key decodes to the wrong length",
+      params: {
+        message: SOL.message,
+        signature: SOL.signature,
+        publicKey: SOL.tenBytesB,
+      },
+      expected: /bad public key size/,
+    },
+  ];
+
+  for (const { name, params, expected } of cases) {
+    it(`surfaces the original error when the ${name}`, async () => {
+      const { createSolanaVerifier } = await import("../src/verify");
+      const verifier = createSolanaVerifier();
+
+      await expect(verifier(params)).rejects.toThrow(expected);
+      await expect(verifier(params)).rejects.not.toThrow(DEPENDENCY_WORDING);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // createXRPLVerifier — unit tests
 // ---------------------------------------------------------------------------
 

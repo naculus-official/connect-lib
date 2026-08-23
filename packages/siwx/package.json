@@ -18,14 +18,14 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "bs58": "^6.0.0",
+    "ripple-keypairs": "^2.0.0",
+    "tweetnacl": "^1.0.3",
     "viem": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.18",
-    "bs58": "^6.0.0",
-    "ripple-keypairs": "^2.0.0",
     "tsup": "^8.3.6",
-    "tweetnacl": "^1.0.3",
     "typescript": "^5.9.3"
   },
   "sideEffects": false,
