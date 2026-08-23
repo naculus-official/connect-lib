@@ -212,48 +212,69 @@ async function decryptWallet(
 }
 
 self.onmessage = async (e: MessageEvent) => {
-  const { type, payload } = e.data;
+  const { type, payload, id } = e.data;
+
+  /**
+   * Every reply carries the request id back.
+   *
+   * IsolatedSigner matches replies to pending promises by id and cannot do
+   * anything with an unlabelled one, so a reply without an id is
+   * indistinguishable from no reply at all — the caller waits out the full 30s
+   * timeout. Routing all eight replies through here makes that impossible to
+   * forget.
+   */
+  const reply = (msg: Record<string, unknown>) => {
+    self.postMessage({ ...msg, id });
+  };
+
   try {
     switch (type) {
       case "init": {
         const pk = await decryptWallet(payload.encrypted, payload.passphrase);
         privKey = pk;
-        self.postMessage({ type: "ready" });
+        reply({ type: "ready" });
         break;
       }
       case "initWithKey": {
         privKey = hexToBytes(payload.privateKey.replace(/^0x/, ""));
-        self.postMessage({ type: "ready" });
+        reply({ type: "ready" });
         break;
       }
       case "signMessage": {
         if (!privKey) {
-          self.postMessage({ type: "error", error: "no_key" });
+          reply({ type: "error", error: "no_key" });
           break;
         }
         const result = signPersonalMessage(
           payload.message,
           payload.chainId ?? "eip155:1",
         );
-        self.postMessage({ type: "signed", ...result });
+        reply({ type: "signed", ...result });
         break;
       }
       case "signTransaction": {
         if (!privKey) {
-          self.postMessage({ type: "error", error: "no_key" });
+          reply({ type: "error", error: "no_key" });
           break;
         }
         const result = signTransaction(payload);
-        self.postMessage({ type: "signed", ...result });
+        reply({ type: "signed", ...result });
         break;
       }
       case "clear": {
         privKey = null;
-        self.postMessage({ type: "cleared" });
+        reply({ type: "cleared" });
         break;
       }
+      default:
+        // Falling through silently would strand the caller on the 30s timeout,
+        // the same failure mode a missing id produces.
+        reply({
+          type: "error",
+          error: `unknown request type: ${String(type)}`,
+        });
     }
   } catch (err: any) {
-    self.postMessage({ type: "error", error: err.message ?? "unknown" });
+    reply({ type: "error", error: err.message ?? "unknown" });
   }
 };

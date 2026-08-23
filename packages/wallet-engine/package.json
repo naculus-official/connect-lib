@@ -15,7 +15,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsup --config tsup.worker.config.ts",
     "clean": "rm -rf dist",
     "test": "vitest run"
   },
