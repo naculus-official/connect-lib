@@ -169,6 +169,18 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
   return { signature: "0x" + bytesToHex(signedEncoded) };
 }
 
+/**
+ * PBKDF2 work factor. Fixed, and deliberately not read from the environment —
+ * see session-keys/crypto.ts for the reasoning.
+ *
+ * Declared locally rather than imported: pulling it from the session-key module
+ * would drag that module and its dependencies into the worker bundle for the
+ * sake of one number. The two are separate KDF paths that may legitimately
+ * diverge later — this one is a candidate for reading its iteration count from
+ * the encrypted payload, per docs/design/worker-isolation-threat-model.md.
+ */
+const PBKDF2_ITERATIONS = 600_000;
+
 async function deriveKey(
   passphrase: string,
   saltHex: string,
@@ -181,9 +193,13 @@ async function deriveKey(
     false,
     ["deriveKey"],
   );
-  const iters = Number(process.env.PBKDF2_ITER) || 600_000;
   return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt: salt as any, iterations: iters, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: salt as any,
+      iterations: PBKDF2_ITERATIONS,
+      hash: "SHA-256",
+    },
     key,
     { name: "AES-GCM", length: 256 },
     false,

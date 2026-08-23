@@ -69,7 +69,6 @@ export default defineConfig({
       "**/coverage/**",
     ],
     testTimeout: 120_000,
-    env: { PBKDF2_ITER: "100" }, // ponytail: test speed over real iterations; 600k used in production
     coverage: {
       provider: "v8",
       thresholds: {

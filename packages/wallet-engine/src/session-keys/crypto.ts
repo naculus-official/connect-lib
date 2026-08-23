@@ -9,7 +9,19 @@ import type { EncryptedKeyPair, SessionKeyPair } from "./types";
  * Decryption key derived from master wallet seed (via KDF).
  */
 
-export const PBKDF2_ITER = Number(process.env.PBKDF2_ITER) || 600_000;
+/**
+ * PBKDF2 work factor. Fixed, and deliberately not read from the environment.
+ *
+ * This used to be read from an environment variable with no floor check, so any
+ * build or CI environment could drop key derivation to a single iteration —
+ * silently, with no failing test. This repo's own vitest config set it to 100.
+ * A work factor a deployment can lower without noticing is not a work factor,
+ * so there is no override path here at all: no env var, no build define, no
+ * parameter, no config field.
+ *
+ * 600,000 matches OWASP's current guidance for PBKDF2-SHA256.
+ */
+export const PBKDF2_ITER = 600_000;
 
 /** Derive AES key — PBKDF2 (SHA-256) from wallet seed */
 async function deriveAESKey(
