@@ -43,8 +43,8 @@ siwx
 
 ## Quick start
 
-> **⚠️ Pre-release** — packages are not yet published to npm.
-> For local dev, see [Development](#development) below.
+> **⚠️ 0.x** — the API can still change between minor versions.
+> Published on npm; see [Releasing](CONTRIBUTING.md#releasing) for how versions move.
 
 ```sh
 pnpm add @naculus/connect
