@@ -1,8 +1,14 @@
 name: Publish
 
+# Publishing is manual, on purpose.
+#
+# This used to also run on `release: published`, which put the tag before the
+# publish: GitHub creates the tag when the release is published, so by the time
+# this workflow ran the version was already tagged whether or not anything
+# reached npm. The tag then meant "someone clicked publish", not "these packages
+# are on the registry". Ordering is now preflight -> publish -> tag -> release,
+# and the preflight requires the tag to be absent.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -24,6 +30,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # release-preflight fails if the release tag already exists. The
+          # default shallow checkout fetches no tags, which would make every
+          # version look untagged and turn that check into a no-op.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v6
         with:
@@ -44,21 +55,73 @@ jobs:
       - name: Run tests
         run: pnpm test:run
 
+      # A dry run is checking that the publish command is configured correctly,
+      # not that a release is ready. --pre-bump is the only preflight that makes
+      # sense here: it is offline, so it cannot answer whether this version is
+      # already on the registry or whether the tag is free, and it does not pack,
+      # so it says nothing about the manifests that would actually be published.
+      #
+      # Deliberately NOT run on a dry run:
+      #   --expect      registry immutability, tag availability, packed pins
+      #   --pack-check  packed manifest coherence
+      #
+      # A green dry run means "the workflow would get as far as calling publish".
+      # It does not mean the release is safe.
+      - name: Release preflight (dry run — configuration only)
+        if: ${{ inputs.dry_run == 'true' }}
+        run: node scripts/release-preflight.mjs --pre-bump
+
+      # pnpm -r publish skips any package whose version is already on the
+      # registry, so a partial bump publishes nothing and still exits 0. The
+      # tag step below reads packages/core, which assumes all 14 agree. Prove
+      # both, plus the packed manifests, before anything reaches npm.
+      - name: Release preflight
+        if: ${{ inputs.dry_run == 'false' }}
+        run: |
+          VERSION=$(node -p "require('./packages/core/package.json').version")
+          node scripts/release-preflight.mjs --expect "$VERSION"
+
+      # ci.yml has run this on every push and PR since before the release work
+      # started; publish.yml never has, so the one workflow that actually ships
+      # code was the only one with no security gate at all.
+      #
+      # No `if`: a dry run that skipped this would report green for a release
+      # the real run would refuse, which is the failure mode the dry-run split
+      # above exists to avoid. Deliberately not softened with continue-on-error
+      # or a trailing `|| echo` — a critical advisory should stop the release,
+      # and a gate that only warns is the thing this branch has been removing.
+      - name: Audit production dependencies
+        run: pnpm audit --audit-level=critical
+
       - name: Publish packages
         run: |
-          if [ "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}" = "true" ]; then
+          if [ "${{ inputs.dry_run == 'true' }}" = "true" ]; then
             echo "🧪 Dry run — would publish:"
             pnpm -r publish --dry-run --access public --no-git-checks --provenance
           else
             pnpm -r publish --access public --no-git-checks --provenance
           fi
 
+      # Runs only after the publish step succeeded, so the tag marks what is on
+      # the registry rather than what someone intended to put there.
+      #
+      # Nothing here is allowed to fail quietly. These commands used to end in
+      # `|| echo "already exists"`, which turned "the tag points at a different
+      # commit" and "the release was already cut" into green checkmarks.
       - name: Tag and release
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true') }}
+        if: ${{ inputs.dry_run == 'false' }}
         run: |
+          set -euo pipefail
+          # Annotated tags need an identity; runners do not provide one.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           VERSION=$(node -p "require('./packages/core/package.json').version")
-          git tag "v$VERSION" 2>/dev/null || echo "🏷️  v$VERSION tag already exists"
-          git push origin "v$VERSION" 2>/dev/null || echo "🏷️  v$VERSION tag already pushed"
-          gh release create "v$VERSION" --generate-notes --verify-tag 2>/dev/null || echo "📦 Release v$VERSION already exists"
+          # preflight already proved all 14 packages agree on this version and
+          # that v$VERSION did not exist. If either has changed underneath us,
+          # these fail and the run goes red.
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --generate-notes --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}

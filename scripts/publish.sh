@@ -1,32 +1,55 @@
 #!/bin/bash
-# publish.sh — Bump version → Build (parallel) → Publish (sequential)
+# publish.sh — prepare a lockstep release locally. It does not publish.
 #
-# Two modes:
+# The name is kept for muscle memory; `pnpm release:prepare` is the honest one.
+# What this does:
 #
-# 1. Local dev (default):
-#      pnpm bump:patch                    → verdaccio (http://localhost:4873)
-#      VERSION=minor ./scripts/publish.sh → manual bump + verdaccio
+#   1. refuse to run from a dirty working tree
+#   2. refuse to bump unless all 14 packages already agree on one version
+#   3. bump all 14 (changesets if any exist, otherwise a literal sed)
+#   4. verify the bump landed on every package
+#   5. tell you what to do next
 #
-# 2. CI / npm:
-#      CI=true REGISTRY=https://registry.npmjs.org ./scripts/publish.sh
-#      (NPM_TOKEN must be set in environment or gh CLI)
+# What it deliberately no longer does: publish, tag, or talk to a registry.
 #
-# Developer workflow:
-#   1. pnpm changeset                      # per PR — describe change
-#   2. Commit changeset with PR
-#   3. pnpm changeset version              # on master, consume changesets
-#   4. git commit -m "vVERSION"
-#   5. CI publish.yml (or publish.sh)      # pushes to npm
+# It used to do all three, in the worst possible order. It bumped versions in
+# the working tree, published from that uncommitted state, and then tagged —
+# which tagged the commit the bump sat on top of, not the bump itself. The tag
+# named a tree that did not contain the versions that had just been published.
+#
+# Publishing now happens in one place only: the Publish workflow, dispatched
+# manually, which installs, builds, tests, runs the preflight, publishes, and
+# only then tags. See CONTRIBUTING.md.
 
 set -e
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-REGISTRY="${REGISTRY:-http://localhost:4873}"
 
-# Auto-detect GITHUB_TOKEN for GitHub Packages if not set
-if [[ "$REGISTRY" == *"npm.pkg.github.com"* ]] && [ -z "$GITHUB_TOKEN" ]; then
-  GITHUB_TOKEN=$(gh auth token 2>/dev/null || echo "")
-  [ -n "$GITHUB_TOKEN" ] && echo "🔑 Using GitHub token from gh CLI" || echo "⚠️  No GITHUB_TOKEN set"
+# A literal sed keyed on packages/core's version silently skips any package
+# that has already drifted, so drift compounds instead of surfacing. Refuse to
+# touch versions unless all 14 currently agree.
+node "$ROOT_DIR/scripts/release-preflight.mjs" --pre-bump || {
+  echo "❌ release-preflight --pre-bump failed — refusing to bump"
+  exit 1
+}
+
+# Refuse to run from a dirty tree at all, before anything is changed.
+#
+# This used to be checked after the bump and downgraded to "tag won't be
+# created", which published the packages and then quietly declined to record
+# what had been published.
+DIRTY="$(cd "$ROOT_DIR" && git status --porcelain)"
+if [ -n "$DIRTY" ]; then
+  echo "❌ Working tree is not clean. Refusing to bump."
+  echo ""
+  echo "$DIRTY" | head -40
+  LINES=$(echo "$DIRTY" | wc -l)
+  [ "$LINES" -gt 40 ] && echo "   … and $((LINES - 40)) more"
+  echo ""
+  echo "   Commit or remove these first. Nothing is stashed, reset or cleaned"
+  echo "   for you — that would be deciding on your behalf what to throw away."
+  exit 1
 fi
+
 CURRENT="$(node -p "require('$ROOT_DIR/packages/core/package.json').version")"
 
 # ── Step 0: Pick version bump ────────────────────────────────────
@@ -37,12 +60,11 @@ if [ -z "$VERSION" ]; then
   select BUMP in "patch ($(echo $CURRENT | awk -F. '{print $1"."$2"."$3+1}'))" \
                 "minor ($(echo $CURRENT | awk -F. '{print $1"."$2+1".0"}'))" \
                 "major ($(echo $CURRENT | awk -F. '{print $1+1".0.0"}'))" \
-                "skip (dry-run)" "cancel"; do
+                "cancel"; do
     case $BUMP in
       patch*) VERSION=patch; break;;
       minor*) VERSION=minor; break;;
       major*) VERSION=major; break;;
-      "skip (dry-run)") VERSION=""; break;;
       cancel) echo "❌ Cancelled"; exit 0;;
     esac
   done
@@ -54,6 +76,13 @@ if ls "$ROOT_DIR"/.changeset/*.md >/dev/null 2>&1; then
   cd "$ROOT_DIR" && pnpm changeset version
   VERSION=$(node -p "require('$ROOT_DIR/packages/core/package.json').version")
   echo "🔼 Changesets bumped to $VERSION"
+  # .changeset/config.json has "fixed": [], so changesets bumps only the
+  # packages a changeset names, while the release model assumes all 14 move
+  # together. Verify that rather than trusting it.
+  node "$ROOT_DIR/scripts/release-preflight.mjs" --expect "$VERSION" || {
+    echo "❌ changesets produced a partial bump — stopping"
+    exit 1
+  }
 elif [ -n "$VERSION" ]; then
   # Manual bump (VERSION env set by interactive select, or CLI flag)
   case "$VERSION" in
@@ -68,64 +97,30 @@ elif [ -n "$VERSION" ]; then
       find "$ROOT_DIR/packages" -name package.json -not -path "*/node_modules/*" \
         -exec sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/g" {} +
       VERSION="$NEW"
+      # sed reports nothing when a pattern does not match, so exit 0 says only
+      # that sed ran. Confirm the bump landed on every package.
+      node "$ROOT_DIR/scripts/release-preflight.mjs" --expect "$NEW" || {
+        echo "❌ bump did not land coherently — stopping"
+        exit 1
+      }
       ;;
-    *) VERSION="$CURRENT" ;;
+    *)
+      echo "❌ VERSION must be patch, minor or major (got \"$VERSION\")"
+      exit 1
+      ;;
   esac
 else
-  VERSION="$CURRENT"
-  echo "⏭️  Skipping bump (publishing $CURRENT as-is)"
+  echo "❌ Nothing to prepare: no changesets present and no bump selected."
+  exit 1
 fi
 
-# Check for uncommitted changes
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-  echo "⚠️  Uncommitted changes — tag won't be created"
-  UNCOMMITTED=1
-else
-  UNCOMMITTED=0
-fi
-
-echo "🚀 Target: $REGISTRY · Version: $VERSION"
 echo ""
-
-# Pre-publish security scan (trivy installed system-wide)
-echo "=== Security scan ==="
-trivy fs --scanners vuln,secret --quiet "$ROOT_DIR/packages" 2>&1 | head -5 || echo "⚠️  trivy scan skipped (install trivy for full checks)"
+echo "✅ Release $VERSION has been prepared locally. Nothing has been published."
 echo ""
-
-# Step 1: Build everything in parallel (pnpm -r handles topological order)
-echo "=== Building all packages (parallel) ==="
-cd "$ROOT_DIR"
-pnpm -r build 2>&1 || { echo "❌ Build failed"; exit 1; }
-echo "✅ Build complete"
+echo "   Next:"
+echo "     1. Inspect the changes:  git diff"
+echo "     2. Commit and push the version bump."
+echo "     3. Run the Publish workflow (Actions → Publish) with dry_run: false."
 echo ""
-
-# Step 2: Auto-discover packages from filesystem — no hardcoded map
-# Replaces old manual mapping that breaks when packages are added
-echo "=== Publishing packages (sequential) ==="
-for pkg in "$ROOT_DIR"/packages/*/package.json; do
-  dir=$(basename "$(dirname "$pkg")")
-  PKG_NAME=$(node -p "require('$pkg').name")
-  PKG_DIR="$(dirname "$pkg")"
-  [[ "$PKG_NAME" == @naculus/* ]] || continue
-
-  echo "=== Publishing $PKG_NAME ==="
-  cd "$PKG_DIR"
-
-  # Check if version already exists on registry
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$REGISTRY/$PKG_NAME/$VERSION" 2>/dev/null || echo "000")
-
-  if [ "$HTTP_CODE" = "200" ]; then
-    echo "⏭️  $PKG_NAME@$VERSION already exists, skipping"
-  else
-    pnpm publish --no-git-checks${PROVENANCE:+ --provenance} --registry "$REGISTRY" 2>&1 && echo "✅ $PKG_NAME published" || echo "⚠️  $PKG_NAME publish failed"
-  fi
-  echo ""
-done
-
-echo "🎉 All done! Packages available at $REGISTRY"
-echo "Test: curl -s $REGISTRY/@naculus/connect-core | jq .version"
-
-# Git tag only if clean and version bumped
-if [ "$UNCOMMITTED" = "0" ] && [ -n "$VERSION" ]; then
-  git tag "v$VERSION" 2>/dev/null && echo "🏷️  Tagged v$VERSION (push manually: git push origin v$VERSION)" || echo "⏭️  Tag v$VERSION already exists"
-fi
+echo "   That workflow is the only entrypoint that publishes to npm, creates the"
+echo "   tag, or cuts a GitHub release — in that order, after the preflight."
