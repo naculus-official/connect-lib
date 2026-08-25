@@ -71,7 +71,9 @@ if [ -z "$VERSION" ]; then
 fi
 
 # ── Step 1: Version bump via changesets or manual ────────────────
-if ls "$ROOT_DIR"/.changeset/*.md >/dev/null 2>&1; then
+# README.md is created by `changeset init` and never goes away, so a plain
+# *.md glob here always matched and the manual bump below was unreachable.
+if find "$ROOT_DIR/.changeset" -maxdepth 1 -type f -name '*.md' ! -name 'README.md' -print -quit | grep -q .; then
   echo "📦 Detected changeset files — running pnpm changeset version"
   cd "$ROOT_DIR" && pnpm changeset version
   VERSION=$(node -p "require('$ROOT_DIR/packages/core/package.json').version")
