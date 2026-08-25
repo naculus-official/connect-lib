@@ -131,6 +131,6 @@ moment it should not be.
 
 | change | version | release note must contain |
 | --- | --- | --- |
-| patch | `0.1.6 → 0.1.7` | per-package sections; "version bump only" where nothing changed |
-| additive API | `0.1.7 → 0.1.8` | every new export, and which package it belongs to |
-| breaking | `0.1.x → 0.2.0` (`x.y.z → (x+1).0.0` after 1.0) | a BREAKING block at the top naming the affected exports and the migration |
+| patch | `X.Y.Z → X.Y.(Z+1)` | per-package sections; "version bump only" where nothing changed |
+| additive API | `X.Y.Z → X.(Y+1).0` before 1.0; `X.Y.Z → X.Y.(Z+1)` after 1.0 | every new export, and which package it belongs to |
+| breaking | `X.Y.Z → X.(Y+1).0` before 1.0; `X.Y.Z → (X+1).0.0` after 1.0 | a BREAKING block at the top naming the affected exports and the migration |
