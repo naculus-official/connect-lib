@@ -24,6 +24,11 @@
 set -e
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+# A command argument supports pnpm on Windows, where cmd.exe cannot parse a
+# POSIX `VERSION=value command` prefix. Preserve the environment variable for
+# direct POSIX callers, and prefer it when both are set.
+VERSION="${VERSION:-${1:-}}"
+
 # A literal sed keyed on packages/core's version silently skips any package
 # that has already drifted, so drift compounds instead of surfacing. Refuse to
 # touch versions unless all 14 currently agree.
