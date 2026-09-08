@@ -2,9 +2,9 @@
 export * from "./account-abstraction";
 export * from "./address-validation";
 export * from "./auto-reconnect";
-// ── Chain Abstraction (Cross-Chain Intent Routing) ───────────────────
-export * from "./chain-abstraction";
 // ── Chain Registry (SRS-007: Token Configs) ──────────────────────────
+export * from "./capabilities";
+export * from "./eip5792";
 export { CHAINS } from "./chain-registry";
 export * from "./connector";
 export * from "./connector-manager";
@@ -18,7 +18,13 @@ export * from "./permissions";
 export * from "./platform";
 export * from "./resolver";
 export { RouteEngine } from "./routes/RouteEngine";
-export type { ChainInfo, Token } from "./routes/types";
+export type {
+  ChainInfo,
+  Route,
+  RouteQuote,
+  RouteStep,
+  Token,
+} from "./routes/types";
 export * from "./rpc";
 export * from "./session";
 // ── Session Keys / Ephemeral Keys ────────────────────────────────────
@@ -31,4 +37,20 @@ export * from "./token";
 export * from "./token-list";
 
 // ── Token Price Oracle ──────────────────────────────────────────────
-export { getNativeTokenPriceUsd } from "./token-price";
+export {
+  getNativeTokenPriceUsd,
+  type NativeTokenPriceOptions,
+} from "./token-price";
+
+// ── Passphrase prompt bridge ──────────────────────────────────────
+// Framework-agnostic on purpose: an encrypted storage adapter asks for a
+// passphrase from inside code that knows nothing about components, so both
+// the React and Vue layers need the same object to bridge that.
+export {
+  PassphraseCancelledError,
+  PassphraseGate,
+} from "./passphrase-gate";
+export type {
+  PassphraseIntent,
+  PassphraseRequest,
+} from "./passphrase-gate";
