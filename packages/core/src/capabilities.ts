@@ -158,11 +158,26 @@ export function chooseExecutionStrategy(
  */
 export type AtomicityRequirement = "required" | "preferred" | "any";
 
+/**
+ * What the caller needs, beyond the calls themselves.
+ *
+ * Sponsorship is not a weaker form of atomicity — it answers who pays, not
+ * whether the calls land together — so it is a separate axis and either can
+ * end in a refusal on its own.
+ */
+export interface ExecutionRequirements {
+  atomicity?: AtomicityRequirement;
+  /** Whether gas must be covered by a paymaster rather than the user. */
+  sponsorship?: AtomicityRequirement;
+}
+
 export interface ExecutionPlan {
   /** `"refuse"` when the requirement cannot be met — send nothing. */
   strategy: ExecutionStrategy | "refuse";
   /** Whether the chosen route is genuinely all-or-nothing. */
   atomic: boolean;
+  /** Whether the wallet reports a paymaster can cover this. */
+  sponsored: boolean;
   /** Why this route, in terms an application can show a user. */
   reason: string;
 }
@@ -184,13 +199,35 @@ export interface ExecutionPlan {
 export function planExecution(
   capabilities: AccountCapabilities,
   callCount: number,
-  requirement: AtomicityRequirement = "preferred",
+  requirements: AtomicityRequirement | ExecutionRequirements = "preferred",
 ): ExecutionPlan {
+  const asked: ExecutionRequirements =
+    typeof requirements === "string"
+      ? { atomicity: requirements }
+      : requirements;
+  const requirement = asked.atomicity ?? "preferred";
+  const sponsorship = asked.sponsorship ?? "any";
+  const sponsored = capabilities.sponsoredTransactions;
+
+  // Checked before anything else: a route that lands the calls perfectly but
+  // charges a user who was promised sponsored gas is still the wrong route,
+  // and finding out after signing is too late.
+  if (sponsorship === "required" && !sponsored && capabilities.discovered) {
+    return {
+      strategy: "refuse",
+      atomic: false,
+      sponsored: false,
+      reason:
+        "This wallet has said no paymaster can cover this transaction, and the caller requires sponsored gas.",
+    };
+  }
+
   // One call is all-or-nothing by construction; there is nothing to batch.
   if (callCount <= 1) {
     return {
       strategy: "sequential",
       atomic: true,
+      sponsored,
       reason: "A single call is atomic on its own.",
     };
   }
@@ -206,11 +243,13 @@ export function planExecution(
       ? {
           strategy: "refuse",
           atomic: false,
+          sponsored,
           reason: `This wallet accepts at most ${capabilities.maxBatchSize} calls per batch and ${callCount} were requested. Splitting them would lose the guarantee that they land together.`,
         }
       : {
           strategy: "sequential",
           atomic: false,
+          sponsored,
           reason: `More calls than this wallet batches at once (${capabilities.maxBatchSize}), so they are sent one by one and an earlier one can land while a later one fails.`,
         };
   }
@@ -219,6 +258,7 @@ export function planExecution(
     return {
       strategy: "atomic-batch",
       atomic: true,
+      sponsored,
       reason: "The wallet reports that it executes batched calls atomically.",
     };
   }
@@ -228,6 +268,7 @@ export function planExecution(
       return {
         strategy: "atomic-batch",
         atomic: true,
+        sponsored,
         reason:
           "This wallet did not answer the capability query, which is not the same as saying no. The batch is sent with the atomic flag set, so the wallet refuses it outright rather than splitting it.",
       };
@@ -235,6 +276,7 @@ export function planExecution(
     return {
       strategy: "sequential",
       atomic: false,
+      sponsored,
       reason:
         "This wallet did not answer the capability query, so the calls are sent one by one and an earlier one can land while a later one fails.",
     };
@@ -244,6 +286,7 @@ export function planExecution(
     return {
       strategy: "refuse",
       atomic: false,
+      sponsored,
       reason:
         "This wallet has said it cannot execute several calls atomically, and the caller requires that they land together.",
     };
@@ -252,6 +295,7 @@ export function planExecution(
   return {
     strategy: "sequential",
     atomic: false,
+    sponsored,
     reason:
       "This wallet cannot batch atomically, so the calls are sent one by one and an earlier one can land while a later one fails.",
   };

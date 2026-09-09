@@ -4,6 +4,7 @@ export * from "./address-validation";
 export * from "./auto-reconnect";
 // ── Chain Registry (SRS-007: Token Configs) ──────────────────────────
 export * from "./capabilities";
+export * from "./delegation";
 export * from "./eip5792";
 export { CHAINS } from "./chain-registry";
 export * from "./connector";

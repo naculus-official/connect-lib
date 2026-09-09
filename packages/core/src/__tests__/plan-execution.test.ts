@@ -93,3 +93,50 @@ describe("planExecution", () => {
     }
   });
 });
+
+describe("planExecution — sponsorship", () => {
+  // Who pays is a separate question from whether the calls land together. A
+  // route that executes perfectly but charges a user who was promised
+  // sponsored gas is still the wrong route, and signing is too late to find
+  // out.
+  it("refuses when sponsorship is required and the wallet said no", () => {
+    const plan = planExecution(caps({ atomicBatch: true }), 2, {
+      atomicity: "required",
+      sponsorship: "required",
+    });
+    expect(plan.strategy).toBe("refuse");
+    expect(plan.reason).toMatch(/no paymaster/);
+  });
+
+  it("proceeds when a paymaster is available", () => {
+    const plan = planExecution(
+      caps({ atomicBatch: true, sponsoredTransactions: true }),
+      2,
+      { atomicity: "required", sponsorship: "required" },
+    );
+    expect(plan.strategy).toBe("atomic-batch");
+    expect(plan.sponsored).toBe(true);
+  });
+
+  // Same reasoning as atomicity: a wallet with no way to answer has not said
+  // no, and it is the authority on its own paymaster.
+  it("does not refuse on behalf of a wallet that never answered", () => {
+    const plan = planExecution(caps({ discovered: false }), 2, {
+      sponsorship: "required",
+    });
+    expect(plan.strategy).not.toBe("refuse");
+  });
+
+  it("reports sponsorship on every plan, whether asked for or not", () => {
+    expect(planExecution(caps({ sponsoredTransactions: true }), 1).sponsored).toBe(
+      true,
+    );
+    expect(planExecution(caps(), 2, "preferred").sponsored).toBe(false);
+  });
+
+  it("still accepts a bare atomicity string", () => {
+    expect(planExecution(caps({ atomicBatch: true }), 2, "required").strategy).toBe(
+      "atomic-batch",
+    );
+  });
+});
