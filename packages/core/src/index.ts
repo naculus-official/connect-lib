@@ -54,3 +54,20 @@ export type {
   PassphraseIntent,
   PassphraseRequest,
 } from "./passphrase-gate";
+
+// ── Solana RPC ────────────────────────────────────────────────────
+// Framework-neutral for the same reason as the passphrase gate above: a Vue
+// composable and a React hook over this are each about ten lines.
+export {
+  formatSol,
+  getLatestBlockhash,
+  getSignatureStatus,
+  getSolanaBalance,
+  LAMPORTS_PER_SOL,
+  parseSol,
+  SolanaRpcError,
+} from "./solana-rpc";
+export type {
+  SolanaBalance,
+  SolanaConfirmationStatus,
+} from "./solana-rpc";
