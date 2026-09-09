@@ -84,8 +84,41 @@ await manager.disconnect();
 | EIP-1193 (Provider API) | ✅ | connector-evm-injected |
 | EIP-6963 (Multi Injected Provider Discovery) | ✅ | connector-evm-injected |
 | EIP-4361 / CAIP-122 (SIWx) | ✅ | siwx |
+| ERC-1271 (contract-account signatures) | ✅ | siwx |
+| ERC-6492 (pre-deployment signatures) | ✅ | siwx |
+| EIP-5792 (wallet calls) | ✅ | core, connector-evm-injected, connector-walletconnect, connector-coinbase |
 | Solana Wallet Standard | ✅ | connector-solana |
 | WalletConnect v2 (CAIP-25) | ✅ | connector-walletconnect |
+
+### EIP-5792 — asking before executing
+
+All four methods are implemented: `wallet_getCapabilities`,
+`wallet_sendCalls`, `wallet_getCallsStatus` and `wallet_showCallsStatus`.
+
+The point of the capability query is that an application decides how to execute
+*before* it sends anything, rather than learning the answer from a rejection:
+
+```ts
+const { atomic, current } = useCapabilities();   // @naculus/connect-appkit-react
+
+if (atomic === "supported") {
+  await sendCalls(calls);        // one batch, all or nothing
+} else {
+  // Sequential. An approve can land and the swap it was for can fail, so an
+  // application that needs all-or-nothing should stop here instead.
+}
+```
+
+`atomic` has three values, not two. A wallet that does not implement
+`wallet_getCapabilities` has not said no — it has said nothing, and EIP-5792 is
+explicit that absence is not a denial. `"unknown"` also covers a query that
+failed and one still in flight.
+
+The wire format is decoded in one place (`core/src/eip5792.ts`) because it
+changed between the draft and 2.0.0, and three connectors each decoded it
+inline and each got it wrong differently: one invented a "no" for a wallet that
+was never asked, one read `Boolean({ supported: false })` as true, one accepted
+`status: "supported"` and dropped `"ready"`.
 
 ## Development
 
