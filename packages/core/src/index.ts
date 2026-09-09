@@ -71,3 +71,13 @@ export type {
   SolanaBalance,
   SolanaConfirmationStatus,
 } from "./solana-rpc";
+
+// ── CAIP-2 / CAIP-10 ──────────────────────────────────────────────
+export {
+  eip155Reference,
+  isEvmAddress,
+  namespaceOf,
+  parseCaip10,
+} from "./caip";
+export type { Caip10Account } from "./caip";
+export { parseChainId, validateChainId } from "./session-manager/types";
