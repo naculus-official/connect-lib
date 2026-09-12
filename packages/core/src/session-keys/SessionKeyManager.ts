@@ -18,7 +18,7 @@
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils";
-
+import { isValidAddress, isZeroAddress } from "../address-validation";
 import type { StorageAdapter } from "../storage";
 import { createSessionKeyError } from "./errors";
 import {
@@ -33,10 +33,17 @@ import type {
   SessionKeyManagerConfig,
   SessionKeyPair,
   SessionKeyScope,
+  SessionKeyTransaction,
   SignedAuthorization,
   StoredSessionKey,
 } from "./types";
 import { DEFAULT_SESSION_KEY_CONFIG } from "./types";
+
+type OffchainAuthorizationVerifier = (input: {
+  message: string;
+  signature: `0x${string}`;
+  signerAddress: `0x${string}`;
+}) => boolean | Promise<boolean>;
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
@@ -60,9 +67,16 @@ function deriveEncryptionPassword(config: SessionKeyManagerConfig): string {
   if (config.encryptionKey && config.encryptionKey.length > 0) {
     return config.encryptionKey;
   }
-  // Use storage prefix + a fixed internal salt for reproducibility
-  // In production, derive from wallet seed phrase
-  const base = `${config.storagePrefix ?? DEFAULT_SESSION_KEY_CONFIG.storagePrefix}::session_key_encryption_v1`;
+  // `encryptionKey` should be supplied by the host wallet. The deterministic
+  // fallback is retained for backwards compatibility with existing records,
+  // but is intentionally documented as unsuitable for high-value storage.
+  const prefix =
+    config.storagePrefix ?? DEFAULT_SESSION_KEY_CONFIG.storagePrefix;
+  // Preserve the pre-0.2 derivation when no salt is supplied so existing
+  // encrypted records remain decryptable after upgrading.
+  const base = config.encryptionSalt
+    ? `${prefix}::${config.encryptionSalt}::session_key_encryption_v1`
+    : `${prefix}::session_key_encryption_v1`;
   return sha256(base).reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
 }
 
@@ -74,6 +88,7 @@ export class SessionKeyManager {
   private encryptionPassword: string;
   private activeBundle: SessionKeyBundle | null = null;
   private cache: Map<string, StoredSessionKey> = new Map();
+  private sessionLocks: Map<string, Promise<void>> = new Map();
 
   constructor(
     config?: SessionKeyManagerConfig,
@@ -109,6 +124,17 @@ export class SessionKeyManager {
   ): Promise<SessionKeyInfo> {
     // Validate scope
     const fullScope = this.resolveScope(scope);
+    this.validateScopeInput(fullScope);
+
+    if (
+      signerAddress !== undefined &&
+      (!isValidAddress(signerAddress, "eip155") || isZeroAddress(signerAddress))
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "signerAddress must be a non-zero EVM address",
+      );
+    }
 
     if (
       this.config.requireAllowedContracts &&
@@ -133,6 +159,7 @@ export class SessionKeyManager {
       undefined, // salt (auto-generated)
       this.config.pbkdf2Iterations,
       publicKeyHex as `0x${string}`, // pass the computed public key
+      { unsafeAllowWeakKdf: this.config.unsafeAllowWeakKdf },
     );
 
     // Create stored record
@@ -190,12 +217,14 @@ export class SessionKeyManager {
    * Sets status to "revoked" and invalidates the cached bundle.
    */
   async revokeSession(sessionId: string): Promise<void> {
-    await this.storage.updateStatus(sessionId, "revoked");
-    this.cache.delete(sessionId);
+    await this.storage.withKeyLock(sessionId, async () => {
+      await this.storage.updateStatus(sessionId, "revoked");
+      this.cache.delete(sessionId);
 
-    if (this.activeBundle?.id === sessionId) {
-      this.activeBundle = null;
-    }
+      if (this.activeBundle?.id === sessionId) {
+        this.activeBundle = null;
+      }
+    });
   }
 
   // ─── Get Bundle (decrypted, for signing) ─────────────────────────────
@@ -208,13 +237,10 @@ export class SessionKeyManager {
    * @returns Decrypted SessionKeyBundle or throws
    */
   async getSessionBundle(sessionId: string): Promise<SessionKeyBundle> {
-    // Check active bundle cache
-    if (this.activeBundle?.id === sessionId) {
-      return this.activeBundle;
-    }
-
-    const stored =
-      (await this.storage.get(sessionId)) ?? this.cache.get(sessionId) ?? null;
+    // Always re-read the record before returning a cached private key. A
+    // second tab may have revoked or changed authorization since the last
+    // call; returning a stale bundle would bypass that lifecycle decision.
+    const stored = await this.readStoredSession(sessionId);
     if (!stored) {
       throw createSessionKeyError("session_key_not_found", sessionId);
     }
@@ -254,48 +280,82 @@ export class SessionKeyManager {
   async signWithSessionKey(
     sessionId: string,
     messageHash: `0x${string}`,
+    tx: SessionKeyTransaction = {},
   ): Promise<`0x${string}`> {
-    const bundle = await this.getSessionBundle(sessionId);
-
-    // Sign with secp256k1
-    const hashBytes = hexToBytes(messageHash.slice(2));
-    const sig = secp256k1.sign(
-      hashBytes,
-      hexToBytes(bundle.privateKey.slice(2)),
+    // The storage lock covers the complete check/sign/accounting sequence so
+    // two managers (or two browser tabs using Web Locks) cannot both consume
+    // the same remaining budget.
+    return this.storage.withKeyLock(sessionId, () =>
+      this.withSessionLock(sessionId, async () => {
+        const stored = await this.readStoredSession(sessionId);
+        if (!stored) {
+          throw createSessionKeyError("session_key_not_found", sessionId);
+        }
+        return this.signStoredSessionKey(stored, messageHash, tx);
+      }),
     );
-    const signature = sig.toCompactHex();
-    const v = sig.recovery !== null ? sig.recovery + 27 : 27;
-    const r = signature.slice(0, 64);
-    const s = signature.slice(64, 128);
-    const vHex = v.toString(16).padStart(2, "0");
+  }
 
-    // Increment usage
-    try {
-      await this.storage.incrementUsage(sessionId);
-    } catch {
-      // Non-critical: usage tracking best-effort
-    }
-
-    return `0x${r}${s}${vHex}` as `0x${string}`;
+  /**
+   * Revalidate a signed off-chain policy and consume its budget in one locked
+   * operation. Product execution flows should use this method instead of a
+   * separate `verifyOffchainAuthorization()` + `signWithSessionKey()` pair,
+   * which would leave a cross-tab authorization-change window between calls.
+   */
+  async signWithVerifiedOffchainAuthorization(
+    sessionId: string,
+    buildExpectedMessage: (policy: SessionKeyInfo) => string,
+    verify: OffchainAuthorizationVerifier,
+    messageHash: `0x${string}`,
+    tx: SessionKeyTransaction = {},
+  ): Promise<`0x${string}`> {
+    return this.storage.withKeyLock(sessionId, () =>
+      this.withSessionLock(sessionId, async () => {
+        this.assertMessageHash(messageHash);
+        const stored = await this.readStoredSession(sessionId);
+        if (!stored) {
+          throw createSessionKeyError("session_key_not_found", sessionId);
+        }
+        this.validateSessionStatus(stored);
+        const expectedMessage = buildExpectedMessage(
+          this.toSessionKeyInfo(stored),
+        );
+        if (
+          !(await this.verifyStoredOffchainAuthorization(
+            stored,
+            expectedMessage,
+            verify,
+          ))
+        ) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "Off-chain authorization no longer matches the signed policy",
+          );
+        }
+        return this.signStoredSessionKey(stored, messageHash, tx);
+      }),
+    );
   }
 
   /**
    * Check whether a session key's scope allows a given transaction.
-   * Updates usage tracking before returning.
+   * Reads the authoritative usage counters before returning.
    */
   async checkSessionScope(
     sessionId: string,
-    tx: {
-      to?: string;
-      value?: string;
-      data?: string;
-      chainId?: number;
-      gas?: string;
-    },
+    tx: SessionKeyTransaction,
   ): Promise<ScopeCheckResult> {
-    let stored = this.cache.get(sessionId) ?? null;
-    if (!stored) {
-      stored = (await this.storage.get(sessionId)) ?? null;
+    let stored: StoredSessionKey | null;
+    try {
+      stored = await this.readStoredSession(sessionId);
+    } catch (error) {
+      return {
+        valid: false,
+        reason:
+          error instanceof Error
+            ? error.message
+            : "Session key storage unavailable",
+      };
     }
     if (!stored) {
       return { valid: false, reason: "Session key not found" };
@@ -307,7 +367,13 @@ export class SessionKeyManager {
       return { valid: false, reason: e.message ?? "Session key invalid" };
     }
 
-    return this.checkScopeAgainstTx(stored.scope, stored.useCount, tx);
+    return this.checkScopeAgainstTx(
+      stored.scope,
+      stored.useCount,
+      tx,
+      stored.accumulatedValue,
+      stored.accumulatedGas,
+    );
   }
 
   // ─── Update Authorization ────────────────────────────────────────────
@@ -320,14 +386,155 @@ export class SessionKeyManager {
     sessionId: string,
     authorization: SignedAuthorization,
   ): Promise<void> {
-    const keys = await this.storage.loadAll();
-    const stored = keys.find((k) => k.id === sessionId);
-    if (!stored) {
-      throw createSessionKeyError("session_key_not_found", sessionId);
+    await this.storage.withKeyLock(sessionId, async () => {
+      const stored = await this.readStoredSession(sessionId);
+      if (!stored) {
+        throw createSessionKeyError("session_key_not_found", sessionId);
+      }
+      if (
+        authorization.type !== stored.scope.mode ||
+        !isValidAddress(authorization.signerAddress, "eip155") ||
+        isZeroAddress(authorization.signerAddress) ||
+        (stored.authorization.signerAddress !==
+          "0x0000000000000000000000000000000000000000" &&
+          authorization.signerAddress.toLowerCase() !==
+            stored.authorization.signerAddress.toLowerCase())
+      ) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          "Authorization type or signer address does not match the session key",
+        );
+      }
+      if (authorization.type === "eip7702" && !authorization.authorization) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          "EIP-7702 authorization bytes are required",
+        );
+      }
+      if (
+        authorization.type === "offchain" &&
+        !/^0x[0-9a-fA-F]{130}$/.test(authorization.rawSignature ?? "")
+      ) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          "Off-chain authorization requires a 65-byte EVM signature",
+        );
+      }
+      stored.authorization = authorization;
+      await this.storage.save(stored);
+      this.cache.set(stored.id, stored);
+    });
+  }
+
+  /**
+   * Verify a persisted off-chain authorization without exposing its signature
+   * through the public session model.
+   *
+   * The caller supplies the chain-specific verifier. Core first binds the
+   * stored signature to the exact expected message and signer, so altered
+   * scope/origin metadata cannot become authorized merely because a signature
+   * field is present in browser storage.
+   */
+  async verifyOffchainAuthorization(
+    sessionId: string,
+    expectedMessage: string,
+    verify: OffchainAuthorizationVerifier,
+  ): Promise<boolean> {
+    const stored = await this.readStoredSession(sessionId);
+    if (!stored) return false;
+    return this.verifyStoredOffchainAuthorization(
+      stored,
+      expectedMessage,
+      verify,
+    );
+  }
+
+  private async verifyStoredOffchainAuthorization(
+    stored: StoredSessionKey,
+    expectedMessage: string,
+    verify: OffchainAuthorizationVerifier,
+  ): Promise<boolean> {
+    const authorization = stored.authorization;
+    if (
+      authorization.type !== "offchain" ||
+      authorization.message !== expectedMessage ||
+      !/^0x[0-9a-fA-F]{130}$/.test(authorization.rawSignature ?? "") ||
+      !isValidAddress(authorization.signerAddress, "eip155") ||
+      isZeroAddress(authorization.signerAddress)
+    ) {
+      return false;
     }
-    stored.authorization = authorization;
-    await this.storage.save(stored);
-    this.cache.set(stored.id, stored);
+
+    try {
+      return Boolean(
+        await verify({
+          message: authorization.message,
+          signature: authorization.rawSignature as `0x${string}`,
+          signerAddress: authorization.signerAddress,
+        }),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private assertMessageHash(messageHash: `0x${string}`): void {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(messageHash)) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "messageHash must be exactly 32 bytes",
+      );
+    }
+  }
+
+  /** Sign and account for one authoritative record while its key lock is held. */
+  private async signStoredSessionKey(
+    stored: StoredSessionKey,
+    messageHash: `0x${string}`,
+    tx: SessionKeyTransaction,
+  ): Promise<`0x${string}`> {
+    this.assertMessageHash(messageHash);
+    this.validateSessionStatus(stored);
+    const check = this.checkScopeAgainstTx(
+      stored.scope,
+      stored.useCount,
+      tx,
+      stored.accumulatedValue,
+      stored.accumulatedGas,
+    );
+    if (!check.valid) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        check.reason ?? stored.id,
+      );
+    }
+
+    const privateKey = decryptPrivateKey(
+      stored.keyPair,
+      this.encryptionPassword,
+      this.config.pbkdf2Iterations,
+    );
+    this.activeBundle = {
+      id: stored.id,
+      privateKey,
+      scope: stored.scope,
+      authorization: stored.authorization,
+      signerAddress: stored.authorization.signerAddress,
+    };
+    const sig = secp256k1.sign(
+      hexToBytes(messageHash.slice(2)),
+      hexToBytes(privateKey.slice(2)),
+    );
+    const compact = sig.toCompactHex();
+    const v = sig.recovery !== null ? sig.recovery + 27 : 27;
+    const signature =
+      `0x${compact}${v.toString(16).padStart(2, "0")}` as `0x${string}`;
+
+    // Usage accounting is part of authorization, not best-effort telemetry.
+    // If it cannot be persisted, do not return a usable signature.
+    await this.storage.incrementUsageUnlocked(stored.id, tx);
+    this.cache.delete(stored.id);
+    return signature;
   }
 
   // ─── Clear ───────────────────────────────────────────────────────────
@@ -343,11 +550,24 @@ export class SessionKeyManager {
 
   // ─── Private Helpers ─────────────────────────────────────────────────
 
+  /** Read the authoritative record; never authorize from a stale cache. */
+  private async readStoredSession(
+    sessionId: string,
+  ): Promise<StoredSessionKey | null> {
+    if (!this.storage.isAvailable()) {
+      throw createSessionKeyError("session_key_storage_unavailable");
+    }
+    try {
+      return await this.storage.get(sessionId);
+    } catch (error) {
+      throw createSessionKeyError("session_key_storage_unavailable", error);
+    }
+  }
+
   /**
    * Resolve the final scope by merging user-provided overrides with defaults.
    */
   private resolveScope(scope?: Partial<SessionKeyScope>): SessionKeyScope {
-    const now = Math.floor(Date.now() / 1000);
     const defaultExpiry = Math.floor(
       (Date.now() + this.config.defaultExpiryMs) / 1000,
     );
@@ -369,6 +589,84 @@ export class SessionKeyManager {
     };
   }
 
+  /** Reject scope values that cannot represent a canonical EVM policy. */
+  private validateScopeInput(scope: SessionKeyScope): void {
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!Number.isSafeInteger(scope.expiry) || scope.expiry <= nowSec) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "Session expiry must be a future Unix timestamp",
+      );
+    }
+    if (
+      scope.maxTxCount !== undefined &&
+      (!Number.isSafeInteger(scope.maxTxCount) || scope.maxTxCount <= 0)
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "maxTxCount must be a positive safe integer",
+      );
+    }
+    for (const [name, value] of [
+      ["maxTotalGas", scope.maxTotalGas],
+      ["maxGasPerTx", scope.maxGasPerTx],
+      ["maxTotalValue", scope.maxTotalValue],
+      ["maxValuePerTx", scope.maxValuePerTx],
+    ] as const) {
+      if (value !== undefined && value < 0n) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          `${name} cannot be negative`,
+        );
+      }
+    }
+    if (
+      scope.allowedChainIds?.some(
+        (chainId) => !Number.isSafeInteger(chainId) || chainId <= 0,
+      )
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "allowedChainIds must contain positive safe integers",
+      );
+    }
+    if (
+      scope.allowedContracts?.some(
+        (address) =>
+          !isValidAddress(address, "eip155") || isZeroAddress(address),
+      )
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "allowedContracts must contain non-zero EVM addresses",
+      );
+    }
+    if (
+      scope.allowedMethods?.some(
+        (selector) => !/^0x[0-9a-fA-F]{8}$/.test(selector),
+      )
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "allowedMethods must contain 4-byte hex selectors",
+      );
+    }
+    if (scope.tokenAllowances) {
+      for (const [address, amount] of Object.entries(scope.tokenAllowances)) {
+        if (
+          !isValidAddress(address, "eip155") ||
+          isZeroAddress(address) ||
+          amount < 0n
+        ) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "tokenAllowances must contain non-negative values keyed by non-zero EVM addresses",
+          );
+        }
+      }
+    }
+  }
+
   /**
    * Validate that a session key is active and not expired.
    */
@@ -383,7 +681,7 @@ export class SessionKeyManager {
 
     // Auto-expire if past expiry
     const nowSec = Math.floor(Date.now() / 1000);
-    if (stored.scope.expiry < nowSec) {
+    if (stored.scope.expiry <= nowSec) {
       // Update stored status to expired (fire-and-forget)
       this.storage.updateStatus(stored.id, "expired").catch(() => {});
       throw createSessionKeyError("session_key_expired", stored.id);
@@ -407,17 +705,44 @@ export class SessionKeyManager {
   private checkScopeAgainstTx(
     scope: SessionKeyScope,
     currentUseCount: number,
-    tx: {
-      to?: string;
-      value?: string;
-      data?: string;
-      chainId?: number;
-      gas?: string;
-    },
+    tx: SessionKeyTransaction,
+    accumulatedValue = 0n,
+    accumulatedGas = 0n,
   ): ScopeCheckResult {
     const result: ScopeCheckResult = { valid: true };
-    const txValue = tx.value ? BigInt(tx.value) : 0n;
-    const txGas = tx.gas ? BigInt(tx.gas) : 0n;
+    let txValue = 0n;
+    let txGas = 0n;
+    try {
+      txValue = tx.value ? BigInt(tx.value) : 0n;
+      txGas = tx.gas ? BigInt(tx.gas) : 0n;
+    } catch {
+      return {
+        valid: false,
+        reason: "Transaction value and gas must be valid integers",
+      };
+    }
+    if (txValue < 0n || txGas < 0n) {
+      return {
+        valid: false,
+        reason: "Transaction value and gas cannot be negative",
+      };
+    }
+    if (
+      tx.chainId !== undefined &&
+      (!Number.isSafeInteger(tx.chainId) || tx.chainId <= 0)
+    ) {
+      return {
+        valid: false,
+        reason: "Transaction chain ID must be a positive safe integer",
+      };
+    }
+
+    if (
+      (scope.maxGasPerTx !== undefined || scope.maxTotalGas !== undefined) &&
+      !tx.gas
+    ) {
+      return { valid: false, reason: "Transaction gas is required by scope" };
+    }
 
     // Chain check
     if (
@@ -431,6 +756,11 @@ export class SessionKeyManager {
           reason: `Chain ${tx.chainId} not in allowed list: ${scope.allowedChainIds.join(", ")}`,
         };
       }
+    } else if (scope.allowedChainIds?.length) {
+      return {
+        valid: false,
+        reason: "Transaction chain ID is required by scope",
+      };
     }
 
     // Contract check
@@ -445,6 +775,11 @@ export class SessionKeyManager {
           reason: `Contract ${tx.to} not in allowed list`,
         };
       }
+    } else if (scope.allowedContracts?.length) {
+      return {
+        valid: false,
+        reason: "Transaction target is required by scope",
+      };
     }
 
     // Forbidden methods check (MUST come before allowed methods — a method
@@ -454,8 +789,12 @@ export class SessionKeyManager {
       tx.data &&
       tx.data.length >= 10
     ) {
-      const methodId = tx.data.slice(0, 10);
-      if (this.config.forbiddenMethods.includes(methodId)) {
+      const methodId = tx.data.slice(0, 10).toLowerCase();
+      if (
+        this.config.forbiddenMethods.some(
+          (method) => method.toLowerCase() === methodId,
+        )
+      ) {
         return {
           valid: false,
           reason: `Method ${methodId} is forbidden for session keys`,
@@ -470,13 +809,19 @@ export class SessionKeyManager {
       tx.data &&
       tx.data.length >= 10
     ) {
-      const methodId = tx.data.slice(0, 10) as `0x${string}`;
-      if (!scope.allowedMethods.includes(methodId)) {
+      const methodId = tx.data.slice(0, 10).toLowerCase();
+      if (
+        !scope.allowedMethods.some(
+          (method) => method.toLowerCase() === methodId,
+        )
+      ) {
         return {
           valid: false,
           reason: `Method ${methodId} not in allowed list`,
         };
       }
+    } else if (scope.allowedMethods?.length) {
+      return { valid: false, reason: "Transaction data is required by scope" };
     }
 
     // Value checks
@@ -487,10 +832,13 @@ export class SessionKeyManager {
       };
     }
 
-    if (scope.maxTotalValue !== undefined && txValue > scope.maxTotalValue) {
+    if (
+      scope.maxTotalValue !== undefined &&
+      accumulatedValue + txValue > scope.maxTotalValue
+    ) {
       return {
         valid: false,
-        reason: `Transaction value ${txValue} exceeds max total value ${scope.maxTotalValue}`,
+        reason: `Cumulative value ${accumulatedValue + txValue} exceeds max total value ${scope.maxTotalValue}`,
       };
     }
 
@@ -499,6 +847,16 @@ export class SessionKeyManager {
       return {
         valid: false,
         reason: `Gas ${txGas} exceeds max per-tx gas ${scope.maxGasPerTx}`,
+      };
+    }
+
+    if (
+      scope.maxTotalGas !== undefined &&
+      accumulatedGas + txGas > scope.maxTotalGas
+    ) {
+      return {
+        valid: false,
+        reason: `Cumulative gas ${accumulatedGas + txGas} exceeds max total gas ${scope.maxTotalGas}`,
       };
     }
 
@@ -512,7 +870,7 @@ export class SessionKeyManager {
 
     // Populate remaining budgets
     if (scope.maxTotalValue !== undefined) {
-      result.remainingValue = scope.maxTotalValue - txValue;
+      result.remainingValue = scope.maxTotalValue - accumulatedValue - txValue;
     }
     if (scope.maxGasPerTx !== undefined) {
       result.remainingGas = scope.maxGasPerTx - txGas;
@@ -524,6 +882,28 @@ export class SessionKeyManager {
     return result;
   }
 
+  /** Serialize sign/check/usage updates per key within this manager instance. */
+  private async withSessionLock<T>(
+    sessionId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.sessionLocks.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.sessionLocks.set(sessionId, gate);
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.sessionLocks.get(sessionId) === gate) {
+        this.sessionLocks.delete(sessionId);
+      }
+    }
+  }
+
   /**
    * Reload the cache from storage, auto-marking expired keys.
    */
@@ -533,7 +913,7 @@ export class SessionKeyManager {
     let changed = false;
 
     for (const key of keys) {
-      if (key.status === "active" && key.scope.expiry < nowSec) {
+      if (key.status === "active" && key.scope.expiry <= nowSec) {
         key.status = "expired";
         changed = true;
       }
@@ -565,6 +945,13 @@ export class SessionKeyManager {
       expiresAt: stored.scope.expiry * 1000,
       useCount: stored.useCount,
       signerAddress: stored.authorization.signerAddress,
+      authorized: Boolean(
+        stored.authorization.rawSignature || stored.authorization.authorization,
+      ),
+      authorizationType: stored.authorization.type,
+      ...(stored.authorization.message
+        ? { authorizationMessage: stored.authorization.message }
+        : {}),
     };
   }
 }

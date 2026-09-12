@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
-import { SessionKeyManager } from "../SessionKeyManager";
+import { sha256 } from "@noble/hashes/sha256";
+import { bytesToHex } from "@noble/hashes/utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorageAdapter } from "../../storage";
-import type { SessionKeyScope, SessionKeyInfo } from "../types";
+import { SessionKeyManager } from "../SessionKeyManager";
+import { decryptPrivateKey, SessionKeyStorage } from "../storage";
+import type { SessionKeyInfo, SessionKeyScope } from "../types";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
@@ -14,10 +17,30 @@ function createManager(config?: Record<string, unknown>) {
       defaultMaxTotalValue: BigInt("1000000000000000000"), // 1 ETH
       requireAllowedContracts: false,
       pbkdf2Iterations: 10, // FAST for testing (default: 600_000)
+      unsafeAllowWeakKdf: true,
       encryptionKey: "test-key",
       ...config,
     },
     new MemoryStorageAdapter(),
+  );
+}
+
+function createManagerWithAdapter(
+  adapter: MemoryStorageAdapter,
+  config: Record<string, unknown> = {},
+) {
+  return new SessionKeyManager(
+    {
+      defaultExpiryMs: 60_000,
+      defaultMaxTxCount: 5,
+      defaultMaxTotalValue: BigInt("1000000000000000000"),
+      requireAllowedContracts: false,
+      pbkdf2Iterations: 10,
+      unsafeAllowWeakKdf: true,
+      encryptionKey: "test-key",
+      ...config,
+    },
+    adapter,
   );
 }
 
@@ -27,14 +50,17 @@ function makeScope(overrides?: Partial<SessionKeyScope>): SessionKeyScope {
     mode: "offchain",
     maxTxCount: 10,
     maxTotalValue: BigInt("100000000000000000"), // 0.1 ETH
-    allowedContracts: ["0xdAC17F958D2ee523a2206206994597C13D831ec7" as `0x${string}`],
+    allowedContracts: [
+      "0xdAC17F958D2ee523a2206206994597C13D831ec7" as `0x${string}`,
+    ],
     allowedMethods: ["0xa9059cbb"], // transfer(address,uint256)
     allowedChainIds: [1],
     ...overrides,
   };
 }
 
-const signerAddress = "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18" as `0x${string}`;
+const signerAddress =
+  "0x742D35CC6634C0532925a3B844Bc9E7595F2bD18" as `0x${string}`;
 const testTx = {
   to: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
   value: "0x2386f26fc10000", // 0.01 ETH in wei (10^16 = 0.01 * 10^18)
@@ -64,6 +90,8 @@ describe("SessionKeyManager", () => {
       expect(info.useCount).toBe(0);
       expect(info.signerAddress).toBe(signerAddress);
       expect(info.scope.mode).toBe("offchain");
+      expect(info.authorized).toBe(false);
+      expect(info.authorizationType).toBe("offchain");
     });
 
     it("should create a session key with custom scope", async () => {
@@ -89,6 +117,53 @@ describe("SessionKeyManager", () => {
       await expect(
         strictManager.createSessionKey({ mode: "offchain" }, signerAddress),
       ).rejects.toThrow();
+    });
+
+    it("should reject non-canonical scope limits", async () => {
+      await expect(
+        manager.createSessionKey(
+          makeScope({ allowedChainIds: [0] }),
+          signerAddress,
+        ),
+      ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+      await expect(
+        manager.createSessionKey(
+          makeScope({ allowedMethods: ["0x1234"] }),
+          signerAddress,
+        ),
+      ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+    });
+
+    it("should preserve the legacy fallback password when no encryption salt is set", async () => {
+      const adapter = new MemoryStorageAdapter();
+      const storagePrefix = "legacy-session-prefix";
+      const legacyCompatibleManager = new SessionKeyManager(
+        {
+          storagePrefix,
+          encryptionKey: "",
+          encryptionSalt: "",
+          defaultExpiryMs: 60_000,
+          requireAllowedContracts: false,
+          pbkdf2Iterations: 10,
+          unsafeAllowWeakKdf: true,
+        },
+        adapter,
+      );
+
+      const info = await legacyCompatibleManager.createSessionKey(
+        undefined,
+        signerAddress,
+      );
+      const stored = await new SessionKeyStorage(adapter).get(info.id);
+      const legacyPassword = bytesToHex(
+        sha256(`${storagePrefix}::session_key_encryption_v1`),
+      );
+
+      expect(stored).not.toBeNull();
+      expect(decryptPrivateKey(stored!.keyPair, legacyPassword, 10)).toMatch(
+        /^0x[0-9a-f]+$/i,
+      );
+      await legacyCompatibleManager.clearAll();
     });
   });
 
@@ -117,11 +192,20 @@ describe("SessionKeyManager", () => {
     });
 
     it("should mark expired keys as expired", async () => {
-      const expiredManager = createManager({ defaultExpiryMs: -100_000 }); // well in the past
-      const info = await expiredManager.createSessionKey(undefined, signerAddress);
+      vi.useFakeTimers();
+      try {
+        const expiredManager = createManager({ defaultExpiryMs: 60_000 });
+        const info = await expiredManager.createSessionKey(
+          undefined,
+          signerAddress,
+        );
+        vi.advanceTimersByTime(120_000);
 
-      const sessions = await expiredManager.listSessions();
-      expect(sessions.find((s) => s.id === info.id)?.status).toBe("expired");
+        const sessions = await expiredManager.listSessions();
+        expect(sessions.find((s) => s.id === info.id)?.status).toBe("expired");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -141,7 +225,25 @@ describe("SessionKeyManager", () => {
       const info = await manager.createSessionKey(undefined, signerAddress);
       await manager.revokeSession(info.id);
 
-      await expect(manager.signWithSessionKey(info.id, "0x" + "ab".repeat(32) as `0x${string}`)).rejects.toThrow();
+      await expect(
+        manager.signWithSessionKey(
+          info.id,
+          ("0x" + "ab".repeat(32)) as `0x${string}`,
+          testTx,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("should observe revocation performed by another manager", async () => {
+      const adapter = new MemoryStorageAdapter();
+      const first = createManagerWithAdapter(adapter);
+      const second = createManagerWithAdapter(adapter);
+      const info = await first.createSessionKey(makeScope(), signerAddress);
+
+      await second.revokeSession(info.id);
+
+      await expect(first.getSessionBundle(info.id)).rejects.toThrow("revoked");
+      await first.clearAll();
     });
   });
 
@@ -154,7 +256,9 @@ describe("SessionKeyManager", () => {
 
     it("should reject transactions with wrong contract", async () => {
       const scope = makeScope({
-        allowedContracts: ["0x1111111111111111111111111111111111111111" as `0x${string}`],
+        allowedContracts: [
+          "0x1111111111111111111111111111111111111111" as `0x${string}`,
+        ],
       });
       const info = await manager.createSessionKey(scope, signerAddress);
       const result = await manager.checkSessionScope(info.id, testTx);
@@ -201,38 +305,121 @@ describe("SessionKeyManager", () => {
       expect(result.remainingValue).toBeGreaterThan(0n);
       expect(result.remainingTxCount).toBe(4); // 5 - 0 - 1
     });
+
+    it("should require gas when a gas budget is configured", async () => {
+      const info = await manager.createSessionKey(
+        makeScope({ maxGasPerTx: 100n }),
+        signerAddress,
+      );
+      const result = await manager.checkSessionScope(info.id, testTx);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain("gas is required");
+    });
+
+    it("should reject malformed numeric transaction fields", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      const result = await manager.checkSessionScope(info.id, {
+        ...testTx,
+        value: "not-a-number",
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain("valid integers");
+    });
+
+    it("should reject a non-positive transaction chain ID", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      const result = await manager.checkSessionScope(info.id, {
+        ...testTx,
+        chainId: 0,
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain("positive safe integer");
+    });
   });
 
   describe("signWithSessionKey", () => {
     it("should produce a valid secp256k1 signature", async () => {
       const info = await manager.createSessionKey(makeScope(), signerAddress);
-      const messageHash = "0x" + "ab".repeat(32) as `0x${string}`;
+      const messageHash = ("0x" + "ab".repeat(32)) as `0x${string}`;
 
-      const signature = await manager.signWithSessionKey(info.id, messageHash);
+      const signature = await manager.signWithSessionKey(
+        info.id,
+        messageHash,
+        testTx,
+      );
       expect(signature).toMatch(/^0x[a-f0-9]{130}$/i); // 65 bytes (r=32, s=32, v=1)
+    });
+
+    it("should enforce a transaction budget across managers", async () => {
+      const adapter = new MemoryStorageAdapter();
+      const first = createManagerWithAdapter(adapter, { defaultMaxTxCount: 1 });
+      const second = createManagerWithAdapter(adapter, {
+        defaultMaxTxCount: 1,
+      });
+      const info = await first.createSessionKey(
+        makeScope({ maxTxCount: 1 }),
+        signerAddress,
+      );
+      const hash = ("0x" + "ab".repeat(32)) as `0x${string}`;
+
+      const results = await Promise.allSettled([
+        first.signWithSessionKey(info.id, hash, testTx),
+        second.signWithSessionKey(info.id, hash, testTx),
+      ]);
+
+      expect(
+        results.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(
+        results.filter((result) => result.status === "rejected"),
+      ).toHaveLength(1);
+      await first.clearAll();
     });
 
     it("should throw for non-existent session key", async () => {
       await expect(
-        manager.signWithSessionKey("nonexistent-id", "0x" + "ab".repeat(32) as `0x${string}`),
+        manager.signWithSessionKey(
+          "nonexistent-id",
+          ("0x" + "ab".repeat(32)) as `0x${string}`,
+          testTx,
+        ),
       ).rejects.toThrow();
     });
 
     it("should throw for expired session key", async () => {
-      const expiredManager = createManager({ defaultExpiryMs: -100_000 }); // well in the past
-      const info = await expiredManager.createSessionKey(undefined, signerAddress);
+      vi.useFakeTimers();
+      try {
+        const expiredManager = createManager({ defaultExpiryMs: 60_000 });
+        const info = await expiredManager.createSessionKey(
+          undefined,
+          signerAddress,
+        );
+        vi.advanceTimersByTime(120_000);
 
-      await expect(
-        expiredManager.signWithSessionKey(info.id, "0x" + "ab".repeat(32) as `0x${string}`),
-      ).rejects.toThrow();
+        await expect(
+          expiredManager.signWithSessionKey(
+            info.id,
+            ("0x" + "ab".repeat(32)) as `0x${string}`,
+            testTx,
+          ),
+        ).rejects.toThrow();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
   describe("setAuthorization", () => {
     it("should attach an authorization to an existing key", async () => {
-      const info = await manager.createSessionKey(undefined, signerAddress);
+      const info = await manager.createSessionKey(
+        { mode: "eip7702" },
+        signerAddress,
+      );
       await manager.setAuthorization(info.id, {
-        signerAddress: "0x1234567890123456789012345678901234567890" as `0x${string}`,
+        signerAddress,
         type: "eip7702",
         authorization: "0xauthorizationdata",
       });
@@ -240,7 +427,151 @@ describe("SessionKeyManager", () => {
       // Verify by checking the bundle (authorization is included)
       const bundle = await manager.getSessionBundle(info.id);
       expect(bundle.authorization.type).toBe("eip7702");
-      expect(bundle.authorization.signerAddress).toBe("0x1234567890123456789012345678901234567890");
+      expect(bundle.authorization.signerAddress).toBe(signerAddress);
+    });
+
+    it("reports an attached off-chain authorization without exposing secrets", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      const message = "Naculus Session Policy v1\nSession: test";
+      const rawSignature = `0x${"12".repeat(65)}` as `0x${string}`;
+
+      await manager.setAuthorization(info.id, {
+        signerAddress,
+        type: "offchain",
+        rawSignature,
+        message,
+      });
+
+      const authorized = (await manager.listSessions()).find(
+        (session) => session.id === info.id,
+      );
+      expect(authorized).toMatchObject({
+        authorized: true,
+        authorizationType: "offchain",
+        authorizationMessage: message,
+      });
+      expect(authorized).not.toHaveProperty("rawSignature");
+      expect(authorized).not.toHaveProperty("privateKey");
+    });
+
+    it("rejects a malformed off-chain authorization signature", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      await expect(
+        manager.setAuthorization(info.id, {
+          signerAddress,
+          type: "offchain",
+          rawSignature: "0x1234",
+        }),
+      ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+      expect(
+        (await manager.listSessions()).find((item) => item.id === info.id)
+          ?.authorized,
+      ).toBe(false);
+    });
+
+    it("revalidates a persisted authorization against the exact message", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      const message = "Naculus Session Policy v1\nSession: test";
+      const rawSignature = `0x${"12".repeat(65)}` as `0x${string}`;
+      await manager.setAuthorization(info.id, {
+        signerAddress,
+        type: "offchain",
+        rawSignature,
+        message,
+      });
+
+      const verify = vi.fn().mockResolvedValue(true);
+      await expect(
+        manager.verifyOffchainAuthorization(info.id, message, verify),
+      ).resolves.toBe(true);
+      expect(verify).toHaveBeenCalledWith({
+        message,
+        signature: rawSignature,
+        signerAddress,
+      });
+
+      await expect(
+        manager.verifyOffchainAuthorization(
+          info.id,
+          `${message} altered`,
+          verify,
+        ),
+      ).resolves.toBe(false);
+      expect(verify).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed when the chain-specific verifier rejects or throws", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      const message = "Naculus Session Policy v1\nSession: test";
+      await manager.setAuthorization(info.id, {
+        signerAddress,
+        type: "offchain",
+        rawSignature: `0x${"12".repeat(65)}`,
+        message,
+      });
+
+      await expect(
+        manager.verifyOffchainAuthorization(info.id, message, () => false),
+      ).resolves.toBe(false);
+      await expect(
+        manager.verifyOffchainAuthorization(info.id, message, () => {
+          throw new Error("invalid signature");
+        }),
+      ).resolves.toBe(false);
+    });
+
+    it("revalidates authorization inside the locked signing operation", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      const message = "Naculus Session Policy v1\nSession: test";
+      const rawSignature = `0x${"12".repeat(65)}` as `0x${string}`;
+      const hash = `0x${"ab".repeat(32)}` as `0x${string}`;
+      await manager.setAuthorization(info.id, {
+        signerAddress,
+        type: "offchain",
+        rawSignature,
+        message,
+      });
+
+      const verify = vi.fn().mockResolvedValue(true);
+      await expect(
+        manager.signWithVerifiedOffchainAuthorization(
+          info.id,
+          () => message,
+          verify,
+          hash,
+          testTx,
+        ),
+      ).resolves.toMatch(/^0x[a-f0-9]{130}$/i);
+      expect(verify).toHaveBeenCalledOnce();
+      expect(
+        (await manager.listSessions()).find((item) => item.id === info.id)
+          ?.useCount,
+      ).toBe(1);
+    });
+
+    it("does not sign or consume budget when locked authorization verification fails", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+      const message = "Naculus Session Policy v1\nSession: test";
+      await manager.setAuthorization(info.id, {
+        signerAddress,
+        type: "offchain",
+        rawSignature: `0x${"12".repeat(65)}`,
+        message,
+      });
+
+      await expect(
+        manager.signWithVerifiedOffchainAuthorization(
+          info.id,
+          () => `${message} altered`,
+          () => true,
+          `0x${"ab".repeat(32)}` as `0x${string}`,
+          testTx,
+        ),
+      ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+      expect(
+        (await manager.listSessions()).find((item) => item.id === info.id)
+          ?.useCount,
+      ).toBe(0);
     });
   });
 
@@ -255,8 +586,8 @@ describe("SessionKeyManager", () => {
       expect(scopeCheck.valid).toBe(true);
 
       // Sign
-      const hash = "0x" + "cd".repeat(32) as `0x${string}`;
-      const sig = await manager.signWithSessionKey(info.id, hash);
+      const hash = ("0x" + "cd".repeat(32)) as `0x${string}`;
+      const sig = await manager.signWithSessionKey(info.id, hash, testTx);
       expect(sig).toBeTruthy();
 
       // Revoke

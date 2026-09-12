@@ -101,9 +101,12 @@ export class SessionKeyManager {
       scope,
       status: "active",
       createdAt: session.createdAt,
-      expiresAt: scope.expiry,
+      // SessionKeyInfo timestamps are milliseconds; scope.expiry is Unix seconds.
+      expiresAt: scope.expiry * 1000,
       useCount: 0,
       signerAddress: this._signerAddress,
+      authorized: false,
+      authorizationType: authorization.type,
     };
   }
 
@@ -327,12 +330,15 @@ export class SessionKeyManager {
     }
 
     // Check chain ID
+    if (tx.chainId === undefined) {
+      return {
+        valid: false,
+        reason: "Transaction chainId is required; refusing to guess a network.",
+      };
+    }
     if (scope.allowedChainIds?.length) {
       const txChainId = tx.chainId;
-      if (
-        txChainId !== undefined &&
-        !scope.allowedChainIds.includes(txChainId)
-      ) {
+      if (!scope.allowedChainIds.includes(txChainId)) {
         return {
           valid: false,
           reason: `Chain ID ${txChainId} is not in allowed chain IDs.`,

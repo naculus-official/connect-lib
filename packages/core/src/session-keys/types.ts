@@ -50,6 +50,15 @@ export interface SessionKeyScope {
   mode: "offchain" | "eip7702" | "aa_module";
 }
 
+/** Transaction facts required before a scoped session key may sign. */
+export interface SessionKeyTransaction {
+  to?: string;
+  value?: string;
+  data?: string;
+  chainId?: number;
+  gas?: string;
+}
+
 // ─── Key Pair ──────────────────────────────────────────────────────────
 
 /** A secp256k1 key pair (private key NEVER persisted unencrypted) */
@@ -63,9 +72,11 @@ export interface SessionKeyPair {
 /** Encrypted session key data for local storage */
 export interface EncryptedKeyPair {
   publicKey: `0x${string}`;
-  encryptedPrivateKey: string; // AES-256-GCM ciphertext (hex)
+  encryptedPrivateKey: string; // AES-256-GCM ciphertext + tag (hex)
   iv: string; // Initialization vector (hex)
   salt: string; // KDF salt (hex)
+  /** Storage cipher; omitted only for legacy pre-0.2 records. */
+  algorithm?: "aes-256-gcm" | "legacy-ctr-hmac";
 }
 
 // ─── Authorization ─────────────────────────────────────────────────────
@@ -77,6 +88,9 @@ export interface SignedAuthorization {
 
   /** Off-chain signature of scope hash (if mode === "offchain") */
   rawSignature?: `0x${string}`;
+
+  /** Exact human-readable message signed by the main wallet, when available. */
+  message?: string;
 
   /** Main wallet address that signed this authorization */
   signerAddress: `0x${string}`;
@@ -112,6 +126,10 @@ export interface StoredSessionKey {
 
   /** Number of transactions signed with this key */
   useCount: number;
+  /** Cumulative value spent by this key, when tracked */
+  accumulatedValue?: bigint;
+  /** Cumulative gas budget consumed by this key, when tracked */
+  accumulatedGas?: bigint;
 }
 
 // ─── Public Info (no private key exposure) ─────────────────────────────
@@ -123,9 +141,16 @@ export interface SessionKeyInfo {
   scope: SessionKeyScope;
   status: SessionKeyStatus;
   createdAt: number;
+  /** Expiration timestamp in Unix milliseconds (scope.expiry is seconds). */
   expiresAt: number;
   useCount: number;
   signerAddress: `0x${string}`;
+  /** Whether the main wallet has attached usable authorization material. */
+  authorized?: boolean;
+  /** Authorization mechanism selected by the policy. */
+  authorizationType?: SignedAuthorization["type"];
+  /** Exact signed policy message, safe to display for audit purposes. */
+  authorizationMessage?: string;
 }
 
 // ─── Session Key Status ────────────────────────────────────────────────
@@ -169,17 +194,30 @@ export interface SessionKeyManagerConfig {
   requireAllowedContracts?: boolean;
   /** Forbidden method selectors (default: approve, permit) */
   forbiddenMethods?: string[];
-  /** Key derivation salt for encryption (auto-generated if not provided) */
+  /** Additional salt component for the key derivation fallback. */
   encryptionSalt?: string;
-  /** Password-derived encryption key (hex string). If not provided, a random one is generated on first use. */
+  /** Host-provided password-derived encryption key. Required for high-value use. */
   encryptionKey?: string;
 
   /**
    * PBKDF2 iteration count for key derivation.
-   * Default: 600_000 (OWASP recommended for AES-256 in 2025).
-   * Set lower (e.g. 1000) for testing to avoid timeout.
+   * Default: 600_000 (OWASP recommended for PBKDF2-HMAC-SHA256).
+   *
+   * Values below the default are rejected when encrypting unless
+   * `unsafeAllowWeakKdf` is also set. The encryption password may be
+   * user-supplied, so a low work factor is a real brute-force exposure and
+   * not merely a tuning knob.
    */
   pbkdf2Iterations?: number;
+
+  /**
+   * Permit `pbkdf2Iterations` below the enforced floor.
+   *
+   * Exists so test suites can avoid ~700ms per derivation. Never set this in
+   * production: it is named to be obvious in review and greppable in a
+   * codebase audit.
+   */
+  unsafeAllowWeakKdf?: boolean;
 }
 
 // ─── Defaults ──────────────────────────────────────────────────────────
@@ -198,4 +236,5 @@ export const DEFAULT_SESSION_KEY_CONFIG: Required<SessionKeyManagerConfig> = {
   encryptionSalt: "",
   encryptionKey: "",
   pbkdf2Iterations: 600_000,
+  unsafeAllowWeakKdf: false,
 };

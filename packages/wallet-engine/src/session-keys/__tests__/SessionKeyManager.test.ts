@@ -1,17 +1,25 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TransactionRequest } from "../../signers/types";
 import { SessionKeyManager } from "../SessionKeyManager";
 import type { SessionKeyScope } from "../types";
-import type { TransactionRequest } from "../../signers/types";
 
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
   return {
     getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
-    removeItem: vi.fn((key: string) => { delete store[key]; }),
-    clear: vi.fn(() => { store = {}; }),
-    get length() { return Object.keys(store).length; },
+    setItem: vi.fn((key: string, value: string) => {
+      store[key] = value;
+    }),
+    removeItem: vi.fn((key: string) => {
+      delete store[key];
+    }),
+    clear: vi.fn(() => {
+      store = {};
+    }),
+    get length() {
+      return Object.keys(store).length;
+    },
     key: vi.fn((index: number) => Object.keys(store)[index] ?? null),
   };
 })();
@@ -20,7 +28,7 @@ Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
 
 describe("session-keys / SessionKeyManager", () => {
   const TEST_SEED = new Uint8Array(32).fill(0x42);
-  const TEST_ADDRESS = "0x" + "ab".repeat(20) as `0x${string}`;
+  const TEST_ADDRESS = ("0x" + "ab".repeat(20)) as `0x${string}`;
   let mgr: SessionKeyManager;
 
   beforeEach(() => {
@@ -47,12 +55,17 @@ describe("session-keys / SessionKeyManager", () => {
       expect(info.publicKey).toMatch(/^0x[0-9a-f]{66}$/);
       expect(info.status).toBe("active");
       expect(info.scope.expiry).toBeGreaterThan(Math.floor(Date.now() / 1000));
+      expect(info.expiresAt).toBe(info.scope.expiry * 1000);
       expect(info.signerAddress).toBe(TEST_ADDRESS);
+      expect(info.authorized).toBe(false);
+      expect(info.authorizationType).toBe("offchain");
     });
 
     it("should reject past expiry", async () => {
       await expect(
-        mgr.createSessionKey(makeScope({ expiry: Math.floor(Date.now() / 1000) - 60 })),
+        mgr.createSessionKey(
+          makeScope({ expiry: Math.floor(Date.now() / 1000) - 60 }),
+        ),
       ).rejects.toThrow("future");
     });
 
@@ -70,18 +83,32 @@ describe("session-keys / SessionKeyManager", () => {
 
       const sessions = await mgr.listSessions();
       expect(sessions).toHaveLength(2);
+      expect(sessions[0]?.expiresAt).toBe(sessions[0]?.scope.expiry * 1000);
+      expect(sessions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            authorized: false,
+            authorizationType: "offchain",
+          }),
+        ]),
+      );
     });
 
     it("should exclude expired sessions", async () => {
       // Create a fresh session
-      const good = await mgr.createSessionKey(makeScope({ expiry: Math.floor(Date.now() / 1000) + 100 }));
+      const good = await mgr.createSessionKey(
+        makeScope({ expiry: Math.floor(Date.now() / 1000) + 100 }),
+      );
 
       // Manually insert an already-expired session via storage for testing
       const { SessionKeyStorage } = await import("../storage");
       const { SessionKeyManager: SKM } = await import("../SessionKeyManager");
       const s = new SessionKeyStorage();
       const pair = await (await import("../crypto")).generateSessionKeyPair();
-      const encrypted = await (await import("../crypto")).encryptSessionKey(pair, TEST_SEED);
+      const encrypted = await (await import("../crypto")).encryptSessionKey(
+        pair,
+        TEST_SEED,
+      );
       await s.save({
         id: "sk_expired_test",
         keyPair: encrypted,
@@ -114,11 +141,13 @@ describe("session-keys / SessionKeyManager", () => {
 
       // After revoke, it should not appear in list
       const sessions = await mgr.listSessions();
-      expect(sessions.find(s => s.id === info.id)).toBeUndefined();
+      expect(sessions.find((s) => s.id === info.id)).toBeUndefined();
     });
 
     it("should throw for non-existent session", async () => {
-      await expect(mgr.revokeSession("sk_nonexistent")).rejects.toThrow("not found");
+      await expect(mgr.revokeSession("sk_nonexistent")).rejects.toThrow(
+        "not found",
+      );
     });
 
     it("should throw for already revoked session", async () => {
@@ -151,7 +180,10 @@ describe("session-keys / SessionKeyManager", () => {
       const { SessionKeyStorage } = await import("../storage");
       const s = new SessionKeyStorage();
       const pair = await (await import("../crypto")).generateSessionKeyPair();
-      const encrypted = await (await import("../crypto")).encryptSessionKey(pair, TEST_SEED);
+      const encrypted = await (await import("../crypto")).encryptSessionKey(
+        pair,
+        TEST_SEED,
+      );
       await s.save({
         id: "sk_expired_now",
         keyPair: encrypted,
@@ -172,7 +204,9 @@ describe("session-keys / SessionKeyManager", () => {
         chainId: 1,
       };
 
-      await expect(mgr.signWithSession("sk_expired_now", tx)).rejects.toThrow("expired");
+      await expect(mgr.signWithSession("sk_expired_now", tx)).rejects.toThrow(
+        "expired",
+      );
     });
 
     it("should reject revoked session", async () => {
@@ -192,9 +226,11 @@ describe("session-keys / SessionKeyManager", () => {
     });
 
     it("should reject tx exceeding value per tx limit", async () => {
-      const info = await mgr.createSessionKey(makeScope({
-        maxValuePerTx: BigInt("10000000000000000"), // 0.01 ETH
-      }));
+      const info = await mgr.createSessionKey(
+        makeScope({
+          maxValuePerTx: BigInt("10000000000000000"), // 0.01 ETH
+        }),
+      );
 
       const tx: TransactionRequest = {
         to: "0x" + "cd".repeat(20),
@@ -244,13 +280,17 @@ describe("session-keys / SessionKeyManager", () => {
       await mgr.signWithSession(info.id, tx);
 
       // Second should fail (useCount reached maxTxCount)
-      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow("Transaction count limit");
+      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow(
+        "Transaction count limit",
+      );
     });
 
     it("should reject tx with non-allowed contract", async () => {
-      const info = await mgr.createSessionKey(makeScope({
-        allowedContracts: ["0x" + "aa".repeat(20) as `0x${string}`],
-      }));
+      const info = await mgr.createSessionKey(
+        makeScope({
+          allowedContracts: [("0x" + "aa".repeat(20)) as `0x${string}`],
+        }),
+      );
 
       const tx: TransactionRequest = {
         to: "0x" + "bb".repeat(20), // not in allowedContracts
@@ -261,14 +301,18 @@ describe("session-keys / SessionKeyManager", () => {
         chainId: 1,
       };
 
-      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow("not in allowed contracts");
+      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow(
+        "not in allowed contracts",
+      );
     });
 
     it("should reject tx with non-allowed method", async () => {
-      const info = await mgr.createSessionKey(makeScope({
-        allowedContracts: ["0x" + "aa".repeat(20) as `0x${string}`],
-        allowedMethods: ["0xa9059cbb"], // transfer(address,uint256)
-      }));
+      const info = await mgr.createSessionKey(
+        makeScope({
+          allowedContracts: [("0x" + "aa".repeat(20)) as `0x${string}`],
+          allowedMethods: ["0xa9059cbb"], // transfer(address,uint256)
+        }),
+      );
 
       const tx: TransactionRequest = {
         to: "0x" + "aa".repeat(20),
@@ -279,13 +323,17 @@ describe("session-keys / SessionKeyManager", () => {
         chainId: 1,
       };
 
-      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow("not in allowed methods");
+      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow(
+        "not in allowed methods",
+      );
     });
 
     it("should reject tx with non-allowed chainId", async () => {
-      const info = await mgr.createSessionKey(makeScope({
-        allowedChainIds: [1],
-      }));
+      const info = await mgr.createSessionKey(
+        makeScope({
+          allowedChainIds: [1],
+        }),
+      );
 
       const tx: TransactionRequest = {
         to: "0x" + "cd".repeat(20),
@@ -296,7 +344,9 @@ describe("session-keys / SessionKeyManager", () => {
         chainId: 137, // Polygon, not in allowedChainIds
       };
 
-      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow("not in allowed chain IDs");
+      await expect(mgr.signWithSession(info.id, tx)).rejects.toThrow(
+        "not in allowed chain IDs",
+      );
     });
   });
 
