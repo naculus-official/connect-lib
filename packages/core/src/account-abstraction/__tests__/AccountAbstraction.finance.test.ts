@@ -13,20 +13,28 @@
 
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { SmartAccountManager, decodeGasLimits } from "../SmartAccountManager";
-import { encodeGasLimits, buildCallData } from "../user-operation";
-import type { Address, Hex, Call, UserOperation } from "../types";
-import type { SmartAccountManagerConfig } from "../SmartAccountManager";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PaymasterService } from "../paymaster";
+import type { SmartAccountManagerConfig } from "../SmartAccountManager";
+import { decodeGasLimits, SmartAccountManager } from "../SmartAccountManager";
+import type { Address, Call, Hex, UserOperation } from "../types";
+import {
+  buildCallData,
+  encodeGasLimits,
+} from "../user-operation";
+
+const TEST_USER_OP_HASH = `0x${"ab".repeat(32)}` as Hex;
 
 // ─── Mock Factories ──────────────────────────────────────────────────
 
-function createTestConfig(overrides: Partial<SmartAccountManagerConfig> = {}): SmartAccountManagerConfig {
+function createTestConfig(
+  overrides: Partial<SmartAccountManagerConfig> = {},
+): SmartAccountManagerConfig {
   return {
     rpcUrl: "https://eth.llamarpc.com",
     bundlerClient: { url: "https://api.pimlico.io/v2/1/rpc?apikey=test" },
     chainId: "eip155:1",
+    signer: vi.fn(async () => ("0x" + "ab".repeat(65)) as `0x${string}`),
     ...overrides,
   };
 }
@@ -73,7 +81,7 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
   it("serializes nonce: 5n → 0x5 in JSON body", async () => {
     const spy = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ result: "0xhash" }),
+      json: () => Promise.resolve({ result: TEST_USER_OP_HASH }),
     });
     vi.stubGlobal("fetch", spy);
 
@@ -82,7 +90,8 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
       nonce: 5n,
       initCode: "0x",
       callData: "0x",
-      accountGasLimits: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      accountGasLimits:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       preVerificationGas: 50000n,
       maxFeePerGas: 50000000000n,
       maxPriorityFeePerGas: 1000000000n,
@@ -94,13 +103,13 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
     await manager.sendUserOpToBundler(userOp);
 
     const body = JSON.parse(spy.mock.calls[0][1].body);
-    expect(body.params[0].nonce).toBe("0x05");
+    expect(body.params[0].nonce).toBe("0x5");
   });
 
   it("serializes preVerificationGas: 50000n → 0xc350", async () => {
     const spy = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ result: "0xhash" }),
+      json: () => Promise.resolve({ result: TEST_USER_OP_HASH }),
     });
     vi.stubGlobal("fetch", spy);
 
@@ -109,7 +118,8 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
       nonce: 0n,
       initCode: "0x",
       callData: "0x",
-      accountGasLimits: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      accountGasLimits:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       preVerificationGas: 50000n,
       maxFeePerGas: 0n,
       maxPriorityFeePerGas: 0n,
@@ -127,7 +137,7 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
   it("serializes maxFeePerGas: 50000000000n → 0xba43b7400", async () => {
     const spy = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ result: "0xhash" }),
+      json: () => Promise.resolve({ result: TEST_USER_OP_HASH }),
     });
     vi.stubGlobal("fetch", spy);
 
@@ -136,7 +146,8 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
       nonce: 0n,
       initCode: "0x",
       callData: "0x",
-      accountGasLimits: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      accountGasLimits:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       preVerificationGas: 0n,
       maxFeePerGas: 50000000000n,
       maxPriorityFeePerGas: 0n,
@@ -148,13 +159,14 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
     await manager.sendUserOpToBundler(userOp);
 
     const body = JSON.parse(spy.mock.calls[0][1].body);
-    expect(body.params[0].maxFeePerGas).toBe("0x0ba43b7400");
+    expect(body.params[0].maxFeePerGas).toBe("0xba43b7400");
+    expect(body.params[0].gasFees).toBeUndefined();
   });
 
   it("serializes empty fields as 0x, not 0x0", async () => {
     const spy = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ result: "0xhash" }),
+      json: () => Promise.resolve({ result: TEST_USER_OP_HASH }),
     });
     vi.stubGlobal("fetch", spy);
 
@@ -163,7 +175,8 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
       nonce: 0n,
       initCode: "0x",
       callData: "0x",
-      accountGasLimits: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      accountGasLimits:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       preVerificationGas: 0n,
       maxFeePerGas: 0n,
       maxPriorityFeePerGas: 0n,
@@ -175,15 +188,17 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
     await manager.sendUserOpToBundler(userOp);
 
     const body = JSON.parse(spy.mock.calls[0][1].body);
-    expect(body.params[0].initCode).toBe("0x");
-    expect(body.params[0].paymasterAndData).toBe("0x");
+    expect(body.params[0].initCode).toBeUndefined();
+    expect(body.params[0].factory).toBeUndefined();
+    expect(body.params[0].paymasterAndData).toBeUndefined();
+    expect(body.params[0].paymaster).toBeUndefined();
     expect(body.params[0].signature).toBe("0x");
   });
 
   it("serializes maxPriorityFeePerGas: 1000000000n → 0x3b9aca00", async () => {
     const spy = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ result: "0xhash" }),
+      json: () => Promise.resolve({ result: TEST_USER_OP_HASH }),
     });
     vi.stubGlobal("fetch", spy);
 
@@ -192,7 +207,8 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
       nonce: 0n,
       initCode: "0x",
       callData: "0x",
-      accountGasLimits: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      accountGasLimits:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       preVerificationGas: 0n,
       maxFeePerGas: 0n,
       maxPriorityFeePerGas: 1000000000n,
@@ -205,6 +221,7 @@ describe("UserOp serialization — bigint → hex in RPC body", () => {
 
     const body = JSON.parse(spy.mock.calls[0][1].body);
     expect(body.params[0].maxPriorityFeePerGas).toBe("0x3b9aca00");
+    expect(body.params[0].gasFees).toBeUndefined();
   });
 });
 
@@ -321,8 +338,14 @@ describe("executeBatch ABI test vectors", () => {
     const offsetWordLen = 64; // 32 bytes in hex
 
     const toOffsetHex = hex.slice(headOffset, headOffset + offsetWordLen);
-    const valuesOffsetHex = hex.slice(headOffset + offsetWordLen, headOffset + 2 * offsetWordLen);
-    const datasOffsetHex = hex.slice(headOffset + 2 * offsetWordLen, headOffset + 3 * offsetWordLen);
+    const valuesOffsetHex = hex.slice(
+      headOffset + offsetWordLen,
+      headOffset + 2 * offsetWordLen,
+    );
+    const datasOffsetHex = hex.slice(
+      headOffset + 2 * offsetWordLen,
+      headOffset + 3 * offsetWordLen,
+    );
 
     // Verify all offsets are valid hex numbers
     expect(BigInt(`0x${toOffsetHex}`)).toBeGreaterThan(0n);
@@ -331,7 +354,9 @@ describe("executeBatch ABI test vectors", () => {
 
     // The head size is 3 * 32 = 96 bytes = 192 hex chars
     // to offset should be 96 (after head words)
-    expect(toOffsetHex).toBe("0000000000000000000000000000000000000000000000000000000000000060");
+    expect(toOffsetHex).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000060",
+    );
 
     // to array: [length(32B), addrA(32B), addrB(32B)] = 96 bytes = 192 hex chars
     // values array: [length(32B), 1n(32B), 2n(32B)] = 96 bytes = 192 hex chars
@@ -343,50 +368,117 @@ describe("executeBatch ABI test vectors", () => {
     // to array at offset 96 from data start
     const toArrayStart = headOffset + parseInt(toOffsetHex, 16) * 2;
     const toLenWord = hex.slice(toArrayStart, toArrayStart + offsetWordLen);
-    expect(toLenWord).toBe("0000000000000000000000000000000000000000000000000000000000000002");
+    expect(toLenWord).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000002",
+    );
 
     // First to address
-    const toAddr1 = hex.slice(toArrayStart + offsetWordLen, toArrayStart + 2 * offsetWordLen);
-    expect(toAddr1).toBe("000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    const toAddr1 = hex.slice(
+      toArrayStart + offsetWordLen,
+      toArrayStart + 2 * offsetWordLen,
+    );
+    expect(toAddr1).toBe(
+      "000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
 
     // Second to address
-    const toAddr2 = hex.slice(toArrayStart + 2 * offsetWordLen, toArrayStart + 3 * offsetWordLen);
-    expect(toAddr2).toBe("000000000000000000000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const toAddr2 = hex.slice(
+      toArrayStart + 2 * offsetWordLen,
+      toArrayStart + 3 * offsetWordLen,
+    );
+    expect(toAddr2).toBe(
+      "000000000000000000000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
 
     // Verify values array
     const valuesArrayStart = headOffset + parseInt(valuesOffsetHex, 16) * 2;
-    const valuesLenWord = hex.slice(valuesArrayStart, valuesArrayStart + offsetWordLen);
-    expect(valuesLenWord).toBe("0000000000000000000000000000000000000000000000000000000000000002");
+    const valuesLenWord = hex.slice(
+      valuesArrayStart,
+      valuesArrayStart + offsetWordLen,
+    );
+    expect(valuesLenWord).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000002",
+    );
 
-    const val1 = hex.slice(valuesArrayStart + offsetWordLen, valuesArrayStart + 2 * offsetWordLen);
-    expect(val1).toBe("0000000000000000000000000000000000000000000000000000000000000001");
+    const val1 = hex.slice(
+      valuesArrayStart + offsetWordLen,
+      valuesArrayStart + 2 * offsetWordLen,
+    );
+    expect(val1).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000001",
+    );
 
-    const val2 = hex.slice(valuesArrayStart + 2 * offsetWordLen, valuesArrayStart + 3 * offsetWordLen);
-    expect(val2).toBe("0000000000000000000000000000000000000000000000000000000000000002");
+    const val2 = hex.slice(
+      valuesArrayStart + 2 * offsetWordLen,
+      valuesArrayStart + 3 * offsetWordLen,
+    );
+    expect(val2).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000002",
+    );
 
     // Verify datas array
     const datasArrayStart = headOffset + parseInt(datasOffsetHex, 16) * 2;
-    const datasLenWord = hex.slice(datasArrayStart, datasArrayStart + offsetWordLen);
-    expect(datasLenWord).toBe("0000000000000000000000000000000000000000000000000000000000000002");
+    const datasLenWord = hex.slice(
+      datasArrayStart,
+      datasArrayStart + offsetWordLen,
+    );
+    expect(datasLenWord).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000002",
+    );
 
-    // First data: [length=1, 0x01]
-    const data1Len = hex.slice(datasArrayStart + offsetWordLen, datasArrayStart + 2 * offsetWordLen);
-    expect(data1Len).toBe("0000000000000000000000000000000000000000000000000000000000000001");
-    const data1 = hex.slice(datasArrayStart + 2 * offsetWordLen, datasArrayStart + 2 * offsetWordLen + 2);
+    // bytes[] head contains offsets relative to the first offset word.
+    const dataOffset1 = hex.slice(
+      datasArrayStart + offsetWordLen,
+      datasArrayStart + 2 * offsetWordLen,
+    );
+    expect(dataOffset1).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000040",
+    );
+    const dataOffset2 = hex.slice(
+      datasArrayStart + 2 * offsetWordLen,
+      datasArrayStart + 3 * offsetWordLen,
+    );
+    expect(dataOffset2).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000080",
+    );
+
+    // First data: [length=1, 0x01], starting after the offsets.
+    const data1Start = datasArrayStart + 3 * offsetWordLen;
+    const data1Len = hex.slice(data1Start, data1Start + offsetWordLen);
+    expect(data1Len).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000001",
+    );
+    const data1 = hex.slice(
+      data1Start + offsetWordLen,
+      data1Start + offsetWordLen + 2,
+    );
     expect(data1).toBe("01");
 
     // Second data: [length=2, 0x0203]
-    const data2Start = datasArrayStart + 2 * offsetWordLen + 2;
+    const data2Start = data1Start + 2 * offsetWordLen;
     const data2Len = hex.slice(data2Start, data2Start + offsetWordLen);
-    expect(data2Len).toBe("0000000000000000000000000000000000000000000000000000000000000002");
-    const data2 = hex.slice(data2Start + offsetWordLen, data2Start + offsetWordLen + 4);
+    expect(data2Len).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000002",
+    );
+    const data2 = hex.slice(
+      data2Start + offsetWordLen,
+      data2Start + offsetWordLen + 4,
+    );
     expect(data2).toBe("0203");
   });
 
   it("encodes single-call batch via executeBatch when multiple calls provided", () => {
     const calls: Call[] = [
-      { to: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Address, value: 0n, data: "0x" as Hex },
-      { to: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Address, value: 1n, data: "0x01" as Hex },
+      {
+        to: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Address,
+        value: 0n,
+        data: "0x" as Hex,
+      },
+      {
+        to: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Address,
+        value: 1n,
+        data: "0x01" as Hex,
+      },
     ];
 
     const result = buildCallData(calls);
@@ -395,9 +487,21 @@ describe("executeBatch ABI test vectors", () => {
 
   it("encodes three-call batch with varied data lengths", () => {
     const calls: Call[] = [
-      { to: "0x1111111111111111111111111111111111111111" as Address, value: 0n, data: "0x" as Hex },
-      { to: "0x2222222222222222222222222222222222222222" as Address, value: 100n, data: "0xaabb" as Hex },
-      { to: "0x3333333333333333333333333333333333333333" as Address, value: 99n, data: "0xdeadbeef" as Hex },
+      {
+        to: "0x1111111111111111111111111111111111111111" as Address,
+        value: 0n,
+        data: "0x" as Hex,
+      },
+      {
+        to: "0x2222222222222222222222222222222222222222" as Address,
+        value: 100n,
+        data: "0xaabb" as Hex,
+      },
+      {
+        to: "0x3333333333333333333333333333333333333333" as Address,
+        value: 99n,
+        data: "0xdeadbeef" as Hex,
+      },
     ];
 
     const result = buildCallData(calls);
@@ -408,7 +512,9 @@ describe("executeBatch ABI test vectors", () => {
     // toOffset = 96 (3 head words)
     const toArrayStart = 8 + 96 * 2; // selector (8) + head (192 hex)
     const toLenWord = hex.slice(toArrayStart, toArrayStart + 64);
-    expect(toLenWord).toBe("0000000000000000000000000000000000000000000000000000000000000003");
+    expect(toLenWord).toBe(
+      "0000000000000000000000000000000000000000000000000000000000000003",
+    );
   });
 });
 
@@ -421,7 +527,10 @@ describe("Paymaster financial tests", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ result: { paymasterAndData: "0xvalidpaymasterdata" } }),
+      json: () =>
+        Promise.resolve({
+          result: { paymasterAndData: "0xvalidpaymasterdata" },
+        }),
     } as unknown as Response);
 
     const service = new PaymasterService({
@@ -475,21 +584,27 @@ describe("Paymaster financial tests", () => {
     // 1. Calls pm_getPaymasterStakeData → returns error
     // 2. Falls back to getVerifyingPaymasterData → pm_sponsorUserOperation → success
     let callCount = 0;
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            ok: true,
+            status: 200,
+            json: () =>
+              Promise.resolve({
+                error: { code: -32000, message: "not sponsored" },
+              }),
+          } as unknown as Response;
+        }
         return {
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ error: { code: -32000, message: "not sponsored" } }),
+          json: () =>
+            Promise.resolve({ result: { paymasterAndData: "0xfallback" } }),
         } as unknown as Response;
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ result: { paymasterAndData: "0xfallback" } }),
-      } as unknown as Response;
-    });
+      });
 
     const service = new PaymasterService({
       url: "https://paymaster.test/rpc",
@@ -508,13 +623,16 @@ describe("Paymaster financial tests", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ result: { paymasterAndData: "0xtokenfee" } }),
+      json: () =>
+        Promise.resolve({ result: { paymasterAndData: "0xtokenfee" } }),
     } as unknown as Response);
 
     const service = new PaymasterService({
       url: "https://paymaster.test/rpc",
       type: "token",
-      policy: { token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address },
+      policy: {
+        token: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as Address,
+      },
     });
 
     // BigInt fee calculation: no floating point precision loss
@@ -537,22 +655,33 @@ describe("Paymaster financial tests", () => {
 // ─── F. SmartAccountManager Financial Edge Cases ───────────────────
 
 describe("SmartAccountManager financial edge cases", () => {
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-
-  it("getBaseFee returns 10gwei fallback on invalid RPC", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
-
-    const manager = new SmartAccountManager(createTestConfig());
-    const fee = await manager.getBaseFee();
-    expect(fee).toBe(10_000_000_000n); // 10 gwei
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  it("getPriorityFee returns 1gwei fallback on invalid RPC", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+  it("fails when base fee RPC is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network error")),
+    );
 
     const manager = new SmartAccountManager(createTestConfig());
-    const fee = await manager.getPriorityFee();
-    expect(fee).toBe(1_000_000_000n); // 1 gwei
+    await expect(manager.getBaseFee()).rejects.toMatchObject({
+      code: "aa_rpc_error",
+    });
+  });
+
+  it("fails when priority fee RPC is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network error")),
+    );
+
+    const manager = new SmartAccountManager(createTestConfig());
+    await expect(manager.getPriorityFee()).rejects.toMatchObject({
+      code: "aa_rpc_error",
+    });
   });
 
   it("estimates gas handles 0x in bundler response (defaults used)", async () => {
@@ -563,17 +692,21 @@ describe("SmartAccountManager financial edge cases", () => {
     // to verify the financial contract.
 
     // Use sendUserOpToBundler directly which properly serializes bigints
-    const spy = vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ result: "0xuserophash12345" }),
-    }));
+    const spy = vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ result: TEST_USER_OP_HASH }),
+      }),
+    );
 
     const userOp: UserOperation = {
       sender: "0x1234567890123456789012345678901234567890" as Address,
       nonce: 0n,
       initCode: "0x",
       callData: "0x",
-      accountGasLimits: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      accountGasLimits:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       preVerificationGas: 50000n,
       maxFeePerGas: 0n,
       maxPriorityFeePerGas: 0n,
@@ -583,30 +716,36 @@ describe("SmartAccountManager financial edge cases", () => {
 
     const manager = new SmartAccountManager(createTestConfig());
     const hash = await manager.sendUserOpToBundler(userOp);
-    expect(hash).toBe("0xuserophash12345");
+    expect(hash).toBe(TEST_USER_OP_HASH);
   });
 
-  it("returns default gas values when bundler returns error", async () => {
+  it("fails when bundler returns an estimation error", async () => {
     // Test via the user-operation.ts standalone function which handles
     // bad bundler responses by returning defaults
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ error: { code: -32000, message: "AA20: account not deployed" } }),
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            error: { code: -32000, message: "AA20: account not deployed" },
+          }),
+      }),
+    );
 
     // Use the user-operation.ts estimateUserOperationGas which accepts raw
     // URL and calls the bundler directly with proper serialization
-    const { estimateUserOperationGas: standaloneEstimate } = await import("../user-operation");
-
-    const estimate = await standaloneEstimate(
-      { sender: "0x1234567890123456789012345678901234567890" as Address },
-      "0x0000000071727De22E5E9d8BAf0edAc6f37da032" as Address,
-      "https://bundler.test/rpc",
+    const { estimateUserOperationGas: standaloneEstimate } = await import(
+      "../user-operation"
     );
 
-    expect(estimate.callGasLimit).toBe(100_000n);
-    expect(estimate.verificationGasLimit).toBe(100_000n);
-    expect(estimate.preVerificationGas).toBe(50_000n);
+    await expect(
+      standaloneEstimate(
+        { sender: "0x1234567890123456789012345678901234567890" as Address },
+        "0x0000000071727De22E5E9d8BAf0edAc6f37da032" as Address,
+        "https://bundler.test/rpc",
+      ),
+    ).rejects.toMatchObject({ code: "aa_estimation_failed" });
   });
 
   it("uses bigint for all gas-related values (no Number())", () => {
@@ -626,7 +765,7 @@ describe("SmartAccountManager financial edge cases", () => {
     // stringifies bigints manually before JSON.stringify
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ result: "0xhash123" }),
+      json: () => Promise.resolve({ result: TEST_USER_OP_HASH }),
     });
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -636,7 +775,8 @@ describe("SmartAccountManager financial edge cases", () => {
       nonce: 99999999999999999999n, // Very large bigint
       initCode: "0x",
       callData: "0x",
-      accountGasLimits: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      accountGasLimits:
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
       preVerificationGas: 50000n,
       maxFeePerGas: 50000000000n,
       maxPriorityFeePerGas: 1000000000n,
@@ -645,11 +785,11 @@ describe("SmartAccountManager financial edge cases", () => {
     };
 
     const hash = await manager.sendUserOpToBundler(userOp);
-    expect(hash).toBe("0xhash123");
+    expect(hash).toBe(TEST_USER_OP_HASH);
 
     // Verify the serialized body
     const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.params[0].nonce).toBe("0x056bc75e2d630fffff"); // hex of 99999999999999999999, padded to even
+    expect(body.params[0].nonce).toBe("0x56bc75e2d630fffff"); // canonical EIP-1474 quantity
   });
 });
 

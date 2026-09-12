@@ -7,6 +7,8 @@
  * @see docs/features/account-abstraction.md
  */
 
+import { keccak_256 } from "@noble/hashes/sha3";
+import { bytesToHex } from "@noble/hashes/utils";
 import { AccountAbstractionError } from "./errors";
 import {
   type Address,
@@ -20,62 +22,8 @@ import {
   type UserOperationGasEstimate,
   type UserOperationReceipt,
   type UserOperationResponse,
+  type UserOperationVersion,
 } from "./types";
-
-// ─── EIP-712 Domain & Types for UserOperation ──────────────────────────
-
-/**
- * EIP-712 typed data for UserOperation signing.
- * Used for eth_signTypedData / eth_signTypedData_v4.
- */
-export const USER_OP_EIP712_DOMAIN = (
-  chainId: number,
-  verifyingContract: Address,
-) => ({
-  name: "Account",
-  version: "1",
-  chainId,
-  verifyingContract,
-});
-
-/**
- * EIP-712 type definitions for UserOperation.
- * Matches eth-infinitism's entry point contracts.
- */
-export const USER_OP_EIP712_TYPES = {
-  UserOperation: [
-    { name: "sender", type: "address" },
-    { name: "nonce", type: "uint256" },
-    { name: "initCode", type: "bytes" },
-    { name: "callData", type: "bytes" },
-    { name: "accountGasLimits", type: "bytes32" },
-    { name: "preVerificationGas", type: "uint256" },
-    { name: "maxFeePerGas", type: "uint256" },
-    { name: "maxPriorityFeePerGas", type: "uint256" },
-    { name: "paymasterAndData", type: "bytes" },
-    { name: "signature", type: "bytes" },
-  ],
-};
-
-/**
- * EIP-712 type definitions for UserOperation (v0.6 format).
- * Uses callGasLimit and verificationGasLimit separately instead of accountGasLimits.
- */
-export const USER_OP_EIP712_TYPES_V06 = {
-  UserOperation: [
-    { name: "sender", type: "address" },
-    { name: "nonce", type: "uint256" },
-    { name: "initCode", type: "bytes" },
-    { name: "callData", type: "bytes" },
-    { name: "callGasLimit", type: "uint256" },
-    { name: "verificationGasLimit", type: "uint256" },
-    { name: "preVerificationGas", type: "uint256" },
-    { name: "maxFeePerGas", type: "uint256" },
-    { name: "maxPriorityFeePerGas", type: "uint256" },
-    { name: "paymasterAndData", type: "bytes" },
-    { name: "signature", type: "bytes" },
-  ],
-};
 
 // ─── Build ─────────────────────────────────────────────────────────────
 
@@ -89,13 +37,19 @@ export function buildUserOperation(
   params: Partial<UserOperation>,
 ): UserOperation {
   return {
-    sender: params.sender ?? "0x",
+    sender: params.sender ?? "0x0000000000000000000000000000000000000000",
     nonce: params.nonce ?? 0n,
     initCode: params.initCode ?? "0x",
     callData: params.callData ?? "0x",
     accountGasLimits:
       params.accountGasLimits ??
       encodeGasLimits(DEFAULT_VERIFICATION_GAS_LIMIT, DEFAULT_CALL_GAS_LIMIT),
+    gasFees:
+      params.gasFees ??
+      encodeGasFees(
+        params.maxPriorityFeePerGas ?? 0n,
+        params.maxFeePerGas ?? 0n,
+      ),
     preVerificationGas:
       params.preVerificationGas ?? DEFAULT_PRE_VERIFICATION_GAS,
     maxFeePerGas: params.maxFeePerGas ?? 0n,
@@ -109,21 +63,55 @@ export function buildUserOperation(
  * Build the callData for a UserOperation from one or more calls.
  *
  * For a single call, encodes as execute(to, value, data).
- * For multiple calls, encodes as executeBatch(to[], value[], data[]).
+ * For multiple calls, encodes the version-specific official SimpleAccount
+ * executeBatch ABI. v0.6 uses `(address[],bytes[])` and only supports zero
+ * native value; v0.7 uses `(address[],uint256[],bytes[])`.
  *
  * @param calls - Array of calls to include
+ * @param version - SimpleAccount/EntryPoint ABI version (defaults to v0.7)
  * @returns Encoded calldata
  */
-export function buildCallData(calls: Call[]): Hex {
-  if (!calls.length) {
+export function buildCallData(
+  calls: Call[],
+  version: UserOperationVersion = "0.7",
+): Hex {
+  if (!Array.isArray(calls) || calls.length === 0) {
     throw new AccountAbstractionError("aa_no_calls");
+  }
+
+  for (const call of calls) {
+    if (
+      !call ||
+      typeof call !== "object" ||
+      typeof call.to !== "string" ||
+      !/^0x[0-9a-fA-F]{40}$/.test(call.to) ||
+      typeof call.value !== "bigint" ||
+      call.value < 0n ||
+      call.value >= 1n << 256n ||
+      typeof call.data !== "string" ||
+      !/^0x(?:[0-9a-fA-F]{2})*$/.test(call.data)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Calls must contain a 20-byte address, uint256 value, and even-length hex data.",
+      );
+    }
   }
 
   if (calls.length === 1) {
     return encodeExecute(calls[0].to, calls[0].value, calls[0].data);
   }
 
-  return encodeExecuteBatch(calls);
+  if (version === "0.6" && calls.some((call) => call.value !== 0n)) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "SimpleAccount v0.6 executeBatch cannot transfer native value; use separate UserOperations or EntryPoint v0.7.",
+    );
+  }
+
+  return version === "0.6"
+    ? encodeExecuteBatchV06(calls)
+    : encodeExecuteBatchV07(calls);
 }
 
 /**
@@ -131,11 +119,35 @@ export function buildCallData(calls: Call[]): Hex {
  */
 function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
   const selector = "0xb61d27f6"; // execute(address,uint256,bytes)
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Call target must be a 20-byte address.",
+    );
+  }
+  if (value >= 1n << 256n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Call value must fit in uint256.",
+    );
+  }
   const toArg = to.toLowerCase().replace("0x", "").padStart(64, "0");
+  if (value < 0n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Call value cannot be negative.",
+    );
+  }
   const valueArg = value.toString(16).padStart(64, "0");
 
   // Dynamic bytes encoding: offset(32B) + length(32B) + data
   const rawData = data.replace("0x", "");
+  if (rawData.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(rawData)) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Call data must be valid hexadecimal.",
+    );
+  }
   const dataLen = rawData.length / 2;
 
   // ABI encoding for execute(address,uint256,bytes):
@@ -156,307 +168,320 @@ function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
  * Encode a batch execute call for SimpleAccount.
  * executeBatch(address[],uint256[],bytes[])
  */
-function encodeExecuteBatch(calls: Call[]): Hex {
+function encodeExecuteBatchV07(calls: Call[]): Hex {
   const selector = "0x47e1da2a";
   const n = calls.length;
-  const nWord = n.toString(16).padStart(64, "0");
-
-  // Build arrays
+  const word = (value: bigint | number): string => {
+    if (
+      typeof value === "number" &&
+      (!Number.isSafeInteger(value) || value < 0)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Array length is invalid.",
+      );
+    }
+    if (typeof value === "bigint" && (value < 0n || value >= 1n << 256n)) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "ABI integer is out of range.",
+      );
+    }
+    return BigInt(value).toString(16).padStart(64, "0");
+  };
   const toArray =
-    nWord +
+    word(n) +
     calls
-      .map((c) => c.to.toLowerCase().replace("0x", "").padStart(64, "0"))
+      .map((c) => word(BigInt(`0x${c.to.toLowerCase().replace("0x", "")}`)))
       .join("");
-  const valuesArray =
-    nWord + calls.map((c) => c.value.toString(16).padStart(64, "0")).join("");
-
-  // Datas: array of dynamic bytes
-  const datasEntries = calls
-    .map((c) => {
-      const rawData = c.data.replace("0x", "");
-      const len = rawData.length / 2;
-      return len.toString(16).padStart(64, "0") + rawData;
-    })
-    .join("");
-  const datasArray = nWord + datasEntries;
+  const valuesArray = word(n) + calls.map((c) => word(c.value)).join("");
+  const tails = calls.map((c) => {
+    if (c.value < 0n) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Call value cannot be negative.",
+      );
+    }
+    const rawData = c.data.replace("0x", "");
+    if (rawData.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(rawData)) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Call data must be valid hexadecimal.",
+      );
+    }
+    const padded = rawData.padEnd(Math.ceil(rawData.length / 64) * 64, "0");
+    return word(rawData.length / 2) + padded;
+  });
+  const datasArray =
+    word(n) +
+    tails
+      .map((_, i) =>
+        word(
+          tails
+            .slice(0, i)
+            .reduce((sum, tail) => sum + tail.length / 2, n * 32),
+        ),
+      )
+      .join("") +
+    tails.join("");
 
   const toLen = 32 + n * 32;
   const valuesLen = 32 + n * 32;
-  const datasLen = 32 + datasEntries.length / 2;
+  const datasLen = datasArray.length / 2;
 
-  const headSize = 32 * 3; // 3 offsets
+  const headSize = 32 * 3;
   const toOffset = headSize;
   const valuesOffset = headSize + toLen;
   const datasOffset = headSize + toLen + valuesLen;
 
   return (`${selector}` +
-    toOffset.toString(16).padStart(64, "0") +
-    valuesOffset.toString(16).padStart(64, "0") +
-    datasOffset.toString(16).padStart(64, "0") +
+    word(toOffset) +
+    word(valuesOffset) +
+    word(datasOffset) +
     toArray +
     valuesArray +
     datasArray) as Hex;
 }
 
-// ─── Sign ──────────────────────────────────────────────────────────────
-
 /**
- * Compute the EIP-712 hash of a UserOperation for signing.
+ * Encode the v0.6 SimpleAccount batch call.
  *
- * @param userOp - The UserOperation to hash
- * @param entryPoint - EntryPoint contract address
- * @param chainId - EVM chain ID
- * @returns The EIP-712 typed data hash
+ * SimpleAccount v0.6 exposes `executeBatch(address[],bytes[])` and always
+ * forwards zero native value. v0.7 added the optional values array, so the
+ * selector and ABI head are intentionally different.
  */
-/**
- * EIP-712 domain separator for UserOperation hashing.
- */
-function computeDomainSeparator(
-  entryPoint: Address,
-  chainId: number,
-): Uint8Array {
-  const { concatBytes: concat } = (() => {
-    return {
-      concatBytes: (...arrays: Uint8Array[]) => {
-        const total = arrays.reduce((a, b) => a + b.length, 0);
-        const result = new Uint8Array(total);
-        let offset = 0;
-        for (const arr of arrays) {
-          result.set(arr, offset);
-          offset += arr.length;
-        }
-        return result;
-      },
-    };
-  })();
-
-  const toBytes = (hex: Hex): Uint8Array => {
-    const raw = hex.startsWith("0x") ? hex.slice(2) : hex;
-    const bytes = new Uint8Array(raw.length / 2);
-    for (let i = 0; i < raw.length; i += 2) {
-      bytes[i / 2] = parseInt(raw.slice(i, i + 2), 16);
+function encodeExecuteBatchV06(calls: Call[]): Hex {
+  const selector = "0x18dfb3c7";
+  const n = calls.length;
+  const word = (value: bigint | number): string => {
+    if (
+      typeof value === "number" &&
+      (!Number.isSafeInteger(value) || value < 0)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Array length is invalid.",
+      );
     }
-    return bytes;
+    if (typeof value === "bigint" && (value < 0n || value >= 1n << 256n)) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "ABI integer is out of range.",
+      );
+    }
+    return BigInt(value).toString(16).padStart(64, "0");
   };
 
-  const stringToBytes = (s: string): Uint8Array => new TextEncoder().encode(s);
-  const padded32 = (b: Uint8Array): Uint8Array => {
-    if (b.length >= 32) return b.slice(0, 32);
-    const result = new Uint8Array(32);
-    result.set(b);
-    return result;
-  };
+  const toArray =
+    word(n) +
+    calls
+      .map((call) =>
+        word(BigInt(`0x${call.to.toLowerCase().replace("0x", "")}`)),
+      )
+      .join("");
+  const tails = calls.map((call) => {
+    const rawData = call.data.replace("0x", "");
+    const padded = rawData.padEnd(Math.ceil(rawData.length / 64) * 64, "0");
+    return word(rawData.length / 2) + padded;
+  });
+  const dataArray =
+    word(n) +
+    tails
+      .map((_, index) =>
+        word(
+          tails
+            .slice(0, index)
+            .reduce((sum, tail) => sum + tail.length / 2, n * 32),
+        ),
+      )
+      .join("") +
+    tails.join("");
 
-  // EIP-712 domain: keccak256(abi.encode(
-  //   keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-  //   keccak256("Account"), keccak256("1"),
-  //   uint256(chainId), address(entryPoint)
-  // ))
-  const domainTypeHash = keccak256Sync(
-    stringToBytes(
-      "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
-    ),
-  );
-  const nameHash = keccak256Sync(stringToBytes("Account"));
-  const versionHash = keccak256Sync(stringToBytes("1"));
-
-  const chainIdBytes = new Uint8Array(32);
-  const chainIdBigInt = BigInt(chainId);
-  const chainIdHex = chainIdBigInt.toString(16).padStart(64, "0");
-  const chainIdArray = toBytes(`0x${chainIdHex}`);
-
-  const entryPointBytes = toBytes(entryPoint);
-  const entryPointPadded = new Uint8Array(32);
-  entryPointPadded.set(entryPointBytes, 12); // address is right-aligned (last 20 bytes)
-
-  return keccak256Sync(
-    concat(
-      domainTypeHash,
-      nameHash,
-      versionHash,
-      chainIdArray,
-      entryPointPadded,
-    ),
-  );
+  const toArrayLength = 32 + n * 32;
+  const headSize = 32 * 2;
+  return (`${selector}` +
+    word(headSize) +
+    word(headSize + toArrayLength) +
+    toArray +
+    dataArray) as Hex;
 }
+
+// ─── Sign ──────────────────────────────────────────────────────────────
 
 export function hashUserOperation(
   userOp: UserOperation,
   entryPoint: Address,
-  chainId: number,
+  chainId: number | bigint,
 ): Hex {
-  const {
-    sender,
-    nonce,
-    initCode,
-    callData,
-    accountGasLimits,
-    preVerificationGas,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-    paymasterAndData,
-  } = userOp;
+  // ERC-4337 v0.7 EntryPoint.getUserOpHash is:
+  // keccak256(abi.encode(keccak256(abi.encode(...packed fields...)),
+  //                     address(entryPoint), block.chainid)).
+  // It is deliberately not an EIP-191 personal-sign digest.
+  const numericChainId = BigInt(chainId);
+  if (numericChainId <= 0n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Chain ID must be a positive integer.",
+    );
+  }
+  const innerHash = keccak256Sync(packUserOp(userOp));
+  const outer = concatBytesArray([
+    innerHash,
+    addressWord(entryPoint),
+    bigintWord(numericChainId),
+  ]);
+  return `0x${bytesToHex(keccak256Sync(outer))}` as Hex;
+}
 
-  const packed = packUserOp({
-    sender,
-    nonce,
-    initCode,
-    callData,
-    accountGasLimits,
-    preVerificationGas,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-    paymasterAndData,
-  });
-
-  // Inner userOp hash
-  const userOpHash = keccak256Sync(packed);
-
-  // EIP-712 domain separator
-  const domainSeparator = computeDomainSeparator(entryPoint, chainId);
-
-  // Combined: \x19\x01 || domainSeparator || userOpHash
-  const { concatBytes } = (() => {
-    return {
-      concatBytes: (...arrays: Uint8Array[]) => {
-        const total = arrays.reduce((a, b) => a + b.length, 0);
-        const result = new Uint8Array(total);
-        let offset = 0;
-        for (const arr of arrays) {
-          result.set(arr, offset);
-          offset += arr.length;
-        }
-        return result;
-      },
-    };
-  })();
-
-  const prefix = new Uint8Array([0x19, 0x01]);
-  const finalHash = keccak256Sync(
-    concatBytes(prefix, domainSeparator, userOpHash),
+/**
+ * Hash a v0.6 UserOperation using EntryPoint.getUserOpHash.
+ * v0.6 keeps gas limits and fees as separate uint256 fields.
+ */
+export function hashUserOperationV06(
+  userOp: UserOperation,
+  entryPoint: Address,
+  chainId: number | bigint,
+): Hex {
+  const numericChainId = BigInt(chainId);
+  if (numericChainId <= 0n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Chain ID must be a positive integer.",
+    );
+  }
+  const { verificationGasLimit, callGasLimit } = decodePackedGasLimits(
+    userOp.accountGasLimits,
   );
-
-  const { bytesToHex } = requireBytesToHex();
-  return `0x${bytesToHex(finalHash)}` as Hex;
+  const inner = concatBytesArray([
+    addressWord(userOp.sender),
+    bigintWord(userOp.nonce),
+    keccak256Sync(hexToBytes(userOp.initCode)),
+    keccak256Sync(hexToBytes(userOp.callData)),
+    bigintWord(callGasLimit),
+    bigintWord(verificationGasLimit),
+    bigintWord(userOp.preVerificationGas),
+    bigintWord(userOp.maxFeePerGas),
+    bigintWord(userOp.maxPriorityFeePerGas),
+    keccak256Sync(hexToBytes(userOp.paymasterAndData)),
+  ]);
+  const innerHash = keccak256Sync(inner);
+  return `0x${bytesToHex(
+    keccak256Sync(
+      concatBytesArray([
+        innerHash,
+        addressWord(entryPoint),
+        bigintWord(numericChainId),
+      ]),
+    ),
+  )}` as Hex;
 }
 
 /**
  * Pack UserOperation fields into a single bytes hash.
  * Follows the eth-infinitism pattern of hashing all fields together.
  */
-function packUserOp(
-  userOp: Pick<
-    UserOperation,
-    | "sender"
-    | "nonce"
-    | "initCode"
-    | "callData"
-    | "accountGasLimits"
-    | "preVerificationGas"
-    | "maxFeePerGas"
-    | "maxPriorityFeePerGas"
-    | "paymasterAndData"
-  >,
-): Uint8Array {
-  const { concatBytes, bytesToHex } = (() => {
-    // Synchronous utilities
-    const encoder = new TextEncoder();
-    return {
-      concatBytes: (...arrays: Uint8Array[]) => {
-        const total = arrays.reduce((a, b) => a + b.length, 0);
-        const result = new Uint8Array(total);
-        let offset = 0;
-        for (const arr of arrays) {
-          result.set(arr, offset);
-          offset += arr.length;
-        }
-        return result;
-      },
-      bytesToHex: (bytes: Uint8Array) => {
-        return Array.from(bytes)
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
-      },
-    };
-  })();
-
-  const toBytes = (hex: Hex): Uint8Array => {
-    const raw = hex.startsWith("0x") ? hex.slice(2) : hex;
-    const bytes = new Uint8Array(raw.length / 2);
-    for (let i = 0; i < raw.length; i += 2) {
-      bytes[i / 2] = parseInt(raw.slice(i, i + 2), 16);
-    }
-    return bytes;
-  };
-
+function packUserOp(userOp: UserOperation): Uint8Array {
   const bigintTo32Bytes = (n: bigint): Uint8Array => {
-    const hex = n.toString(16).padStart(64, "0");
-    return toBytes(`0x${hex}`);
+    return bigintWord(n);
   };
 
-  return concatBytes(
-    toBytes(userOp.sender),
+  const gasFees =
+    userOp.gasFees ??
+    encodeGasFees(userOp.maxPriorityFeePerGas, userOp.maxFeePerGas);
+  return concatBytesArray([
+    addressWord(userOp.sender),
     bigintTo32Bytes(userOp.nonce),
-    keccak256Sync(toBytes(userOp.initCode)),
-    keccak256Sync(toBytes(userOp.callData)),
-    toBytes(userOp.accountGasLimits),
+    keccak256Sync(hexToBytes(userOp.initCode)),
+    keccak256Sync(hexToBytes(userOp.callData)),
+    bytes32Word(userOp.accountGasLimits),
     bigintTo32Bytes(userOp.preVerificationGas),
-    bigintTo32Bytes(userOp.maxFeePerGas),
-    bigintTo32Bytes(userOp.maxPriorityFeePerGas),
-    keccak256Sync(toBytes(userOp.paymasterAndData)),
-  );
+    bytes32Word(gasFees),
+    keccak256Sync(hexToBytes(userOp.paymasterAndData)),
+  ]);
 }
 
 /**
  * Synchronous keccak256 hash using @noble/hashes.
  */
 function keccak256Sync(data: Uint8Array): Uint8Array {
-  // Inline to avoid dynamic import constraints — we use a pure JS fallback
-  // but if @noble/hashes is available it will be used
-  const { keccak_256 } = requireKeccak();
   return keccak_256(data);
 }
 
-/**
- * Memoized require for keccak256 to avoid re-importing.
- */
-let _keccakFn: ((data: Uint8Array) => Uint8Array) | null = null;
-
-function requireKeccak(): { keccak_256: (data: Uint8Array) => Uint8Array } {
-  if (_keccakFn) return { keccak_256: _keccakFn };
-
-  // Try @noble/hashes first
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const noble = require("@noble/hashes/sha3");
-    _keccakFn = noble.keccak_256;
-  } catch {
-    throw new AccountAbstractionError(
-      "aa_encode_error",
-      "keccak256 not available. @noble/hashes is required.",
-    );
+function hexToBytes(hex: Hex): Uint8Array {
+  const raw = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (raw.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(raw)) {
+    throw new AccountAbstractionError("aa_encode_error", "Invalid hex value.");
   }
-
-  return { keccak_256: _keccakFn! };
+  const bytes = new Uint8Array(raw.length / 2);
+  for (let i = 0; i < raw.length; i += 2) {
+    bytes[i / 2] = Number.parseInt(raw.slice(i, i + 2), 16);
+  }
+  return bytes;
 }
 
-let _bytesToHexFn: ((bytes: Uint8Array) => string) | null = null;
-
-function requireBytesToHex(): { bytesToHex: (bytes: Uint8Array) => string } {
-  if (_bytesToHexFn) return { bytesToHex: _bytesToHexFn };
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const noble = require("@noble/hashes/utils");
-    _bytesToHexFn = noble.bytesToHex;
-  } catch {
-    _bytesToHexFn = (bytes: Uint8Array) =>
-      Array.from(bytes)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+function bigintWord(value: bigint): Uint8Array {
+  if (value < 0n || value >= 1n << 256n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Integer exceeds uint256.",
+    );
   }
+  const bytes = new Uint8Array(32);
+  let remaining = value;
+  for (let i = 31; i >= 0 && remaining > 0n; i--) {
+    bytes[i] = Number(remaining & 0xffn);
+    remaining >>= 8n;
+  }
+  return bytes;
+}
 
-  return { bytesToHex: _bytesToHexFn! };
+function addressWord(address: Address): Uint8Array {
+  const bytes = hexToBytes(address);
+  if (bytes.length !== 20) {
+    throw new AccountAbstractionError("aa_encode_error", "Invalid address.");
+  }
+  const word = new Uint8Array(32);
+  word.set(bytes, 12);
+  return word;
+}
+
+function bytes32Word(value: Hex): Uint8Array {
+  const bytes = hexToBytes(value);
+  if (bytes.length !== 32) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Packed UserOperation fields must be exactly 32 bytes.",
+    );
+  }
+  return bytes;
+}
+
+function decodePackedGasLimits(value: Hex): {
+  verificationGasLimit: bigint;
+  callGasLimit: bigint;
+} {
+  const bytes = hexToBytes(value);
+  if (bytes.length !== 32) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Packed account gas limits must be exactly 32 bytes.",
+    );
+  }
+  return {
+    verificationGasLimit: BigInt(`0x${bytesToHex(bytes.slice(0, 16))}`),
+    callGasLimit: BigInt(`0x${bytesToHex(bytes.slice(16))}`),
+  };
+}
+
+function concatBytesArray(arrays: Uint8Array[]): Uint8Array {
+  const total = arrays.reduce((sum, array) => sum + array.length, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const array of arrays) {
+    result.set(array, offset);
+    offset += array.length;
+  }
+  return result;
 }
 
 /**
@@ -466,37 +491,67 @@ export function encodeGasLimits(
   verificationGasLimit: bigint,
   callGasLimit: bigint,
 ): Hex {
+  if (
+    verificationGasLimit < 0n ||
+    callGasLimit < 0n ||
+    verificationGasLimit >= 1n << 128n ||
+    callGasLimit >= 1n << 128n
+  ) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "ERC-4337 v0.7 gas limits must each fit in 128 bits.",
+    );
+  }
   const vglHex = verificationGasLimit.toString(16).padStart(32, "0");
   const cglHex = callGasLimit.toString(16).padStart(32, "0");
   return `0x${vglHex}${cglHex}` as Hex;
 }
 
+/** Encode maxPriorityFeePerGas (high 128 bits) and maxFeePerGas (low 128 bits). */
+export function encodeGasFees(
+  maxPriorityFeePerGas: bigint,
+  maxFeePerGas: bigint,
+): Hex {
+  const max128 = (value: bigint, label: string) => {
+    if (value < 0n || value >= 1n << 128n) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        `${label} must fit in 128 bits for ERC-4337 v0.7.`,
+      );
+    }
+    return value.toString(16).padStart(32, "0");
+  };
+  return `0x${max128(maxPriorityFeePerGas, "maxPriorityFeePerGas")}${max128(maxFeePerGas, "maxFeePerGas")}` as Hex;
+}
+
 // ─── Sign ──────────────────────────────────────────────────────────────
 
 /**
- * Sign a UserOperation using EIP-191 or EIP-712.
+ * Sign a UserOperation using the account's signature scheme.
  *
  * For SimpleAccount, the signature is a standard ECDSA signature.
  *
  * @param userOp - The UserOperation to sign (without signature)
- * @param signer - A function that signs arbitrary data (e.g. personal_sign)
+ * @param signer - A function that signs the raw ERC-4337 userOpHash. The
+ * account contract decides how to interpret the signature; do not wrap this
+ * hash in EIP-191 unless the account explicitly requires that scheme.
  * @param entryPoint - EntryPoint contract address
  * @param chainId - EVM chain ID
+ * @param signerMode - Sign the raw hash or the EIP-191-prefixed hash
  * @returns The UserOperation with signature field filled
  */
 export async function signUserOperation(
   userOp: UserOperation,
   signer: (hash: Hex) => Promise<Hex> | Hex,
   entryPoint: Address,
-  chainId: number,
+  chainId: number | bigint,
+  signerMode: "raw" | "eip191" = "raw",
 ): Promise<UserOperation> {
   try {
     const hash = hashUserOperation(userOp, entryPoint, chainId);
-
-    // Wrap the hash in the EIP-191 personal_sign format
-    const messageHash = await wrapEIP191(hash);
-
-    const signature = await signer(messageHash);
+    const signature = await signer(
+      signerMode === "eip191" ? toEthSignedMessageHash(hash) : hash,
+    );
 
     return {
       ...userOp,
@@ -511,30 +566,132 @@ export async function signUserOperation(
   }
 }
 
-/**
- * Wrap data in EIP-191 personal_sign format:
- * \x19Ethereum Signed Message:\n + len(message) + message
- */
-async function wrapEIP191(hash: Hex): Promise<Hex> {
-  const rawMessage = hash.startsWith("0x") ? hash.slice(2) : hash;
-  const prefix = `\x19Ethereum Signed Message:\n${rawMessage.length / 2}`;
-  const encoder = new TextEncoder();
-  const prefixBytes = encoder.encode(prefix);
-  const messageBytes = new Uint8Array(rawMessage.length / 2);
-  for (let i = 0; i < rawMessage.length; i += 2) {
-    messageBytes[i / 2] = parseInt(rawMessage.slice(i, i + 2), 16);
+/** Sign a v0.6 UserOperation with the account's configured scheme. */
+export async function signUserOperationV06(
+  userOp: UserOperation,
+  signer: (hash: Hex) => Promise<Hex> | Hex,
+  entryPoint: Address,
+  chainId: number | bigint,
+  signerMode: "raw" | "eip191" = "raw",
+): Promise<UserOperation> {
+  try {
+    const hash = hashUserOperationV06(userOp, entryPoint, chainId);
+    return {
+      ...userOp,
+      signature: await signer(
+        signerMode === "eip191" ? toEthSignedMessageHash(hash) : hash,
+      ),
+    };
+  } catch (error) {
+    throw new AccountAbstractionError(
+      "aa_signature_failed",
+      "Failed to sign v0.6 UserOperation",
+      error,
+    );
   }
+}
 
-  const combined = new Uint8Array(prefixBytes.length + messageBytes.length);
-  combined.set(prefixBytes);
-  combined.set(messageBytes, prefixBytes.length);
-
-  const { keccak_256 } = await import("@noble/hashes/sha3");
-  const { bytesToHex } = await import("@noble/hashes/utils");
-  return `0x${bytesToHex(keccak_256(combined))}` as Hex;
+/** Apply the EIP-191 personal-sign prefix used by eth-infinitism SimpleAccount. */
+export function toEthSignedMessageHash(hash: Hex): Hex {
+  const message = hexToBytes(hash);
+  if (message.length !== 32) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "UserOperation hash must be exactly 32 bytes.",
+    );
+  }
+  const prefix = new TextEncoder().encode("\x19Ethereum Signed Message:\n32");
+  return `0x${bytesToHex(keccak256Sync(concatBytesArray([prefix, message])))}` as Hex;
 }
 
 // ─── Send ──────────────────────────────────────────────────────────────
+
+export function quantity(value: bigint): string {
+  if (value < 0n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "UserOperation quantities cannot be negative.",
+    );
+  }
+  return `0x${value.toString(16)}`;
+}
+
+function splitInitCode(initCode: Hex): Record<string, string> {
+  if (initCode === "0x") return {};
+  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(initCode) || initCode.length < 42) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "ERC-4337 v0.7 initCode must contain a 20-byte factory address.",
+    );
+  }
+  return {
+    factory: `0x${initCode.slice(2, 42)}` as Address,
+    factoryData: `0x${initCode.slice(42)}` as Hex,
+  };
+}
+
+function splitPaymasterAndData(
+  paymasterAndData: Hex,
+): Record<string, string> {
+  if (paymasterAndData === "0x") return {};
+  const raw = paymasterAndData.slice(2);
+  // address (20 bytes) + validation gas (16) + postOp gas (16)
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(raw) || raw.length < 104) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "ERC-4337 v0.7 paymasterAndData must contain the address and both uint128 gas limits.",
+    );
+  }
+  return {
+    paymaster: `0x${raw.slice(0, 40)}` as Address,
+    paymasterVerificationGasLimit: quantity(
+      BigInt(`0x${raw.slice(40, 72)}`),
+    ),
+    paymasterPostOpGasLimit: quantity(BigInt(`0x${raw.slice(72, 104)}`)),
+    paymasterData: `0x${raw.slice(104)}` as Hex,
+  };
+}
+
+/** Serialize the internal packed UserOperation into the versioned RPC shape. */
+export function serializeUserOperationForRpc(
+  userOp: UserOperation,
+  version: UserOperationVersion,
+): Record<string, string> {
+  if (version === "0.6") {
+    const { verificationGasLimit, callGasLimit } = decodePackedGasLimits(
+      userOp.accountGasLimits,
+    );
+    return {
+      sender: userOp.sender,
+      nonce: quantity(userOp.nonce),
+      initCode: userOp.initCode,
+      callData: userOp.callData,
+      callGasLimit: quantity(callGasLimit),
+      verificationGasLimit: quantity(verificationGasLimit),
+      preVerificationGas: quantity(userOp.preVerificationGas),
+      maxFeePerGas: quantity(userOp.maxFeePerGas),
+      maxPriorityFeePerGas: quantity(userOp.maxPriorityFeePerGas),
+      paymasterAndData: userOp.paymasterAndData,
+      signature: userOp.signature,
+    };
+  }
+  const { verificationGasLimit, callGasLimit } = decodePackedGasLimits(
+    userOp.accountGasLimits,
+  );
+  return {
+    sender: userOp.sender,
+    nonce: quantity(userOp.nonce),
+    ...splitInitCode(userOp.initCode),
+    callData: userOp.callData,
+    callGasLimit: quantity(callGasLimit),
+    verificationGasLimit: quantity(verificationGasLimit),
+    preVerificationGas: quantity(userOp.preVerificationGas),
+    maxFeePerGas: quantity(userOp.maxFeePerGas),
+    maxPriorityFeePerGas: quantity(userOp.maxPriorityFeePerGas),
+    ...splitPaymasterAndData(userOp.paymasterAndData),
+    signature: userOp.signature,
+  };
+}
 
 /**
  * Send a UserOperation to a bundler RPC endpoint.
@@ -548,24 +705,13 @@ export async function sendUserOperation(
   userOp: UserOperation,
   bundlerUrl: string,
   entryPoint: Address,
+  version: UserOperationVersion = "0.7",
 ): Promise<UserOperationResponse> {
   if (!bundlerUrl) {
     throw new AccountAbstractionError("aa_no_bundler");
   }
 
-  // Serialize for RPC: bigint → hex string
-  const serializedOp = {
-    sender: userOp.sender,
-    nonce: `0x${userOp.nonce.toString(16)}`,
-    initCode: userOp.initCode,
-    callData: userOp.callData,
-    accountGasLimits: userOp.accountGasLimits,
-    preVerificationGas: `0x${userOp.preVerificationGas.toString(16)}`,
-    maxFeePerGas: `0x${userOp.maxFeePerGas.toString(16)}`,
-    maxPriorityFeePerGas: `0x${userOp.maxPriorityFeePerGas.toString(16)}`,
-    paymasterAndData: userOp.paymasterAndData,
-    signature: userOp.signature,
-  };
+  const serializedOp = serializeUserOperationForRpc(userOp, version);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30_000);
@@ -611,8 +757,18 @@ export async function sendUserOperation(
       );
     }
 
+    if (
+      typeof json.result !== "string" ||
+      !/^0x[0-9a-fA-F]{64}$/.test(json.result)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_user_op_rejected",
+        "Bundler returned an invalid UserOperation hash.",
+      );
+    }
+
     return {
-      userOpHash: json.result as Hex,
+      userOpHash: json.result,
       sender: userOp.sender,
       nonce: userOp.nonce,
     };
@@ -635,26 +791,35 @@ export async function estimateUserOperationGas(
   userOp: Partial<UserOperation>,
   entryPoint: Address,
   bundlerUrl: string,
+  version: UserOperationVersion = "0.7",
 ): Promise<UserOperationGasEstimate> {
   if (!bundlerUrl) {
     throw new AccountAbstractionError("aa_no_bundler");
   }
 
   // Serialize for RPC
-  const serializedOp = {
+  const partial = {
     sender: userOp.sender ?? "0x0000000000000000000000000000000000000000",
-    nonce: `0x${(userOp.nonce ?? 0n).toString(16)}`,
+    nonce: userOp.nonce ?? 0n,
     initCode: userOp.initCode ?? "0x",
     callData: userOp.callData ?? "0x",
     accountGasLimits:
       userOp.accountGasLimits ??
       `0x${DEFAULT_VERIFICATION_GAS_LIMIT.toString(16).padStart(32, "0")}${DEFAULT_CALL_GAS_LIMIT.toString(16).padStart(32, "0")}`,
-    preVerificationGas: `0x${(userOp.preVerificationGas ?? DEFAULT_PRE_VERIFICATION_GAS).toString(16)}`,
-    maxFeePerGas: `0x${(userOp.maxFeePerGas ?? 0n).toString(16)}`,
-    maxPriorityFeePerGas: `0x${(userOp.maxPriorityFeePerGas ?? 0n).toString(16)}`,
+    gasFees:
+      userOp.gasFees ??
+      encodeGasFees(
+        userOp.maxPriorityFeePerGas ?? 0n,
+        userOp.maxFeePerGas ?? 0n,
+      ),
+    preVerificationGas:
+      userOp.preVerificationGas ?? DEFAULT_PRE_VERIFICATION_GAS,
     paymasterAndData: userOp.paymasterAndData ?? "0x",
     signature: userOp.signature ?? "0x",
-  };
+    maxFeePerGas: userOp.maxFeePerGas ?? 0n,
+    maxPriorityFeePerGas: userOp.maxPriorityFeePerGas ?? 0n,
+  } as UserOperation;
+  const serializedOp = serializeUserOperationForRpc(partial, version);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15_000);
@@ -673,67 +838,109 @@ export async function estimateUserOperationGas(
         }),
         signal: controller.signal,
       });
-    } catch {
-      // Network error (DNS failure, timeout, etc.) — return defaults
-      return {
-        callGasLimit: DEFAULT_CALL_GAS_LIMIT,
-        verificationGasLimit: DEFAULT_VERIFICATION_GAS_LIMIT,
-        preVerificationGas: DEFAULT_PRE_VERIFICATION_GAS,
-      };
+    } catch (error) {
+      throw new AccountAbstractionError(
+        "aa_estimation_failed",
+        "Failed to connect to bundler for gas estimation.",
+        error,
+      );
     }
 
     if (!response.ok) {
-      return {
-        callGasLimit: DEFAULT_CALL_GAS_LIMIT,
-        verificationGasLimit: DEFAULT_VERIFICATION_GAS_LIMIT,
-        preVerificationGas: DEFAULT_PRE_VERIFICATION_GAS,
-      };
+      throw new AccountAbstractionError(
+        "aa_estimation_failed",
+        `Bundler returned status ${response.status} during gas estimation.`,
+      );
     }
 
-    const json = (await response.json().catch(() => ({}))) as {
+    let json: {
       result?: {
         callGasLimit?: string;
         verificationGasLimit?: string;
         preVerificationGas?: string;
         accountGasLimits?: string;
+        paymasterVerificationGasLimit?: string;
       };
       error?: { code: number; message: string };
     };
-
-    if (json.error || !json.result) {
-      // If estimation fails, return default values
-      return {
-        callGasLimit: DEFAULT_CALL_GAS_LIMIT,
-        verificationGasLimit: DEFAULT_VERIFICATION_GAS_LIMIT,
-        preVerificationGas: DEFAULT_PRE_VERIFICATION_GAS,
-      };
+    try {
+      json = (await response.json()) as typeof json;
+    } catch (error) {
+      throw new AccountAbstractionError(
+        "aa_estimation_failed",
+        "Bundler returned invalid JSON during gas estimation.",
+        error,
+      );
     }
 
-    const result = json.result!;
+    if (json.error || !json.result) {
+      throw new AccountAbstractionError(
+        "aa_estimation_failed",
+        json.error?.message ?? "Bundler returned no gas estimate.",
+        json.error,
+      );
+    }
+
+    const result = json.result;
+    const parseEstimate = (value: unknown, field: string): bigint => {
+      if (
+        typeof value !== "string" ||
+        !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)
+      ) {
+        throw new AccountAbstractionError(
+          "aa_estimation_failed",
+          `Bundler returned an invalid ${field}.`,
+        );
+      }
+      return BigInt(value);
+    };
 
     // Try to decode accountGasLimits (v0.7)
     if (result.accountGasLimits) {
-      const raw = result.accountGasLimits.replace("0x", "");
+      if (!/^0x[0-9a-fA-F]{64}$/.test(result.accountGasLimits)) {
+        throw new AccountAbstractionError(
+          "aa_estimation_failed",
+          "Bundler returned invalid packed accountGasLimits.",
+        );
+      }
+      const raw = result.accountGasLimits.slice(2);
       return {
         callGasLimit: BigInt(`0x${raw.slice(32, 64)}`),
         verificationGasLimit: BigInt(`0x${raw.slice(0, 32)}`),
-        preVerificationGas: result.preVerificationGas
-          ? BigInt(result.preVerificationGas)
-          : DEFAULT_PRE_VERIFICATION_GAS,
+        preVerificationGas: parseEstimate(
+          result.preVerificationGas,
+          "preVerificationGas",
+        ),
         accountGasLimits: result.accountGasLimits as Hex,
+        ...(result.paymasterVerificationGasLimit === undefined
+          ? {}
+          : {
+              paymasterVerificationGasLimit: parseEstimate(
+                result.paymasterVerificationGasLimit,
+                "paymasterVerificationGasLimit",
+              ),
+            }),
       };
     }
 
     return {
-      callGasLimit: result.callGasLimit
-        ? BigInt(result.callGasLimit)
-        : DEFAULT_CALL_GAS_LIMIT,
-      verificationGasLimit: result.verificationGasLimit
-        ? BigInt(result.verificationGasLimit)
-        : DEFAULT_VERIFICATION_GAS_LIMIT,
-      preVerificationGas: result.preVerificationGas
-        ? BigInt(result.preVerificationGas)
-        : DEFAULT_PRE_VERIFICATION_GAS,
+      callGasLimit: parseEstimate(result.callGasLimit, "callGasLimit"),
+      verificationGasLimit: parseEstimate(
+        result.verificationGasLimit,
+        "verificationGasLimit",
+      ),
+      preVerificationGas: parseEstimate(
+        result.preVerificationGas,
+        "preVerificationGas",
+      ),
+      ...(result.paymasterVerificationGasLimit === undefined
+        ? {}
+        : {
+            paymasterVerificationGasLimit: parseEstimate(
+              result.paymasterVerificationGasLimit,
+              "paymasterVerificationGasLimit",
+            ),
+          }),
     };
   } finally {
     clearTimeout(timeoutId);
