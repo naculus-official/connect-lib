@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { IndexedDbStorageAdapter } from "../indexed-db";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { WalletData } from "../../wallet";
+import { IndexedDbStorageAdapter } from "../indexed-db";
 
 const mockData: WalletData = {
   mnemonic: "test test test test test test test test test test test test",
@@ -27,6 +27,24 @@ describe("IndexedDbStorageAdapter", () => {
     expect(loaded).toEqual(mockData);
   });
 
+  it("repairs an empty v1 database created before the wallet engine", async () => {
+    const { IDBFactory } = await import("fake-indexeddb");
+    const isolatedIndexedDb = new IDBFactory();
+    vi.stubGlobal("indexedDB", isolatedIndexedDb);
+    await new Promise<void>((resolve, reject) => {
+      const request = isolatedIndexedDb.open("naculus_wallet", 1);
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+
+    const adapter = new IndexedDbStorageAdapter("repaired_wallet");
+    await expect(adapter.save(mockData)).resolves.toBeUndefined();
+    await expect(adapter.load()).resolves.toEqual(mockData);
+  });
+
   it("clears stored data", async () => {
     const key = "test_clear_" + Date.now();
     const adapter = new IndexedDbStorageAdapter(key);
@@ -37,7 +55,9 @@ describe("IndexedDbStorageAdapter", () => {
   });
 
   it("returns null when no data stored", async () => {
-    const adapter = new IndexedDbStorageAdapter("test_nonexistent_" + Date.now());
+    const adapter = new IndexedDbStorageAdapter(
+      "test_nonexistent_" + Date.now(),
+    );
     const loaded = await adapter.load();
     expect(loaded).toBeNull();
   });

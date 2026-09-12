@@ -4,7 +4,10 @@ import type { StorageAdapter } from "./types";
 
 const DB_NAME = "naculus_wallet";
 const STORE_NAME = "wallets";
-const DB_VERSION = 1;
+// Version 2 repairs databases that were previously opened by a read-only
+// probe (or another client) at v1 before the wallet store existed. Upgrading
+// preserves any valid v1 wallet records and creates only the missing store.
+const DB_VERSION = 2;
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {

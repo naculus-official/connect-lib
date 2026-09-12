@@ -6,7 +6,8 @@
  * - Account deployment via factory contract
  * - Deploy-and-execute (merge deploy into first UserOperation)
  *
- * Supports SimpleAccount (eth-infinitism) with EntryPoint v0.7.
+ * Supports the official eth-infinitism SimpleAccount ABIs paired with
+ * EntryPoint v0.6 and v0.7 deployments.
  *
  * @see docs/features/account-abstraction.md
  */
@@ -20,11 +21,8 @@ import {
   type BundlerClient,
   type Call,
   DEFAULT_CALL_GAS_LIMIT,
-  DEFAULT_ENTRY_POINT,
   DEFAULT_PRE_VERIFICATION_GAS,
   DEFAULT_VERIFICATION_GAS_LIMIT,
-  ENTRY_POINT_V0_6,
-  ENTRY_POINT_V0_7,
   type Hex,
   type PaymasterConfig,
   type SendUserOpOptions,
@@ -36,17 +34,37 @@ import {
   type UserOperationReceipt,
   type UserOperationResponse,
 } from "./types";
-import { buildUserOperation, signUserOperation } from "./user-operation";
+import {
+  buildUserOperation,
+  encodeGasFees,
+  encodeGasLimits,
+  serializeUserOperationForRpc,
+  signUserOperation,
+  signUserOperationV06,
+} from "./user-operation";
 
 /**
  * Hash map of known factory addresses for each account type.
  * Keyed by chain ID (CAIP-2 format).
  */
 function getFactoryAddress(
-  _chainId: string,
-  _accountType: AccountType,
-): Address {
-  return SIMPLE_ACCOUNT_FACTORY;
+  chainId: string,
+  accountType: AccountType,
+): Address | null {
+  // Only the eth-infinitism SimpleAccount factory is implemented here.
+  // Never silently use it for a different account implementation.
+  if (accountType !== "simple") return null;
+  // The factory embeds the EntryPoint in its account implementation. Resolve
+  // it from the chain registry so v0.6 and v0.7 can never be mixed.
+  //
+  // No fallback. `?? SIMPLE_ACCOUNT_FACTORY` contradicted the line above: it
+  // returned the v0.7 factory for any chain the registry does not know, which
+  // would be an address derived from a contract that is not deployed there.
+  // validateAccountConfig currently rejects those chains first with
+  // aa_no_entry_point, so this was not reachable — but relying on a caller
+  // upstream to have checked is exactly how such a fallback becomes live
+  // again, and there is no chain for which guessing a factory is correct.
+  return AA_SUPPORTED_CHAINS[chainId]?.factory ?? null;
 }
 
 /**
@@ -58,29 +76,181 @@ function getEntryPointForChain(chainId: string): Address | null {
   return null;
 }
 
-/**
- * Compute the keccak256 hash of a hex string.
- */
-async function keccak256(data: Hex): Promise<Hex> {
-  const { keccak_256 } = await import("@noble/hashes/sha3");
-  const { bytesToHex } = await import("@noble/hashes/utils");
-  const raw = data.startsWith("0x") ? data.slice(2) : data;
-  const bytes = new Uint8Array(raw.length / 2);
-  for (let i = 0; i < raw.length; i += 2) {
-    bytes[i / 2] = parseInt(raw.slice(i, i + 2), 16);
+function getUserOperationVersion(chainId: string): "0.6" | "0.7" {
+  const info = AA_SUPPORTED_CHAINS[chainId];
+  if (!info) throw new AccountAbstractionError("aa_unsupported_chain");
+  return info.version;
+}
+
+function validateCalls(calls: Call[]): void {
+  if (!Array.isArray(calls) || calls.length === 0) {
+    throw new AccountAbstractionError("aa_no_calls");
   }
-  return `0x${bytesToHex(keccak_256(bytes))}` as Hex;
+  for (const call of calls) {
+    if (
+      !call ||
+      typeof call !== "object" ||
+      typeof call.to !== "string" ||
+      !/^0x[0-9a-fA-F]{40}$/.test(call.to) ||
+      typeof call.value !== "bigint" ||
+      call.value < 0n ||
+      call.value >= 1n << 256n ||
+      typeof call.data !== "string" ||
+      !/^0x(?:[0-9a-fA-F]{2})*$/.test(call.data)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Calls must contain a 20-byte address, uint256 value, and even-length hex data.",
+      );
+    }
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAddress(value: unknown): value is Address {
+  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
+function isBytes32(value: unknown): value is Hex {
+  return typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+function isHexData(value: unknown): value is Hex {
+  return typeof value === "string" && /^0x(?:[0-9a-fA-F]{2})*$/.test(value);
+}
+
+function parseRpcQuantity(value: unknown, field: string): bigint {
+  if (
+    typeof value !== "string" ||
+    !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)
+  ) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      `Bundler returned an invalid ${field}.`,
+    );
+  }
+  return BigInt(value);
+}
+
+function parseUserOperationReceipt(
+  value: unknown,
+  expectedHash: Hex,
+  expectedEntryPoint: Address,
+): UserOperationReceipt {
+  if (!isRecord(value)) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Bundler returned an invalid UserOperation receipt.",
+    );
+  }
+  if (
+    !isBytes32(value.userOpHash) ||
+    value.userOpHash.toLowerCase() !== expectedHash.toLowerCase()
+  ) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Bundler receipt does not match the requested UserOperation hash.",
+    );
+  }
+  if (
+    !isAddress(value.entryPoint) ||
+    value.entryPoint.toLowerCase() !== expectedEntryPoint.toLowerCase()
+  ) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Bundler receipt does not match the configured EntryPoint.",
+    );
+  }
+  if (!isAddress(value.sender)) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Bundler receipt contains an invalid sender address.",
+    );
+  }
+  if (
+    value.paymaster !== undefined &&
+    value.paymaster !== null &&
+    !isAddress(value.paymaster)
+  ) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Bundler receipt contains an invalid paymaster address.",
+    );
+  }
+  if (typeof value.success !== "boolean" || !isBytes32(value.transactionHash)) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Bundler receipt contains an invalid execution result.",
+    );
+  }
+  if (!Array.isArray(value.logs)) {
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Bundler receipt contains invalid logs.",
+    );
+  }
+
+  const logs = value.logs.map((candidate) => {
+    if (
+      !isRecord(candidate) ||
+      !isAddress(candidate.address) ||
+      !Array.isArray(candidate.topics) ||
+      !candidate.topics.every(isBytes32) ||
+      !isHexData(candidate.data)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_rpc_error",
+        "Bundler receipt contains an invalid log entry.",
+      );
+    }
+    return {
+      address: candidate.address,
+      topics: candidate.topics,
+      data: candidate.data,
+    };
+  });
+
+  return {
+    userOpHash: value.userOpHash,
+    entryPoint: value.entryPoint,
+    sender: value.sender,
+    nonce: parseRpcQuantity(value.nonce, "nonce"),
+    ...(value.paymaster === undefined || value.paymaster === null
+      ? {}
+      : { paymaster: value.paymaster }),
+    actualGasUsed: parseRpcQuantity(value.actualGasUsed, "actualGasUsed"),
+    actualGasCost: parseRpcQuantity(value.actualGasCost, "actualGasCost"),
+    success: value.success,
+    transactionHash: value.transactionHash,
+    logs,
+  };
 }
 
 /**
  * Encode the createAccount call data for the SimpleAccountFactory.
  * The factory's `createAccount(address owner, uint256 salt)` returns the account address.
  *
- * ABI: createAccount(address,uint256) = 0xcf7aba77
+ * ABI: createAccount(address,uint256) — selector is the first 4 bytes of
+ * keccak256("createAccount(address,uint256)") = 0x5fbfb9cf. The previous value
+ * (0xcf7aba77) matched no factory signature, so both the counterfactual
+ * address lookup and the deployment initCode called a function the
+ * SimpleAccountFactory does not expose.
  * Args: owner (left-padded to 32 bytes) + salt (left-padded to 32 bytes)
  */
 function encodeCreateAccount(owner: Address, salt: bigint): Hex {
-  const selector = "0xcf7aba77";
+  const selector = "0x5fbfb9cf";
+  if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) {
+    throw new AccountAbstractionError("aa_invalid_owner");
+  }
+  if (salt < 0n || salt >= 1n << 256n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Account salt must fit in uint256.",
+    );
+  }
   const ownerArg = owner.toLowerCase().replace("0x", "").padStart(64, "0");
   const saltArg = salt.toString(16).padStart(64, "0");
   return `${selector}${ownerArg}${saltArg}` as Hex;
@@ -92,17 +262,37 @@ function encodeCreateAccount(owner: Address, salt: bigint): Hex {
  */
 function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
   const selector = "0xb61d27f6";
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Invalid call target address.",
+    );
+  }
   const toArg = to.toLowerCase().replace("0x", "").padStart(64, "0");
+  if (value < 0n || value >= 1n << 256n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Call value cannot be negative.",
+    );
+  }
   const valueArg = value.toString(16).padStart(64, "0");
-  // Dynamic bytes: offset + length + data
-  const dataOffset = toArg.length / 2 + valueArg.length / 2 + 64; // 32 bytes for offset
+  // ABI offsets are relative to the start of the argument block. The bytes
+  // tail starts after all three head words: to, value, and the offset itself.
+  const dataOffset = toArg.length / 2 + valueArg.length / 2 + 32;
   const dataLen = data.startsWith("0x")
     ? (data.length - 2) / 2
     : data.length / 2;
-  const offsetArg = `00000000000000000000000000000000000000000000000000000000000000${dataOffset.toString(16).padStart(2, "0")}`;
-  const lengthArg = dataLen.toString(16).padStart(64, "0");
   const dataRaw = data.replace("0x", "");
-  return `${selector}${toArg}${valueArg}${offsetArg}${lengthArg}${dataRaw}` as Hex;
+  if (dataRaw.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(dataRaw)) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Call data must be valid hexadecimal.",
+    );
+  }
+  const offsetArg = dataOffset.toString(16).padStart(64, "0");
+  const lengthArg = dataLen.toString(16).padStart(64, "0");
+  const paddedData = dataRaw.padEnd(Math.ceil(dataRaw.length / 64) * 64, "0");
+  return `${selector}${toArg}${valueArg}${offsetArg}${lengthArg}${paddedData}` as Hex;
 }
 
 /**
@@ -111,46 +301,140 @@ function encodeExecute(to: Address, value: bigint, data: Hex): Hex {
  *
  * For simplicity, we only pass one array of calldata elements.
  */
-function encodeExecuteBatch(calls: Call[]): Hex {
-  const selector = "0x47e1da2a";
-  return `${selector}${encodeExecuteBatchCalls(calls)}` as Hex;
+function encodeExecuteBatch(calls: Call[], version: "0.6" | "0.7"): Hex {
+  if (version === "0.6" && calls.some((call) => call.value !== 0n)) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "SimpleAccount v0.6 executeBatch cannot transfer native value; use separate UserOperations or EntryPoint v0.7.",
+    );
+  }
+  const selector = version === "0.6" ? "0x18dfb3c7" : "0x47e1da2a";
+  return `${selector}${version === "0.6" ? encodeExecuteBatchV06Calls(calls) : encodeExecuteBatchCalls(calls)}` as Hex;
 }
 
 function encodeExecuteBatchCalls(calls: Call[]): string {
   const n = calls.length;
-  const nWord = n.toString(16).padStart(64, "0");
-
-  // Each array: [length(32B)] + [n elements padded to 32B each]
+  const word = (value: bigint | number): string => {
+    if (
+      typeof value === "number" &&
+      (!Number.isSafeInteger(value) || value < 0)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Array length is invalid.",
+      );
+    }
+    if (typeof value === "bigint" && (value < 0n || value >= 1n << 256n)) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "ABI integer is out of range.",
+      );
+    }
+    return BigInt(value).toString(16).padStart(64, "0");
+  };
   const toArray =
-    nWord +
+    word(n) +
     calls
-      .map((c) => c.to.toLowerCase().replace("0x", "").padStart(64, "0"))
+      .map((c) => {
+        if (!/^0x[0-9a-fA-F]{40}$/.test(c.to)) {
+          throw new AccountAbstractionError(
+            "aa_encode_error",
+            "Invalid call target address.",
+          );
+        }
+        return word(BigInt(`0x${c.to.toLowerCase().replace("0x", "")}`));
+      })
       .join("");
-  const valuesArray =
-    nWord + calls.map((c) => c.value.toString(16).padStart(64, "0")).join("");
-  // Datas: dynamic bytes array
-  const datDatas = calls
-    .map((c) => {
-      const rawData = c.data.replace("0x", "");
-      const dataLen = rawData.length / 2;
-      return dataLen.toString(16).padStart(64, "0") + rawData;
-    })
-    .join("");
-  const datasArray = nWord + datDatas;
+  const valuesArray = word(n) + calls.map((c) => word(c.value)).join("");
+  const tails = calls.map((c) => {
+    if (c.value < 0n) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Call value cannot be negative.",
+      );
+    }
+    const rawData = c.data.replace("0x", "");
+    if (rawData.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(rawData)) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Call data must be valid hexadecimal.",
+      );
+    }
+    const padded = rawData.padEnd(Math.ceil(rawData.length / 64) * 64, "0");
+    return word(rawData.length / 2) + padded;
+  });
+  const datasArray =
+    word(n) +
+    tails
+      .map((_, i) =>
+        word(
+          tails
+            .slice(0, i)
+            .reduce((sum, tail) => sum + tail.length / 2, n * 32),
+        ),
+      )
+      .join("") +
+    tails.join("");
 
   const toArrayLen = 32 + n * 32;
   const valuesArrayLen = 32 + n * 32;
-  const datasArrayLen = 32 + datDatas.length / 2;
-
-  const toOffset = (96).toString(16).padStart(64, "0"); // after 3 head words
-  const valuesOffset = (96 + toArrayLen).toString(16).padStart(64, "0");
-  const datasOffset = (96 + toArrayLen + valuesArrayLen)
-    .toString(16)
-    .padStart(64, "0");
+  const toOffset = word(96); // after 3 head words
+  const valuesOffset = word(96 + toArrayLen);
+  const datasOffset = word(96 + toArrayLen + valuesArrayLen);
 
   return (
     toOffset + valuesOffset + datasOffset + toArray + valuesArray + datasArray
   );
+}
+
+/** ABI payload for SimpleAccount v0.6 executeBatch(address[],bytes[]). */
+function encodeExecuteBatchV06Calls(calls: Call[]): string {
+  const n = calls.length;
+  const word = (value: bigint | number): string => {
+    if (
+      typeof value === "number" &&
+      (!Number.isSafeInteger(value) || value < 0)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "Array length is invalid.",
+      );
+    }
+    if (typeof value === "bigint" && (value < 0n || value >= 1n << 256n)) {
+      throw new AccountAbstractionError(
+        "aa_encode_error",
+        "ABI integer is out of range.",
+      );
+    }
+    return BigInt(value).toString(16).padStart(64, "0");
+  };
+  const toArray =
+    word(n) +
+    calls
+      .map((call) =>
+        word(BigInt(`0x${call.to.toLowerCase().replace("0x", "")}`)),
+      )
+      .join("");
+  const tails = calls.map((call) => {
+    const rawData = call.data.replace("0x", "");
+    const padded = rawData.padEnd(Math.ceil(rawData.length / 64) * 64, "0");
+    return word(rawData.length / 2) + padded;
+  });
+  const dataArray =
+    word(n) +
+    tails
+      .map((_, index) =>
+        word(
+          tails
+            .slice(0, index)
+            .reduce((sum, tail) => sum + tail.length / 2, n * 32),
+        ),
+      )
+      .join("") +
+    tails.join("");
+  const toArrayLength = 32 + n * 32;
+  const headSize = 32 * 2;
+  return word(headSize) + word(headSize + toArrayLength) + toArray + dataArray;
 }
 
 /**
@@ -228,6 +512,10 @@ export interface SmartAccountManagerConfig {
   defaultPaymasterConfig?: PaymasterConfig;
   /** Chain ID in CAIP-2 format */
   chainId: string;
+  /** Sign the ERC-4337 userOpHash (EIP-191 by default for SimpleAccount). */
+  signer?: (hash: Hex) => Promise<Hex> | Hex;
+  /** Signature preimage expected by the account implementation. SimpleAccount uses EIP-191. */
+  signerMode?: "raw" | "eip191";
 }
 
 export class SmartAccountManager {
@@ -258,7 +546,7 @@ export class SmartAccountManager {
    */
   async getAccountAddress(config: SmartAccountConfig): Promise<Address> {
     const chainId = config.chainId ?? this.config.chainId;
-    const entryPoint = config.entryPoint ?? this.getEntryPoint(chainId);
+    this.validateAccountConfig(config, chainId);
     const factory = this.getFactory(chainId, config.accountType);
 
     const salt = config.salt ?? 0n;
@@ -275,7 +563,13 @@ export class SmartAccountManager {
 
     // The factory returns the account address (20 bytes, padded to 32)
     const raw = result.startsWith("0x") ? result.slice(2) : result;
-    const addressHex = `0x${raw.slice(raw.length - 40)}` as Address;
+    if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+      throw new AccountAbstractionError(
+        "aa_rpc_error",
+        "SimpleAccountFactory returned an invalid address encoding.",
+      );
+    }
+    const addressHex = `0x${raw.slice(-40)}` as Address;
     return addressHex;
   }
 
@@ -287,15 +581,8 @@ export class SmartAccountManager {
    * @returns Smart account info
    */
   async createAccount(config: SmartAccountConfig): Promise<SmartAccountInfo> {
-    if (
-      !config.owner ||
-      !config.owner.startsWith("0x") ||
-      config.owner.length !== 42
-    ) {
-      throw new AccountAbstractionError("aa_invalid_owner");
-    }
-
     const chainId = config.chainId ?? this.config.chainId;
+    this.validateAccountConfig(config, chainId);
     const address = await this.getAccountAddress(config);
     const isDeployed = await isContractDeployed(this.config.rpcUrl, address);
 
@@ -342,6 +629,7 @@ export class SmartAccountManager {
     value: bigint;
   }> {
     const chainId = config.chainId ?? this.config.chainId;
+    this.validateAccountConfig(config, chainId);
     const factory = this.getFactory(chainId, config.accountType);
     const salt = config.salt ?? 0n;
 
@@ -367,11 +655,10 @@ export class SmartAccountManager {
     calls: Call[],
     options?: SendUserOpOptions,
   ): Promise<UserOperationResponse> {
-    if (!calls.length) {
-      throw new AccountAbstractionError("aa_no_calls");
-    }
+    validateCalls(calls);
 
     const chainId = config.chainId ?? this.config.chainId;
+    const version = getUserOperationVersion(chainId);
     const address = await this.getAccountAddress(config);
 
     // Determine initCode (deploy if not deployed and not skipped)
@@ -394,42 +681,12 @@ export class SmartAccountManager {
     const callData =
       calls.length === 1
         ? encodeExecute(calls[0].to, calls[0].value, calls[0].data)
-        : encodeExecuteBatch(calls);
-
-    // Estimate gas
-    let gasEstimate: UserOperationGasEstimate;
-    try {
-      gasEstimate = await this.estimateUserOperationGas(entryPoint, {
-        sender: address,
-        nonce,
-        initCode,
-        callData,
-        paymasterAndData: "0x",
-        signature: "0x",
-      });
-    } catch {
-      // Fall back to defaults if estimation fails
-      gasEstimate = {
-        callGasLimit: DEFAULT_CALL_GAS_LIMIT,
-        verificationGasLimit: DEFAULT_VERIFICATION_GAS_LIMIT,
-        preVerificationGas: DEFAULT_PRE_VERIFICATION_GAS,
-      };
-    }
-
-    // Apply gas overrides
-    const callGasLimit =
-      options?.gasOverrides?.callGasLimit ?? gasEstimate.callGasLimit;
-    const verificationGasLimit =
-      options?.gasOverrides?.verificationGasLimit ??
-      gasEstimate.verificationGasLimit;
-    const preVerificationGas =
-      options?.gasOverrides?.preVerificationGas ??
-      gasEstimate.preVerificationGas;
+        : encodeExecuteBatch(calls, version);
 
     // Get fee data
     let maxFeePerGas: bigint;
     let maxPriorityFeePerGas: bigint;
-    if (options?.gasOverrides?.maxFeePerGas) {
+    if (options?.gasOverrides?.maxFeePerGas !== undefined) {
       maxFeePerGas = options.gasOverrides.maxFeePerGas;
       maxPriorityFeePerGas =
         options.gasOverrides.maxPriorityFeePerGas ??
@@ -440,6 +697,75 @@ export class SmartAccountManager {
       maxFeePerGas = baseFee * 2n + priorityFee;
       maxPriorityFeePerGas = priorityFee;
     }
+    if (maxPriorityFeePerGas > maxFeePerGas) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        "maxPriorityFeePerGas cannot exceed maxFeePerGas.",
+      );
+    }
+
+    const paymasterConfig =
+      options?.paymaster ?? this.config.defaultPaymasterConfig;
+    const paymasterService = paymasterConfig
+      ? (this.config.paymaster ??
+        new PaymasterService({
+          url: paymasterConfig.url,
+          type: paymasterConfig.type,
+          policy: paymasterConfig.policy,
+        }))
+      : undefined;
+    const paymasterRequest = paymasterService
+      ? {
+          entryPoint,
+          chainId: BigInt(chainId.split(":")[1]),
+          version,
+        }
+      : undefined;
+
+    // ERC-7677 stub data must be present during bundler estimation; otherwise
+    // the estimate ignores paymaster validation entirely and can succeed
+    // locally with gas limits the sponsored operation cannot use.
+    const provisionalUserOp = buildUserOperation({
+      sender: address,
+      nonce,
+      initCode,
+      callData,
+      accountGasLimits: encodeGasLimits(
+        options?.gasOverrides?.verificationGasLimit ?? 0n,
+        options?.gasOverrides?.callGasLimit ?? 0n,
+      ),
+      preVerificationGas: options?.gasOverrides?.preVerificationGas ?? 0n,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+      gasFees: encodeGasFees(maxPriorityFeePerGas, maxFeePerGas),
+      paymasterAndData: "0x",
+      signature: "0x",
+    });
+    const paymasterStub =
+      paymasterService && paymasterRequest
+        ? await paymasterService.getPaymasterStubData(
+            provisionalUserOp,
+            paymasterRequest,
+          )
+        : undefined;
+
+    const gasEstimate = await this.estimateUserOperationGas(
+      entryPoint,
+      {
+        ...provisionalUserOp,
+        paymasterAndData: paymasterStub?.paymasterAndData ?? "0x",
+      },
+      version,
+    );
+
+    const callGasLimit =
+      options?.gasOverrides?.callGasLimit ?? gasEstimate.callGasLimit;
+    const verificationGasLimit =
+      options?.gasOverrides?.verificationGasLimit ??
+      gasEstimate.verificationGasLimit;
+    const preVerificationGas =
+      options?.gasOverrides?.preVerificationGas ??
+      gasEstimate.preVerificationGas;
 
     // Build the v0.7 accountGasLimits
     const accountGasLimits = encodeGasLimits(
@@ -457,27 +783,51 @@ export class SmartAccountManager {
       preVerificationGas,
       maxFeePerGas,
       maxPriorityFeePerGas,
+      gasFees: encodeGasFees(maxPriorityFeePerGas, maxFeePerGas),
       paymasterAndData: "0x",
       signature: "0x",
     });
 
-    // Paymaster
-    const paymasterConfig =
-      options?.paymaster ?? this.config.defaultPaymasterConfig;
-    if (paymasterConfig) {
-      const paymasterService =
-        this.config.paymaster ??
-        new PaymasterService({
-          url: paymasterConfig.url,
-          type: paymasterConfig.type,
-          policy: paymasterConfig.policy,
-        });
-      const paymasterData = await paymasterService.getPaymasterData(userOp);
+    if (paymasterService && paymasterRequest && paymasterStub) {
+      const paymasterData = await paymasterService.getPaymasterFinalData(
+        userOp,
+        paymasterRequest,
+        paymasterStub,
+        gasEstimate.paymasterVerificationGasLimit,
+      );
       userOp = { ...userOp, paymasterAndData: paymasterData.paymasterAndData };
     }
 
+    if (!this.config.signer) {
+      throw new AccountAbstractionError(
+        "aa_signature_failed",
+        "A raw UserOperation signer is required before sending to a bundler.",
+      );
+    }
+    const signedUserOp =
+      version === "0.6"
+        ? await signUserOperationV06(
+            userOp,
+            this.config.signer,
+            entryPoint,
+            BigInt(chainId.split(":")[1]),
+            this.config.signerMode ?? "eip191",
+          )
+        : await signUserOperation(
+            userOp,
+            this.config.signer,
+            entryPoint,
+            BigInt(chainId.split(":")[1]),
+            this.config.signerMode ?? "eip191",
+          );
+    const userOpHash = await this.sendUserOpToBundler(
+      signedUserOp,
+      entryPoint,
+      version,
+    );
+
     return {
-      userOpHash: "0x", // Will be set after sending
+      userOpHash,
       sender: address,
       nonce,
     };
@@ -506,40 +856,117 @@ export class SmartAccountManager {
   async estimateUserOperationGas(
     entryPoint: Address,
     partialUserOp: Partial<UserOperation>,
+    version: "0.6" | "0.7" = "0.7",
   ): Promise<UserOperationGasEstimate> {
+    const expectedEntryPoint = this.getEntryPoint(this.config.chainId);
+    const expectedVersion = getUserOperationVersion(this.config.chainId);
+    if (
+      entryPoint.toLowerCase() !== expectedEntryPoint.toLowerCase() ||
+      version !== expectedVersion
+    ) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        `EntryPoint ${entryPoint} and UserOperation version ${version} do not match manager chain ${this.config.chainId}.`,
+      );
+    }
     const bundlerUrl = this.config.bundlerClient.url;
+    // sendUserOperation checks this; estimation did not, so an unconfigured
+    // bundler surfaced here as a fetch failure against an empty URL instead of
+    // naming the missing configuration.
+    if (!bundlerUrl) {
+      throw new AccountAbstractionError("aa_no_bundler");
+    }
     const params = {
       ...partialUserOp,
-      sender: partialUserOp.sender ?? "0x",
+      sender:
+        partialUserOp.sender ?? "0x0000000000000000000000000000000000000000",
       nonce: partialUserOp.nonce ?? 0n,
       initCode: partialUserOp.initCode ?? "0x",
       callData: partialUserOp.callData ?? "0x",
-      accountGasLimits: partialUserOp.accountGasLimits ?? "0x",
+      accountGasLimits:
+        partialUserOp.accountGasLimits ?? encodeGasLimits(0n, 0n),
+      gasFees:
+        partialUserOp.gasFees ??
+        encodeGasFees(
+          partialUserOp.maxPriorityFeePerGas ?? 0n,
+          partialUserOp.maxFeePerGas ?? 0n,
+        ),
       preVerificationGas: partialUserOp.preVerificationGas ?? 0n,
       maxFeePerGas: partialUserOp.maxFeePerGas ?? 0n,
       maxPriorityFeePerGas: partialUserOp.maxPriorityFeePerGas ?? 0n,
       paymasterAndData: partialUserOp.paymasterAndData ?? "0x",
       signature: partialUserOp.signature ?? "0x",
     };
+    const serializedParams = serializeUserOperationForRpc(
+      params as UserOperation,
+      version,
+    );
 
     const result = await rpcCall<{
       callGasLimit?: string;
       verificationGasLimit?: string;
       preVerificationGas?: string;
       accountGasLimits?: string;
-    }>(bundlerUrl, "eth_estimateUserOperationGas", [params, entryPoint]);
+      paymasterVerificationGasLimit?: string;
+    }>(bundlerUrl, "eth_estimateUserOperationGas", [
+      serializedParams,
+      entryPoint,
+    ]);
+    if (!result || typeof result !== "object") {
+      throw new AccountAbstractionError(
+        "aa_estimation_failed",
+        "Bundler returned no gas estimate.",
+      );
+    }
 
+    const parseEstimate = (value: unknown, field: string): bigint => {
+      if (
+        typeof value !== "string" ||
+        !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)
+      ) {
+        throw new AccountAbstractionError(
+          "aa_estimation_failed",
+          `Bundler returned an invalid ${field}.`,
+        );
+      }
+      return BigInt(value);
+    };
+
+    let callGasLimit: bigint;
+    let verificationGasLimit: bigint;
+    if (typeof result.accountGasLimits === "string") {
+      if (!/^0x[0-9a-fA-F]{64}$/.test(result.accountGasLimits)) {
+        throw new AccountAbstractionError(
+          "aa_estimation_failed",
+          "Bundler returned invalid packed accountGasLimits.",
+        );
+      }
+      const packed = result.accountGasLimits.slice(2);
+      verificationGasLimit = BigInt(`0x${packed.slice(0, 32)}`);
+      callGasLimit = BigInt(`0x${packed.slice(32)}`);
+    } else {
+      callGasLimit = parseEstimate(result.callGasLimit, "callGasLimit");
+      verificationGasLimit = parseEstimate(
+        result.verificationGasLimit,
+        "verificationGasLimit",
+      );
+    }
     return {
-      callGasLimit: result.callGasLimit
-        ? BigInt(result.callGasLimit)
-        : DEFAULT_CALL_GAS_LIMIT,
-      verificationGasLimit: result.verificationGasLimit
-        ? BigInt(result.verificationGasLimit)
-        : DEFAULT_VERIFICATION_GAS_LIMIT,
-      preVerificationGas: result.preVerificationGas
-        ? BigInt(result.preVerificationGas)
-        : DEFAULT_PRE_VERIFICATION_GAS,
+      callGasLimit,
+      verificationGasLimit,
+      preVerificationGas: parseEstimate(
+        result.preVerificationGas,
+        "preVerificationGas",
+      ),
       accountGasLimits: result.accountGasLimits as Hex | undefined,
+      ...(result.paymasterVerificationGasLimit === undefined
+        ? {}
+        : {
+            paymasterVerificationGasLimit: parseEstimate(
+              result.paymasterVerificationGasLimit,
+              "paymasterVerificationGasLimit",
+            ),
+          }),
     };
   }
 
@@ -547,36 +974,42 @@ export class SmartAccountManager {
    * Send a signed UserOperation to the bundler.
    * Returns the userOpHash which can be used to track the operation.
    */
-  async sendUserOpToBundler(userOp: UserOperation): Promise<Hex> {
+  async sendUserOpToBundler(
+    userOp: UserOperation,
+    entryPoint: Address = this.getEntryPoint(this.config.chainId),
+    version: "0.6" | "0.7" = getUserOperationVersion(this.config.chainId),
+  ): Promise<Hex> {
+    const expectedEntryPoint = this.getEntryPoint(this.config.chainId);
+    const expectedVersion = getUserOperationVersion(this.config.chainId);
+    if (
+      entryPoint.toLowerCase() !== expectedEntryPoint.toLowerCase() ||
+      version !== expectedVersion
+    ) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        `EntryPoint ${entryPoint} and UserOperation version ${version} do not match manager chain ${this.config.chainId}.`,
+      );
+    }
     const bundlerUrl = this.config.bundlerClient.url;
 
     if (!bundlerUrl) {
       throw new AccountAbstractionError("aa_no_bundler");
     }
 
-    // Serialize UserOperation for RPC: bigint → hex string (even-length, per Ethereum JSON-RPC convention)
-    const bigintToEvenHex = (n: bigint): string => {
-      const hex = n.toString(16);
-      return hex.length % 2 === 0 ? `0x${hex}` : `0x0${hex}`;
-    };
-    const serializedOp = {
-      sender: userOp.sender,
-      nonce: bigintToEvenHex(userOp.nonce),
-      initCode: userOp.initCode,
-      callData: userOp.callData,
-      accountGasLimits: userOp.accountGasLimits,
-      preVerificationGas: bigintToEvenHex(userOp.preVerificationGas),
-      maxFeePerGas: bigintToEvenHex(userOp.maxFeePerGas),
-      maxPriorityFeePerGas: bigintToEvenHex(userOp.maxPriorityFeePerGas),
-      paymasterAndData: userOp.paymasterAndData,
-      signature: userOp.signature,
-    };
+    const serializedOp = serializeUserOperationForRpc(userOp, version);
 
-    const userOpHash = await rpcCall<Hex>(
+    const userOpHash = await rpcCall<unknown>(
       bundlerUrl,
       "eth_sendUserOperation",
-      [serializedOp, userOp.sender], // EntryPoint may be needed here
+      [serializedOp, entryPoint],
     );
+
+    if (!isBytes32(userOpHash)) {
+      throw new AccountAbstractionError(
+        "aa_rpc_error",
+        "Bundler returned an invalid UserOperation hash.",
+      );
+    }
 
     return userOpHash;
   }
@@ -591,37 +1024,50 @@ export class SmartAccountManager {
   ): Promise<UserOperationReceipt | null> {
     const bundlerUrl = this.config.bundlerClient.url;
 
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const result = await rpcCall<{
-          userOpHash: Hex;
-          entryPoint: Address;
-          sender: Address;
-          nonce: string;
-          paymaster?: Address;
-          actualGasUsed: string;
-          actualGasCost: string;
-          success: boolean;
-          transactionHash: Hex;
-          logs: Array<{ address: Address; topics: Hex[]; data: Hex }>;
-        } | null>(bundlerUrl, "eth_getUserOperationReceipt", [userOpHash]);
+    if (!bundlerUrl) {
+      throw new AccountAbstractionError("aa_no_bundler");
+    }
+    if (!isBytes32(userOpHash)) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        "UserOperation hash must be a 32-byte hex value.",
+      );
+    }
+    if (!Number.isSafeInteger(maxRetries) || maxRetries < 1) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        "maxRetries must be a positive safe integer.",
+      );
+    }
+    if (!Number.isSafeInteger(intervalMs) || intervalMs < 0) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        "intervalMs must be a non-negative safe integer.",
+      );
+    }
+    const expectedEntryPoint = this.getEntryPoint(this.config.chainId);
 
-        if (result) {
-          return {
-            userOpHash: result.userOpHash,
-            entryPoint: result.entryPoint,
-            sender: result.sender,
-            nonce: BigInt(result.nonce),
-            paymaster: result.paymaster,
-            actualGasUsed: BigInt(result.actualGasUsed),
-            actualGasCost: BigInt(result.actualGasCost),
-            success: result.success,
-            transactionHash: result.transactionHash,
-            logs: result.logs,
-          };
-        }
+    for (let i = 0; i < maxRetries; i++) {
+      let result: unknown = null;
+      try {
+        result = await rpcCall<unknown>(
+          bundlerUrl,
+          "eth_getUserOperationReceipt",
+          [userOpHash],
+        );
       } catch {
-        // Continue polling
+        // Transient RPC and transport failures remain retryable.
+      }
+
+      // Parse outside the retry catch. Once a bundler returns a non-null
+      // receipt, malformed or mismatched data is an integrity failure rather
+      // than a pending operation and must not be hidden as a timeout.
+      if (result !== null && result !== undefined) {
+        return parseUserOperationReceipt(
+          result,
+          userOpHash,
+          expectedEntryPoint,
+        );
       }
 
       if (i < maxRetries - 1) {
@@ -664,12 +1110,20 @@ export class SmartAccountManager {
         ["latest", false],
       );
       if (block?.baseFeePerGas) {
-        return BigInt(block.baseFeePerGas);
+        const fee = BigInt(block.baseFeePerGas);
+        if (fee >= 0n) return fee;
       }
-    } catch {
-      // RPC failed — use fallback
+    } catch (error) {
+      throw new AccountAbstractionError(
+        "aa_rpc_error",
+        "Failed to read the target chain base fee.",
+        error,
+      );
     }
-    return 10_000_000_000n; // 10 gwei fallback
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Target chain did not return a base fee.",
+    );
   }
 
   /**
@@ -682,10 +1136,19 @@ export class SmartAccountManager {
         "eth_maxPriorityFeePerGas",
         [],
       );
-      return BigInt(result);
-    } catch {
-      return 1_000_000_000n; // 1 gwei fallback
+      const fee = BigInt(result);
+      if (fee >= 0n) return fee;
+    } catch (error) {
+      throw new AccountAbstractionError(
+        "aa_rpc_error",
+        "Failed to read the target chain priority fee.",
+        error,
+      );
     }
+    throw new AccountAbstractionError(
+      "aa_rpc_error",
+      "Target chain returned an invalid priority fee.",
+    );
   }
 
   // ── Private Helpers ─────────────────────────────────────────────
@@ -699,29 +1162,58 @@ export class SmartAccountManager {
   }
 
   private getFactory(chainId: string, accountType: AccountType): Address {
+    if (accountType !== "simple") {
+      throw new AccountAbstractionError(
+        "aa_unknown_account_type",
+        `Account type "${accountType}" is not implemented by this module.`,
+      );
+    }
     const factory = getFactoryAddress(chainId, accountType);
     if (!factory) {
-      throw new AccountAbstractionError("aa_no_factory");
+      // Distinguished from the account-type error: the caller needs to know
+      // it is the chain that is unsupported, not their configuration.
+      throw new AccountAbstractionError(
+        "aa_unsupported_chain",
+        `No SimpleAccount factory is registered for ${chainId}. Account ` +
+          `abstraction requires a chain with a known EntryPoint and factory.`,
+      );
     }
     return factory;
+  }
+
+  private validateAccountConfig(
+    config: SmartAccountConfig,
+    chainId: string,
+  ): void {
+    // Resolve first so an unknown chain reports the more specific missing
+    // EntryPoint error rather than being obscured by a transport mismatch.
+    const expectedEntryPoint = this.getEntryPoint(chainId);
+    // The manager owns one RPC/bundler transport. Refuse a per-account chain
+    // override unless it matches that transport; otherwise a caller could
+    // derive or submit a valid-looking UserOperation against the wrong chain.
+    if (chainId !== this.config.chainId) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        `Account chain ${chainId} does not match manager chain ${this.config.chainId}.`,
+      );
+    }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(config.owner)) {
+      throw new AccountAbstractionError("aa_invalid_owner");
+    }
+    const configuredEntryPoint = config.entryPoint;
+    if (
+      configuredEntryPoint &&
+      configuredEntryPoint.toLowerCase() !== expectedEntryPoint.toLowerCase()
+    ) {
+      throw new AccountAbstractionError(
+        "aa_no_entry_point",
+        `EntryPoint ${configuredEntryPoint} is not the registered EntryPoint for ${chainId}.`,
+      );
+    }
   }
 }
 
 // ─── Utility ───────────────────────────────────────────────────────────
-
-/**
- * Encode account gas limits as a packed 32-byte value (v0.7).
- * High 16 bytes = verificationGasLimit
- * Low 16 bytes = callGasLimit
- */
-export function encodeGasLimits(
-  verificationGasLimit: bigint,
-  callGasLimit: bigint,
-): Hex {
-  const vglHex = verificationGasLimit.toString(16).padStart(32, "0");
-  const cglHex = callGasLimit.toString(16).padStart(32, "0");
-  return `0x${vglHex}${cglHex}` as Hex;
-}
 
 /**
  * Decode account gas limits from packed 32-byte value (v0.7).
@@ -733,6 +1225,12 @@ export function decodeGasLimits(accountGasLimits: Hex): {
   const raw = accountGasLimits.startsWith("0x")
     ? accountGasLimits.slice(2)
     : accountGasLimits;
+  if (raw.length !== 64 || !/^[0-9a-fA-F]+$/.test(raw)) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Packed account gas limits must be exactly 32 bytes.",
+    );
+  }
   const verificationGasLimit = BigInt(`0x${raw.slice(0, 32)}`);
   const callGasLimit = BigInt(`0x${raw.slice(32, 64)}`);
   return { verificationGasLimit, callGasLimit };
