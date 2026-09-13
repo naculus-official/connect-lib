@@ -1,3 +1,4 @@
+import { isValidAddress } from "../address-validation";
 import { DEFAULT_RPC_URLS } from "../rpc";
 import { ENSProvider } from "./providers/ens";
 import { SNSProvider } from "./providers/sns";
@@ -16,7 +17,10 @@ function defaultEnsRpc(): string {
 }
 
 function defaultSnsRpc(): string {
-  return DEFAULT_RPC_URLS["solana:0"] ?? "https://api.mainnet-beta.solana.com";
+  return (
+    DEFAULT_RPC_URLS["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"] ??
+    "https://api.mainnet-beta.solana.com"
+  );
 }
 
 // ── Name Detector ────────────────────────────────────────────────
@@ -175,6 +179,12 @@ export class NameResolver {
 
     // Determine chain type from address format or chainId
     const chainType = this.detectChainType(cleanAddr, chainId);
+    if (!isValidAddress(cleanAddr, chainType)) {
+      throw new ResolutionError(
+        "INVALID_ADDRESS",
+        `Invalid ${chainType} address: "${cleanAddr}"`,
+      );
+    }
 
     // Check cache
     const cacheKey = `lookup:${cleanAddr.toLowerCase()}:${chainType}`;

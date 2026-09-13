@@ -12,6 +12,7 @@
  */
 
 import { rpcCall } from "../abortable-fetch";
+import { isValidAddress } from "../address-validation";
 import { DEFAULT_RPC_URLS } from "../rpc";
 import { ERC20_FUNCTION_SIGNATURES } from "./abi";
 import { ERC20TokenError } from "./errors";
@@ -35,6 +36,56 @@ function strip0x(hex: string): string {
 /** Left-pad a hex string (without 0x) to 64 hex chars (32 bytes) */
 function padLeftTo32Bytes(hex: string): string {
   return hex.padStart(64, "0");
+}
+
+function assertTokenAddress(
+  address: string,
+  field: string,
+): asserts address is `0x${string}` {
+  if (!isValidAddress(address, "eip155")) {
+    throw new ERC20TokenError(
+      "invalid_address",
+      `Invalid EVM ${field} address.`,
+    );
+  }
+}
+
+function assertChainId(chainId: number): void {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new ERC20TokenError(
+      "invalid_chain",
+      `Invalid EVM chain ID: ${chainId}.`,
+    );
+  }
+}
+
+function assertTokenConfig(token: TokenConfig): void {
+  assertTokenAddress(token.address, "token");
+  assertChainId(token.chainId);
+}
+
+function assertDecimals(decimals: number): void {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+    throw new ERC20TokenError(
+      "invalid_amount",
+      `Invalid ERC-20 decimals: ${decimals}.`,
+    );
+  }
+}
+
+function normalizeRawAmount(
+  amount: ERC20TransferTxParams["amount"],
+  decimals: number,
+): bigint {
+  assertDecimals(decimals);
+  if (typeof amount === "string") return parseUnits(amount, decimals);
+  if (typeof amount !== "bigint" || amount < 0n) {
+    throw new ERC20TokenError(
+      "invalid_amount",
+      "ERC-20 amount must be a non-negative decimal string or bigint.",
+    );
+  }
+  return amount;
 }
 
 /**
@@ -67,7 +118,7 @@ export function abiEncodeAddress(addr: `0x${string}`): `0x${string}` {
  * ABI-encode a uint256: left-pad to 32 bytes.
  */
 export function abiEncodeUint256(value: bigint): `0x${string}` {
-  if (value < 0n) {
+  if (value < 0n || value > (1n << 256n) - 1n) {
     throw new ERC20TokenError(
       "invalid_amount",
       `Cannot encode negative uint256: ${value}`,
@@ -108,7 +159,17 @@ export async function abiEncodeFunctionCall(
   ...encodedArgs: string[]
 ): Promise<`0x${string}`> {
   const selector = await abiFunctionSelector(signature);
-  const data = encodedArgs.map((a) => strip0x(a)).join("");
+  const args = encodedArgs.map((a) => {
+    const clean = strip0x(a);
+    if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+      throw new ERC20TokenError(
+        "encoding_error",
+        "ABI arguments must be 32-byte encoded values.",
+      );
+    }
+    return clean;
+  });
+  const data = args.join("");
   return `${selector}${data}` as `0x${string}`;
 }
 
@@ -162,6 +223,7 @@ async function encodeTransferFrom(
  * Get the RPC URL for a given chain ID.
  */
 function getRpcUrl(chainId: number, options?: ERC20CallOptions): string {
+  assertChainId(chainId);
   if (options?.rpcUrl) return options.rpcUrl;
   const url = DEFAULT_RPC_URLS[`eip155:${chainId}`];
   if (!url) {
@@ -182,8 +244,19 @@ async function ethCall(
   data: `0x${string}`,
 ): Promise<string> {
   try {
-    return await rpcCall<string>(rpcUrl, "eth_call", [{ to, data }, "latest"]);
+    const result = await rpcCall<unknown>(rpcUrl, "eth_call", [
+      { to, data },
+      "latest",
+    ]);
+    if (typeof result !== "string" || !/^0x[0-9a-fA-F]*$/.test(result)) {
+      throw new ERC20TokenError(
+        "encoding_error",
+        "RPC eth_call returned a non-hex result.",
+      );
+    }
+    return result;
   } catch (err) {
+    if (err instanceof ERC20TokenError) throw err;
     throw new ERC20TokenError("rpc_error", `RPC eth_call error: ${err}`, err);
   }
 }
@@ -194,25 +267,69 @@ async function ethCall(
  */
 function decodeUint256(hex: string): bigint {
   const clean = strip0x(hex);
+  if (
+    !/^0x?[0-9a-fA-F]+$/.test(hex) ||
+    clean.length > 64 ||
+    clean.length % 2 !== 0
+  ) {
+    throw new ERC20TokenError(
+      "encoding_error",
+      "RPC returned an invalid uint256 encoding.",
+    );
+  }
   return BigInt(`0x${clean}`);
 }
 
 function decodeString(hex: string): string {
   const clean = strip0x(hex);
-  // ABI-encoded string: offset (32 bytes) + length (32 bytes) + data
-  if (clean.length < 128) return "";
-  const lengthHex = clean.slice(64, 128);
-  const length = parseInt(lengthHex, 16);
-  const dataHex = clean.slice(128, 128 + length * 2);
-  const bytes = new Uint8Array(length);
-  for (let i = 0; i < length; i++) {
-    bytes[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2), 16);
+  if (!/^[0-9a-fA-F]*$/.test(clean) || clean.length % 2 !== 0) return "";
+
+  // A number of deployed ERC-20s predate the metadata interface and return a
+  // bytes32 symbol/name. Accept that canonical legacy form as well as ABI
+  // dynamic strings, without trusting an unbounded length from the RPC.
+  if (clean.length === 64) {
+    const end = clean.search(/00/);
+    const dataHex = end === -1 ? clean : clean.slice(0, end);
+    return new TextDecoder().decode(hexToBytes(dataHex));
   }
+
+  // ABI-encoded string: offset (32 bytes) + length (32 bytes) + data.
+  if (clean.length < 128 || BigInt(`0x${clean.slice(0, 64)}`) !== 32n) {
+    return "";
+  }
+  const length = BigInt(`0x${clean.slice(64, 128)}`);
+  const availableBytes = BigInt((clean.length - 128) / 2);
+  if (length > availableBytes || length > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return "";
+  }
+  const dataHex = clean.slice(128, 128 + Number(length) * 2);
+  const bytes = hexToBytes(dataHex);
   return new TextDecoder().decode(bytes);
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) {
+    throw new ERC20TokenError(
+      "encoding_error",
+      "RPC returned an invalid hexadecimal encoding.",
+    );
+  }
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
 function decodeUint8(hex: string): number {
-  return Number(decodeUint256(hex));
+  const value = decodeUint256(hex);
+  if (value > 255n) {
+    throw new ERC20TokenError(
+      "encoding_error",
+      "RPC returned an out-of-range uint8 value.",
+    );
+  }
+  return Number(value);
 }
 
 // ── Selector Cache ────────────────────────────────────────────────
@@ -245,10 +362,10 @@ export class ERC20TokenHelper {
     data: `0x${string}`;
     value: "0x0";
   }> {
-    const rawAmount =
-      typeof params.amount === "string"
-        ? parseUnits(params.amount, decimals)
-        : params.amount;
+    assertTokenConfig(params.token);
+    assertTokenAddress(params.from, "sender");
+    assertTokenAddress(params.to, "recipient");
+    const rawAmount = normalizeRawAmount(params.amount, decimals);
 
     const data = await encodeTransfer(params.to, rawAmount);
 
@@ -272,10 +389,10 @@ export class ERC20TokenHelper {
     data: `0x${string}`;
     value: "0x0";
   }> {
-    const rawAmount =
-      typeof params.amount === "string"
-        ? parseUnits(params.amount, decimals)
-        : params.amount;
+    assertTokenConfig(params.token);
+    assertTokenAddress(params.owner, "owner");
+    assertTokenAddress(params.spender, "spender");
+    const rawAmount = normalizeRawAmount(params.amount, decimals);
 
     const data = await encodeApprove(params.spender, rawAmount);
 
@@ -300,10 +417,10 @@ export class ERC20TokenHelper {
     data: `0x${string}`;
     value: "0x0";
   }> {
-    const rawAmount =
-      typeof params.amount === "string"
-        ? parseUnits(params.amount, decimals)
-        : params.amount;
+    assertTokenConfig(params.token);
+    assertTokenAddress(params.from, "sender");
+    assertTokenAddress(params.to, "recipient");
+    const rawAmount = normalizeRawAmount(params.amount, decimals);
 
     const data = await encodeTransferFrom(params.from, params.to, rawAmount);
 
@@ -325,6 +442,9 @@ export class ERC20TokenHelper {
     spender: `0x${string}`,
     options?: ERC20CallOptions,
   ): Promise<bigint> {
+    assertTokenConfig(token);
+    assertTokenAddress(owner, "owner");
+    assertTokenAddress(spender, "spender");
     const rpcUrl = getRpcUrl(token.chainId, options);
 
     const selector = await getSelector(ERC20_FUNCTION_SIGNATURES.allowance);
@@ -343,6 +463,7 @@ export class ERC20TokenHelper {
     token: TokenConfig,
     options?: ERC20CallOptions,
   ): Promise<TokenInfo> {
+    assertTokenConfig(token);
     const rpcUrl = getRpcUrl(token.chainId, options);
     const to = token.address;
 
@@ -390,14 +511,21 @@ export class ERC20TokenHelper {
     token: TokenConfig,
     options?: ERC20CallOptions,
   ): Promise<boolean> {
+    assertTokenConfig(token);
     const rpcUrl = getRpcUrl(token.chainId, options);
 
     try {
-      const code = await rpcCall<string>(rpcUrl, "eth_getCode", [
+      const code = await rpcCall<unknown>(rpcUrl, "eth_getCode", [
         token.address,
         "latest",
       ]);
-      return code !== "0x" && code !== "0x0";
+      if (typeof code !== "string" || !/^0x[0-9a-fA-F]*$/.test(code)) {
+        throw new ERC20TokenError(
+          "encoding_error",
+          "RPC eth_getCode returned a non-hex result.",
+        );
+      }
+      return !/^0x0*$/i.test(code);
     } catch (err) {
       throw new ERC20TokenError(
         "rpc_error",
@@ -414,7 +542,9 @@ export class ERC20TokenHelper {
     token: TokenConfig,
     options?: ERC20CallOptions,
   ): Promise<number> {
+    assertTokenConfig(token);
     if (token.decimals !== undefined) {
+      assertDecimals(token.decimals);
       return token.decimals;
     }
 
@@ -426,6 +556,7 @@ export class ERC20TokenHelper {
       const result = await ethCall(rpcUrl, token.address, data);
       return decodeUint8(result);
     } catch (err) {
+      if (err instanceof ERC20TokenError) throw err;
       throw new ERC20TokenError(
         "decimals_fetch_failed",
         `Failed to fetch decimals for token ${token.address} on chain ${token.chainId}.`,

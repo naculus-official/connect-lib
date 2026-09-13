@@ -18,24 +18,19 @@ export const SUPPORTED_NAMESPACES = [
  * Common EVM Chain IDs (CAIP-2 format)
  */
 export const EIP155_MAINNET = "eip155:1";
-/** @deprecated Goerli testnet was deprecated in early 2023. Use HOLESKY instead. */
-export const EIP155_GOERLI = "eip155:5";
 export const EIP155_HOLESKY = "eip155:17000";
 export const EIP155_SEPOLIA = "eip155:11155111";
 export const EIP155_POLYGON = "eip155:137";
-export const EIP155_MUMBAI = "eip155:80001";
 export const EIP155_ARBITRUM = "eip155:42161";
-export const EIP155_ARBITRUM_GOERLI = "eip155:421613"; // DEPRECATED
 export const EIP155_OPTIMISM = "eip155:10";
-export const EIP155_OPTIMISM_GOERLI = "eip155:420"; // DEPRECATED
 export const EIP155_BASE = "eip155:8453";
 
 /**
  * Common Solana Cluster IDs (CAIP-2 format)
  */
-export const SOLANA_MAINNET = "solana:0";
-export const SOLANA_DEVNET = "solana:1";
-export const SOLANA_TESTNET = "solana:2";
+export const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+export const SOLANA_DEVNET = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+export const SOLANA_TESTNET = "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
 
 /**
  * Common XRPL Network IDs (CAIP-2 format)

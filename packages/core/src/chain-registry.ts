@@ -13,6 +13,8 @@ export interface ChainInfo {
   nativeCurrency: { symbol: string; decimals: number };
   axelarName?: string; // Axelar GMP name (undefined = not supported by Axelar)
   usdcAddress?: string; // ERC-20 USDC address (undefined = no USDC on this chain)
+  /** Whether usdcAddress is Circle-issued native USDC or a bridged representation. */
+  usdcVariant?: "native" | "bridged";
   usdcDecimals?: number; // USDC decimals (defaults to 6)
   usdtAddress?: string; // ERC-20 USDT address (undefined = no USDT on this chain)
   usdtDecimals?: number; // USDT decimals (defaults to 6)
@@ -31,9 +33,10 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     axelarName: "ethereum",
     usdcAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    usdcVariant: "native",
     usdtAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
     entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-    factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
+    factoryAddress: "0x91E60e0613810449d098b0b5Ec8b51A0FE8c8985",
     explorerUrl: "https://etherscan.io",
     chainlinkEthUsdFeed: "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
   },
@@ -41,7 +44,8 @@ export const CHAINS: Record<number, ChainInfo> = {
     name: "Optimism",
     caip2Id: "eip155:10",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
-    usdcAddress: "0x7F5c764cBc14f9669B88837ca1490cCa17c31607",
+    usdcAddress: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+    usdcVariant: "native",
     usdtAddress: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
     entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
@@ -54,6 +58,7 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "BNB", decimals: 18 },
     axelarName: "binance",
     usdcAddress: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    usdcVariant: "bridged",
     usdtAddress: "0x55d398326f99059fF775485246999027B3197955",
     usdcDecimals: 18,
     usdtDecimals: 18,
@@ -65,15 +70,17 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "xDAI", decimals: 18 },
     axelarName: "gnosis",
     usdcAddress: "0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83",
+    usdcVariant: "bridged",
     usdtAddress: "0x4ECaBa5870353805a9F068101A40E0f32ed605C6",
     explorerUrl: "https://gnosisscan.io",
   },
   137: {
     name: "Polygon",
     caip2Id: "eip155:137",
-    nativeCurrency: { symbol: "MATIC", decimals: 18 },
+    nativeCurrency: { symbol: "POL", decimals: 18 },
     axelarName: "polygon",
-    usdcAddress: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+    usdcAddress: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    usdcVariant: "native",
     usdtAddress: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
     entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
@@ -86,6 +93,7 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "FTM", decimals: 18 },
     axelarName: "fantom",
     usdcAddress: "0x04068DA6C83AFCFA0e13ba15A6696662335D5B75",
+    usdcVariant: "bridged",
     explorerUrl: "https://ftmscan.com",
   },
   324: {
@@ -99,6 +107,7 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     axelarName: "polygon-zkevm",
     usdcAddress: "0xA8CE8aee21bC2A48a5EF670afCc9274C7bbbC035",
+    usdcVariant: "bridged",
     explorerUrl: "https://zkevm.polygonscan.com",
   },
   8453: {
@@ -107,8 +116,9 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     axelarName: "base",
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    usdcVariant: "native",
     entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-    factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
+    factoryAddress: "0x91E60e0613810449d098b0b5Ec8b51A0FE8c8985",
     explorerUrl: "https://basescan.org",
   },
   42161: {
@@ -117,6 +127,7 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     axelarName: "arbitrum",
     usdcAddress: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    usdcVariant: "native",
     usdtAddress: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",
     entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
     factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
@@ -128,13 +139,15 @@ export const CHAINS: Record<number, ChainInfo> = {
     nativeCurrency: { symbol: "AVAX", decimals: 18 },
     axelarName: "avalanche",
     usdcAddress: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+    usdcVariant: "native",
     explorerUrl: "https://snowtrace.io",
   },
   59144: {
     name: "Linea",
     caip2Id: "eip155:59144",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
-    usdcAddress: "0x176211869cA2b568f2A7D4EE941E073a542EEd12",
+    usdcAddress: "0x176211869cA2b568f2A7D4EE941E073a821EE1ff",
+    usdcVariant: "native",
     explorerUrl: "https://lineascan.build",
   },
   534352: {
@@ -142,6 +155,7 @@ export const CHAINS: Record<number, ChainInfo> = {
     caip2Id: "eip155:534352",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     usdcAddress: "0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4",
+    usdcVariant: "bridged",
     explorerUrl: "https://scrollscan.com",
   },
   11155111: {
@@ -149,7 +163,7 @@ export const CHAINS: Record<number, ChainInfo> = {
     caip2Id: "eip155:11155111",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-    factoryAddress: "0x9406Cc6185a346906296840746125a0E44976454",
+    factoryAddress: "0x91E60e0613810449d098b0b5Ec8b51A0FE8c8985",
     explorerUrl: "https://sepolia.etherscan.io",
   },
 };

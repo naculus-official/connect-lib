@@ -26,16 +26,23 @@ export function parseUnits(
   if (
     typeof decimals !== "number" ||
     !Number.isInteger(decimals) ||
-    decimals < 0
+    decimals < 0 ||
+    decimals > 255
   ) {
     throw new ERC20TokenError(
       "invalid_amount",
-      `Invalid decimals value: ${decimals}. Must be a non-negative integer.`,
+      `Invalid decimals value: ${decimals}. Must be an integer from 0 to 255.`,
     );
   }
 
   // Handle bigint directly (already in raw units)
   if (typeof amount === "bigint") {
+    if (amount < 0n) {
+      throw new ERC20TokenError(
+        "invalid_amount",
+        `Amount must be non-negative, got: ${amount}`,
+      );
+    }
     return amount;
   }
 
@@ -45,6 +52,15 @@ export function parseUnits(
       throw new ERC20TokenError(
         "invalid_amount",
         `Amount is not a finite number: ${amount}`,
+      );
+    }
+    // JavaScript numbers above MAX_SAFE_INTEGER cannot represent wei/token
+    // units exactly. Require callers to pass a decimal string or bigint for
+    // large financial amounts rather than silently introducing rounding.
+    if (Math.abs(amount) > Number.MAX_SAFE_INTEGER) {
+      throw new ERC20TokenError(
+        "invalid_amount",
+        "Number amount exceeds MAX_SAFE_INTEGER; use a decimal string or bigint.",
       );
     }
     if (amount < 0) {
@@ -71,10 +87,17 @@ export function parseUnits(
   for (let i = 0; i < str.length; i++) {
     const ch = str[i];
     if (ch === ".") {
-      if (hasDot) throw new ERC20TokenError("invalid_amount", `Multiple decimal points in amount: "${amount}"`);
+      if (hasDot)
+        throw new ERC20TokenError(
+          "invalid_amount",
+          `Multiple decimal points in amount: "${amount}"`,
+        );
       hasDot = true;
     } else if (ch < "0" || ch > "9") {
-      throw new ERC20TokenError("invalid_amount", `Amount contains invalid character '${ch}': "${amount}"`);
+      throw new ERC20TokenError(
+        "invalid_amount",
+        `Amount contains invalid character '${ch}': "${amount}"`,
+      );
     }
   }
 
@@ -137,11 +160,12 @@ export function formatUnits(amount: bigint, decimals: number): string {
   if (
     typeof decimals !== "number" ||
     !Number.isInteger(decimals) ||
-    decimals < 0
+    decimals < 0 ||
+    decimals > 255
   ) {
     throw new ERC20TokenError(
       "invalid_amount",
-      `Invalid decimals value: ${decimals}. Must be a non-negative integer.`,
+      `Invalid decimals value: ${decimals}. Must be an integer from 0 to 255.`,
     );
   }
 

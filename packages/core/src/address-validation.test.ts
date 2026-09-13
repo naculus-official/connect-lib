@@ -35,6 +35,9 @@ describe("isValidAddress", () => {
   it("rejects invalid hex characters", () => {
     expect(isValidAddress("0xzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")).toBe(false);
   });
+  it("rejects unsupported namespaces instead of accepting arbitrary addresses", () => {
+    expect(isValidAddress("anything", "unknown")).toBe(false);
+  });
   it("accepts valid Solana base58 address", () => {
     expect(isValidAddress("7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtPb", "solana")).toBe(true);
   });
@@ -43,6 +46,10 @@ describe("isValidAddress", () => {
   });
   it("accepts valid XRPL classic address", () => {
     expect(isValidAddress("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh", "xrpl")).toBe(true);
+  });
+  it("accepts valid XRPL X-address and destination-tag form", () => {
+    expect(isValidAddress("X7d3eHCXzwBeWrZec1yT24iZerQjYLeTFXz1GU9RBnWr7gZ", "xrpl")).toBe(true);
+    expect(isValidAddress("rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY-495", "xrpl")).toBe(true);
   });
   it("rejects invalid XRPL address (wrong prefix)", () => {
     expect(isValidAddress("xHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh", "xrpl")).toBe(false);

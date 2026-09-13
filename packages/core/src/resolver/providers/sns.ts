@@ -1,6 +1,14 @@
+// Base58 comes from @scure/base. The hand-written pair that used to live here
+// produced one byte too many whenever the decoded value was zero — the
+// all-zeros Solana System Program ID came back 33 bytes instead of 32 — and
+// those bytes are hashed into a program-derived address, so a wrong length
+// resolves a name to a different account entirely.
+
+import { ed25519 } from "@noble/curves/ed25519";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils";
+import { base58 } from "@scure/base";
 
 const textEncoder = new TextEncoder();
 function stringToBytes(str: string): Uint8Array {
@@ -15,57 +23,23 @@ import { ResolutionError } from "../types";
 /** Bonfida SNS Program ID (mainnet). */
 export const SNS_PROGRAM_ID = "namesLPneVptA9Z5rqUDD9tMTWEJwofgaYwp8cawRkX";
 
-/** .sol TLD domain key (PDA). Derived from seeds ["domain", "sol"]. */
-export const SOL_TLD_DOMAIN = "58P1RCHjMiN1eS6LGpmmNvbTYGWCoh2vMGN4JmSScWdT";
+/** Bonfida's .sol TLD authority (the parent Name Service account). */
+export const SOL_TLD_AUTHORITY = "58PwtjSDuFHuUkYjH9BYnnQKHfwo9reZhC2zMJv9JPkx";
 
-/** The SNS "name record" prefix seed. */
-const NAME_RECORD_SEED = "name_record";
+/** Backwards-compatible alias; this is an authority, not a derived PDA. */
+export const SOL_TLD_DOMAIN = SOL_TLD_AUTHORITY;
 
-/** Central Bank account (SNS owner). */
-const SNS_CENTRAL_BANK = "FzU4e4qMA1aCiq3YBoe8ByKK5ubQi9a5kYzP4jcfprh6";
+/** SPL Name Service PDA hash prefix. */
+const HASH_PREFIX = "SPL Name Service";
+
+/** Solana's canonical program-derived-address marker. */
+const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 
 // ── Helper Constants ────────────────────────────────────────────
 
 /** BASE58 alphabet for decoding Solana addresses. */
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-const BASE = BigInt(58);
-
-/** Max retries for RPC calls. */
-const MAX_RETRIES = 2;
 
 // ── Base58 Decode ────────────────────────────────────────────────
-
-/**
- * Decode a Base58-encoded string to bytes.
- */
-function base58Decode(input: string): Uint8Array {
-  // Convert to BigInt first
-  let num = BigInt(0);
-  for (const char of input) {
-    const idx = ALPHABET.indexOf(char);
-    if (idx === -1) throw new Error(`Invalid Base58 character: ${char}`);
-    num = num * BASE + BigInt(idx);
-  }
-
-  // Convert BigInt to bytes
-  const hex = num.toString(16);
-  const hexPadded = hex.length % 2 === 0 ? hex : `0${hex}`;
-  const bytes = hexToBytes(hexPadded);
-
-  // Preserve leading zeros (encoded as '1's)
-  const leadingZeros = input.match(/^1*/)?.[0]?.length ?? 0;
-  const result = new Uint8Array(leadingZeros + bytes.length);
-  result.set(bytes, leadingZeros);
-
-  return result;
-}
-
-/**
- * Decode Base58 to a hex string.
- */
-function base58ToHex(input: string): string {
-  return bytesToHex(base58Decode(input));
-}
 
 // ── PDA Derivation ───────────────────────────────────────────────
 
@@ -77,14 +51,32 @@ function findProgramAddress(
   seeds: Uint8Array[],
   programId: Uint8Array,
 ): [Uint8Array, number] {
+  if (programId.length !== 32) {
+    throw new Error("Solana program IDs must be 32 bytes");
+  }
+  const totalSeedLength = seeds.reduce((sum, seed) => sum + seed.length, 0);
+  if (
+    seeds.length > 16 ||
+    seeds.some((seed) => seed.length > 32) ||
+    totalSeedLength + seeds.length + 1 > 512
+  ) {
+    throw new Error("Solana PDA seeds exceed the runtime limits");
+  }
   for (let bump = 255; bump >= 0; bump--) {
-    const seedsBytes = concatBytes(...seeds, new Uint8Array([bump]), programId);
+    const seedsBytes = concatBytes(
+      ...seeds,
+      new Uint8Array([bump]),
+      programId,
+      PDA_MARKER,
+    );
     const hash = sha256(seedsBytes);
-    // Check that the hash is NOT on the ed25519 curve
-    // (simplified: check that the first byte is not a valid curve point)
-    // For Solana, PDAs are guaranteed by bump search
-    if (hash[31] & 0x80) continue; // Try next bump if high bit is set
-    return [hash, bump];
+    // A Solana PDA must be off the Ed25519 curve. A bit test is not an
+    // equivalent curve-membership check and can derive runtime-invalid PDAs.
+    try {
+      ed25519.Point.fromHex(hash);
+    } catch {
+      return [hash, bump];
+    }
   }
   throw new Error("Unable to find a valid bump seed");
 }
@@ -94,18 +86,18 @@ function findProgramAddress(
  */
 function parseAccountInfo(rawData: string): Record<string, unknown> {
   // Decode Base58 account data into hex
-  const bytes = base58Decode(rawData);
+  const bytes = base58.decode(rawData);
+  if (bytes.length < 96) throw new Error("Invalid SNS name registry data");
   // For name records, the format is:
-  // - header (bytes): tag (1) + parent_name (32) + owner (32) + class (32)
+  // - header (bytes): parent_name (32) + owner (32) + class (32)
   // - data (remaining)
   const header = {
-    tag: bytes[0],
-    parentName: bytesToHex(bytes.slice(1, 33)),
-    owner: bytesToHex(bytes.slice(33, 65)),
-    class: bytesToHex(bytes.slice(65, 97)),
+    parentName: bytesToHex(bytes.slice(0, 32)),
+    owner: bytesToHex(bytes.slice(32, 64)),
+    class: bytesToHex(bytes.slice(64, 96)),
   };
 
-  const content = bytes.slice(97);
+  const content = bytes.slice(96);
 
   return {
     header,
@@ -166,15 +158,17 @@ async function getAccountInfo(
  * Derive the domain key for a .sol name.
  */
 function deriveDomainKey(name: string): string {
-  // Domain key derivation: PDA with seeds ["name_record", tld_domain, name_bytes]
-  const tldBytes = base58Decode(SOL_TLD_DOMAIN);
-  const nameBytes = stringToBytes(name.toLowerCase().replace(".sol", ""));
-  const programBytes = base58Decode(SNS_PROGRAM_ID);
+  // Canonical SPL Name Service derivation: hash the label, then derive the
+  // name account from [hashed_name, zero class, .sol TLD authority].
+  const bareName = name.toLowerCase().replace(/\.sol$/, "");
+  const hashedName = sha256(stringToBytes(HASH_PREFIX + bareName));
+  const tldBytes = base58.decode(SOL_TLD_AUTHORITY);
+  const programBytes = base58.decode(SNS_PROGRAM_ID);
 
-  const seeds = [stringToBytes(NAME_RECORD_SEED), tldBytes, nameBytes];
+  const seeds = [hashedName, new Uint8Array(32), tldBytes];
 
   const [address] = findProgramAddress(seeds, programBytes);
-  return bytesToHex(address);
+  return base58.encode(address);
 }
 
 // ── Provider ─────────────────────────────────────────────────────
@@ -206,13 +200,13 @@ export class SNSProvider implements ResolverProvider {
 
     // Fetch account info for the domain record
     try {
-      const accountInfo = await getAccountInfo(
-        this.rpcUrl,
-        domainKey.length === 64 ? domainKey : `0x${domainKey}`,
-      );
+      const accountInfo = await getAccountInfo(this.rpcUrl, domainKey);
 
       // The account info returns data as [base58_data, encoding_type]
-      if (!accountInfo || !accountInfo.data || accountInfo.data.length === 0) {
+      if (!accountInfo?.data || accountInfo.data.length === 0) {
+        return null;
+      }
+      if (accountInfo.owner !== SNS_PROGRAM_ID || accountInfo.executable) {
         return null;
       }
 
@@ -232,9 +226,6 @@ export class SNSProvider implements ResolverProvider {
         return null;
       }
 
-      // Convert hex owner to Base58 (Solana address format)
-      // For simplicity, return the hex address — consumers can convert if needed
-      // In practice, the owner address is stored as a Solana pubkey (32 bytes)
       const solanaAddress = this.hexToBase58(ownerHex);
 
       return {
@@ -264,29 +255,6 @@ export class SNSProvider implements ResolverProvider {
     const normalizedHex = hex.replace(/^0x/, "").padStart(64, "0");
     const bytes = hexToBytes(normalizedHex.slice(0, 64));
 
-    // Convert to BigInt
-    let num = BigInt(0);
-    for (let i = 0; i < bytes.length; i++) {
-      num = num * BigInt(256) + BigInt(bytes[i]);
-    }
-
-    // Convert to Base58
-    if (num === BigInt(0)) return "11111111111111111111111111111111";
-
-    const chars: string[] = [];
-    while (num > BigInt(0)) {
-      const remainder = Number(num % BASE);
-      chars.push(ALPHABET[remainder]);
-      num = num / BASE;
-    }
-
-    // Add leading '1's for leading zero bytes
-    let leadingOnes = 0;
-    for (const b of bytes) {
-      if (b === 0) leadingOnes++;
-      else break;
-    }
-
-    return "1".repeat(leadingOnes) + chars.reverse().join("");
+    return base58.encode(bytes);
   }
 }

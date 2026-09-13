@@ -9,6 +9,7 @@
 export type ERC20TokenErrorCode =
   | "token_not_deployed" // Contract has no code on target chain
   | "invalid_address" // from/to/spender is not a valid address
+  | "invalid_chain" // chain ID is not a positive EIP-155 integer
   | "invalid_amount" // Amount format error (NaN, negative, too many decimals)
   | "insufficient_allowance" // allowance(owner, spender) < amount
   | "insufficient_balance" // balanceOf(owner) < amount
@@ -22,6 +23,7 @@ export type ERC20TokenErrorCode =
 export const ERC20_TOKEN_ERROR_MESSAGES: Record<ERC20TokenErrorCode, string> = {
   token_not_deployed: "Token contract is not deployed on this chain.",
   invalid_address: "Address is not a valid EVM address.",
+  invalid_chain: "Chain ID is not a valid positive EIP-155 integer.",
   invalid_amount: "Amount is invalid.",
   insufficient_allowance:
     "Insufficient allowance. Please approve the spender first.",

@@ -55,6 +55,7 @@ describe("parseUnits", () => {
   it("should throw on negative amount", () => {
     expect(() => parseUnits("-1.5", 6)).toThrow(ERC20TokenError);
     expect(() => parseUnits("-100", 0)).toThrow(ERC20TokenError);
+    expect(() => parseUnits(-1n, 18)).toThrow(ERC20TokenError);
   });
 
   it("should throw on non-integer decimals", () => {
@@ -65,6 +66,13 @@ describe("parseUnits", () => {
   it("should throw on invalid number input", () => {
     expect(() => parseUnits(NaN, 6)).toThrow(ERC20TokenError);
     expect(() => parseUnits(Infinity, 6)).toThrow(ERC20TokenError);
+  });
+
+  it("rejects imprecise numbers above MAX_SAFE_INTEGER", () => {
+    expect(() => parseUnits(Number.MAX_SAFE_INTEGER + 2, 0)).toThrow(
+      "MAX_SAFE_INTEGER",
+    );
+    expect(() => parseUnits("9007199254740993", 0)).not.toThrow();
   });
 
   it("should handle whole number string representation", () => {

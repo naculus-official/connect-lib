@@ -6,8 +6,8 @@
 
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import { detectTokenInfo, clearAutoDetectCache } from "../auto-detect";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { clearAutoDetectCache, detectTokenInfo } from "../auto-detect";
 
 /**
  * Create a mock Response for RPC calls.
@@ -16,7 +16,10 @@ import { detectTokenInfo, clearAutoDetectCache } from "../auto-detect";
  */
 function mockFetchForRpc(): void {
   globalThis.fetch = vi.fn(
-    async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       const body = JSON.parse(
         typeof init?.body === "string" ? init.body : "{}",
       );
@@ -43,10 +46,10 @@ function mockFetchForRpc(): void {
         result = "0x";
       }
 
-      return new Response(
-        JSON.stringify({ jsonrpc: "2.0", id: 1, result }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     },
   );
 }
@@ -54,10 +57,16 @@ function mockFetchForRpc(): void {
 /**
  * Mock fetch with a counter to verify the cache prevents re-fetches.
  */
-function mockFetchWithCounter(): { fetchSpy: Mock; getCallCount: () => number } {
+function mockFetchWithCounter(): {
+  fetchSpy: Mock;
+  getCallCount: () => number;
+} {
   let callCount = 0;
   const fn = vi.fn(
-    async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    async (
+      _url: string | URL | Request,
+      init?: RequestInit,
+    ): Promise<Response> => {
       callCount++;
       const body = JSON.parse(
         typeof init?.body === "string" ? init.body : "{}",
@@ -72,10 +81,10 @@ function mockFetchWithCounter(): { fetchSpy: Mock; getCallCount: () => number } 
             "0000000000000000000000000000000000000000000000000000000000000004" +
             "5445535400000000000000000000000000000000000000000000000000000000"; // "TEST"
 
-      return new Response(
-        JSON.stringify({ jsonrpc: "2.0", id: 1, result }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
     },
   );
   globalThis.fetch = fn;
@@ -96,7 +105,11 @@ describe("auto-detect", () => {
   describe("detectTokenInfo()", () => {
     it("should fetch token metadata from chain", async () => {
       mockFetchForRpc();
-      const token = await detectTokenInfo(testAddress, 1, "https://rpc.example.com");
+      const token = await detectTokenInfo(
+        testAddress,
+        1,
+        "https://rpc.example.com",
+      );
 
       expect(token.address).toBe(testAddress);
       expect(token.chainId).toBe(1);
@@ -124,8 +137,9 @@ describe("auto-detect", () => {
 
     it("should handle RPC errors", async () => {
       // Return a fresh Response for each call so json() isn't consumed twice
-      globalThis.fetch = vi.fn().mockImplementation(
-        async (): Promise<Response> => {
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(async (): Promise<Response> => {
           return new Response(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -134,12 +148,38 @@ describe("auto-detect", () => {
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
-        },
-      );
+        });
 
       await expect(
         detectTokenInfo(testAddress, 1, "https://rpc.example.com"),
       ).rejects.toThrow("RPC error");
+    });
+
+    it("rejects malformed contract addresses and chain IDs", async () => {
+      await expect(
+        detectTokenInfo("0x1234", 1, "https://rpc.example.com"),
+      ).rejects.toThrow("Invalid ERC-20 contract address");
+      await expect(
+        detectTokenInfo(testAddress, 0, "https://rpc.example.com"),
+      ).rejects.toThrow("Invalid EVM chain ID");
+    });
+
+    it("does not turn an empty decimals response into zero", async () => {
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(
+          async (): Promise<Response> =>
+            new Response(
+              JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x" }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+        );
+
+      await expect(
+        detectTokenInfo(testAddress, 1, "https://rpc.example.com", {
+          skipCache: true,
+        }),
+      ).rejects.toThrow("Invalid ERC-20 decimals response");
     });
   });
 

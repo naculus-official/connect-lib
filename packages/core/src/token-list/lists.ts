@@ -154,8 +154,8 @@ export const POLYGON_TOKENS: TokenListEntry[] = [
   },
   {
     chainId: 137,
-    address: "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-    name: "USD Coin (PoS)",
+    address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    name: "USD Coin",
     symbol: "USDC",
     decimals: 6,
     logoURI: "https://cryptologos.cc/logos/usd-coin-usdc-logo.png",
@@ -181,7 +181,7 @@ export const POLYGON_TOKENS: TokenListEntry[] = [
   },
   {
     chainId: 137,
-    address: "0x1BFd67037B42Cf73acF2047067bd4F2C47D9BfD6",
+    address: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6",
     name: "Wrapped BTC (PoS)",
     symbol: "WBTC",
     decimals: 8,
@@ -223,8 +223,8 @@ export const OPTIMISM_TOKENS: TokenListEntry[] = [
   },
   {
     chainId: 10,
-    address: "0x7F5c764cBc14f9669B88837ca1490cCa17c31607",
-    name: "USD Coin (Optimism)",
+    address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+    name: "USD Coin",
     symbol: "USDC",
     decimals: 6,
     logoURI: "https://cryptologos.cc/logos/usd-coin-usdc-logo.png",

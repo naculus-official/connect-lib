@@ -202,6 +202,50 @@ describe("LocalStorageSessionStorage", () => {
     expect(loaded!.namespaces.eip155.accounts).toContain("eip155:1:0xabc");
   });
 
+  it("encrypts persisted session data when an encryption key is configured", async () => {
+    const storage = new LocalStorageSessionStorage(
+      "test_encrypted_session",
+      "senderpay-test-key",
+    );
+    const session: UniversalWalletSession = {
+      id: "encrypted-session",
+      walletId: "wallet-1",
+      walletType: "walletconnect",
+      namespaces: {},
+      platform: "desktop-web",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await storage.save(session);
+    const raw = (globalThis as any).localStorage.getItem(
+      "test_encrypted_session:session",
+    );
+    expect(raw).toBeTruthy();
+    expect(raw).not.toContain("encrypted-session");
+    await expect(storage.load()).resolves.toMatchObject({
+      id: "encrypted-session",
+    });
+  });
+
+  it("removes a plaintext record when encrypted loading is requested", async () => {
+    (globalThis as any).localStorage.setItem(
+      "test_encrypted_plaintext:session",
+      JSON.stringify({ id: "plaintext" }),
+    );
+    const storage = new LocalStorageSessionStorage(
+      "test_encrypted_plaintext",
+      "senderpay-test-key",
+    );
+
+    await expect(storage.load()).resolves.toBeNull();
+    expect(
+      (globalThis as any).localStorage.getItem(
+        "test_encrypted_plaintext:session",
+      ),
+    ).toBeNull();
+  });
+
   it("should return null when no session saved", async () => {
     const storage = new LocalStorageSessionStorage("test_empty");
     const result = await storage.load();

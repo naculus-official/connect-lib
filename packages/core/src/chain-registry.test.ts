@@ -52,12 +52,33 @@ describe("chain-registry", () => {
       );
     });
 
+    it("uses Polygon's current native gas token", () => {
+      expect(CHAINS[137].nativeCurrency).toEqual({
+        symbol: "POL",
+        decimals: 18,
+      });
+    });
+
     it("all usdcAddress entries are valid 42-char hex addresses", () => {
       for (const chainInfo of Object.values(CHAINS)) {
         if (chainInfo.usdcAddress) {
           expect(chainInfo.usdcAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+          expect(chainInfo.usdcVariant).toBeDefined();
         }
       }
+    });
+
+    it("marks native versus bridged USDC explicitly", () => {
+      expect(CHAINS[1].usdcVariant).toBe("native");
+      expect(CHAINS[10].usdcVariant).toBe("native");
+      expect(CHAINS[137].usdcVariant).toBe("native");
+      expect(CHAINS[8453].usdcVariant).toBe("native");
+      expect(CHAINS[42161].usdcVariant).toBe("native");
+      expect(CHAINS[43114].usdcVariant).toBe("native");
+      expect(CHAINS[59144].usdcVariant).toBe("native");
+      expect(CHAINS[56].usdcVariant).toBe("bridged");
+      expect(CHAINS[100].usdcVariant).toBe("bridged");
+      expect(CHAINS[250].usdcVariant).toBe("bridged");
     });
 
     it("all usdtAddress entries are valid 42-char hex addresses", () => {
@@ -90,6 +111,17 @@ describe("chain-registry", () => {
           expect(chainInfo.entryPoint).toBeDefined();
         }
       }
+    });
+
+    it("uses the matching SimpleAccount factory for each EntryPoint version", () => {
+      const v06Factory = "0x9406Cc6185a346906296840746125a0E44976454";
+      const v07Factory = "0x91E60e0613810449d098b0b5Ec8b51A0FE8c8985";
+      expect(CHAINS[1].factoryAddress).toBe(v07Factory);
+      expect(CHAINS[8453].factoryAddress).toBe(v07Factory);
+      expect(CHAINS[11155111].factoryAddress).toBe(v07Factory);
+      expect(CHAINS[10].factoryAddress).toBe(v06Factory);
+      expect(CHAINS[137].factoryAddress).toBe(v06Factory);
+      expect(CHAINS[42161].factoryAddress).toBe(v06Factory);
     });
   });
 

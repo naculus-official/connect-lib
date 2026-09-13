@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NameResolver, ResolutionError } from "..";
 
 // ── Mock fetch for RPC calls ────────────────────────────────────
@@ -15,7 +15,8 @@ beforeEach(() => {
       Promise.resolve({
         jsonrpc: "2.0",
         id: 1,
-        result: "0x0000000000000000000000000000000000000000000000000000000000000000",
+        result:
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
       }),
   } as Response);
 });
@@ -41,7 +42,9 @@ describe("NameResolver", () => {
 
     it("should throw ResolutionError for unsupported name service", async () => {
       const resolver = new NameResolver();
-      await expect(resolver.resolveName("test.xyz")).rejects.toThrow(ResolutionError);
+      await expect(resolver.resolveName("test.xyz")).rejects.toThrow(
+        ResolutionError,
+      );
       await expect(resolver.resolveName("test.xyz")).rejects.toMatchObject({
         code: "UNSUPPORTED_NAME_SERVICE",
       });
@@ -49,7 +52,9 @@ describe("NameResolver", () => {
 
     it("should throw ResolutionError for name with no suffix at all", async () => {
       const resolver = new NameResolver();
-      await expect(resolver.resolveName("vitalik")).rejects.toThrow(ResolutionError);
+      await expect(resolver.resolveName("vitalik")).rejects.toThrow(
+        ResolutionError,
+      );
       await expect(resolver.resolveName("vitalik")).rejects.toMatchObject({
         code: "UNSUPPORTED_NAME_SERVICE",
       });
@@ -57,7 +62,9 @@ describe("NameResolver", () => {
 
     it("should throw ResolutionError for invalid name format", async () => {
       const resolver = new NameResolver();
-      await expect(resolver.resolveName("-test.eth")).rejects.toThrow(ResolutionError);
+      await expect(resolver.resolveName("-test.eth")).rejects.toThrow(
+        ResolutionError,
+      );
       await expect(resolver.resolveName("-test.eth")).rejects.toMatchObject({
         code: "INVALID_NAME",
       });
@@ -114,7 +121,8 @@ describe("NameResolver", () => {
             Promise.resolve({
               jsonrpc: "2.0",
               id: 1,
-              result: "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41",
+              result:
+                "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41",
             }),
         } as Response)
         // Mock addr lookup
@@ -124,7 +132,8 @@ describe("NameResolver", () => {
             Promise.resolve({
               jsonrpc: "2.0",
               id: 1,
-              result: "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
+              result:
+                "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
             }),
         } as Response);
 
@@ -157,7 +166,8 @@ describe("NameResolver", () => {
             Promise.resolve({
               jsonrpc: "2.0",
               id: 1,
-              result: "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41",
+              result:
+                "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41",
             }),
         } as Response)
         .mockResolvedValueOnce({
@@ -166,7 +176,8 @@ describe("NameResolver", () => {
             Promise.resolve({
               jsonrpc: "2.0",
               id: 1,
-              result: "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
+              result:
+                "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
             }),
         } as Response);
 
@@ -184,7 +195,8 @@ describe("NameResolver", () => {
             Promise.resolve({
               jsonrpc: "2.0",
               id: 1,
-              result: "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41",
+              result:
+                "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41",
             }),
         } as Response)
         .mockResolvedValueOnce({
@@ -193,7 +205,8 @@ describe("NameResolver", () => {
             Promise.resolve({
               jsonrpc: "2.0",
               id: 1,
-              result: "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
+              result:
+                "0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
             }),
         } as Response);
 
@@ -237,11 +250,12 @@ describe("NameResolver", () => {
 
       // Slow response — never resolves
       vi.mocked(fetch).mockImplementation(
-        () =>
-          new Promise<Response>(() => {}), // Never resolves
+        () => new Promise<Response>(() => {}), // Never resolves
       );
 
-      await expect(resolver.resolveName("test.eth")).rejects.toThrow(ResolutionError);
+      await expect(resolver.resolveName("test.eth")).rejects.toThrow(
+        ResolutionError,
+      );
       await expect(resolver.resolveName("test.eth")).rejects.toMatchObject({
         code: "RESOLUTION_TIMEOUT",
       });
@@ -252,6 +266,13 @@ describe("NameResolver", () => {
     it("should throw for empty address", async () => {
       const resolver = new NameResolver();
       await expect(resolver.lookupAddress("")).rejects.toThrow(ResolutionError);
+    });
+
+    it("should reject malformed addresses before making an RPC call", async () => {
+      const resolver = new NameResolver();
+      await expect(
+        resolver.lookupAddress("0x1234", "eip155:1"),
+      ).rejects.toMatchObject({ code: "INVALID_ADDRESS" });
     });
 
     it("should pass chainId hint to provider selection", async () => {

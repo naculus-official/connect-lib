@@ -1,14 +1,23 @@
+import { SOLANA_DEVNET, SOLANA_MAINNET, SOLANA_TESTNET } from "./constants";
+/**
+ * Public fallback RPC endpoints used only when a caller has not supplied its
+ * own transport. This distributable package intentionally does not read
+ * process.env: environment values are often injected by a PaaS at build time
+ * and may contain provider API keys, which would leak into browser bundles.
+ * SenderPay and other production apps should pass a public, quota-limited RPC
+ * URL or use a backend proxy/workload identity for provider credentials.
+ */
 export const DEFAULT_RPC_URLS: Record<string, string> = {
-  "eip155:1": process.env.DEFAULT_RPC_ETH ?? "https://eth.llamarpc.com",
-  "eip155:17000": process.env.DEFAULT_RPC_HOLESKY ?? "https://holesky.llamarpc.com",
-  "eip155:11155111": process.env.DEFAULT_RPC_SEPOLIA ?? "https://sepolia.llamarpc.com",
-  "eip155:137": process.env.DEFAULT_RPC_POLYGON ?? "https://polygon.llamarpc.com",
-  "eip155:10": process.env.DEFAULT_RPC_OPTIMISM ?? "https://optimism.llamarpc.com",
-  "eip155:42161": process.env.DEFAULT_RPC_ARBITRUM ?? "https://arbitrum.llamarpc.com",
-  "eip155:8453": process.env.DEFAULT_RPC_BASE ?? "https://base.llamarpc.com",
-  "solana:0": "https://api.mainnet-beta.solana.com",
-  "solana:1": "https://api.devnet.solana.com",
-  "solana:2": "https://api.testnet.solana.com",
+  "eip155:1": "https://eth.llamarpc.com",
+  "eip155:17000": "https://holesky.llamarpc.com",
+  "eip155:11155111": "https://sepolia.llamarpc.com",
+  "eip155:137": "https://polygon.llamarpc.com",
+  "eip155:10": "https://optimism.llamarpc.com",
+  "eip155:42161": "https://arbitrum.llamarpc.com",
+  "eip155:8453": "https://base.llamarpc.com",
+  [SOLANA_MAINNET]: "https://api.mainnet-beta.solana.com",
+  [SOLANA_DEVNET]: "https://api.devnet.solana.com",
+  [SOLANA_TESTNET]: "https://api.testnet.solana.com",
 };
 
 /**

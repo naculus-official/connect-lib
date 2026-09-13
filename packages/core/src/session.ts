@@ -1,6 +1,7 @@
 import { logger } from "./logger";
 import type { StorageAdapter } from "./storage";
 import { LocalStorageAdapter } from "./storage";
+import { EncryptedRecordStorageAdapter } from "./storage/encrypted-record";
 
 export type Namespace = "eip155" | "solana" | string;
 
@@ -113,12 +114,18 @@ export class LocalStorageSessionStorage implements SessionStorage {
   /**
    * @param key - localStorage key used to store the session blob.
    *             Defaults to "naculus_web3_session".
+   * @param encryptionKey - Optional AES-GCM key for at-rest session metadata.
+   *             Never use a signing key or PaaS root credential; browser code
+   *             cannot keep frontend configuration secret.
    */
-  constructor(key = "naculus_web3_session") {
+  constructor(key = "naculus_web3_session", encryptionKey?: string) {
     this.innerKey = "session";
     // The supplied key becomes the adapter prefix so multiple
     // storage instances don't collide.
-    this.adapter = new LocalStorageAdapter(key + ":");
+    const base = new LocalStorageAdapter(key + ":");
+    this.adapter = encryptionKey
+      ? new EncryptedRecordStorageAdapter(base, encryptionKey)
+      : base;
   }
 
   /**
@@ -135,7 +142,13 @@ export class LocalStorageSessionStorage implements SessionStorage {
     try {
       return await this.adapter.get<UniversalWalletSession>(this.innerKey);
     } catch {
-      // Parse errors are non-fatal — treat as missing session
+      // Treat malformed, plaintext, or undecryptable records as missing and
+      // remove them so a later configuration change cannot revive stale data.
+      try {
+        await this.adapter.remove(this.innerKey);
+      } catch {
+        // Best-effort cleanup; the session remains unavailable either way.
+      }
       return null;
     }
   }

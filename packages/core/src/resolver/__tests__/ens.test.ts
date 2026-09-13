@@ -1,6 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
-import { ENSProvider, ENS_REGISTRY_ADDRESS, ENS_REVERSE_REGISTRAR } from "../providers/ens";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  ENS_REGISTRY_ADDRESS,
+  ENS_REVERSE_REGISTRAR,
+  ENSProvider,
+} from "../providers/ens";
 
 // ── Mock fetch ──────────────────────────────────────────────────
 
@@ -54,7 +58,8 @@ describe("ENSProvider", () => {
       const provider = createProvider();
 
       // Mock resolver lookup → returns resolver address
-      const resolverAddr = "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41";
+      const resolverAddr =
+        "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41";
       const addrResult = `0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045`;
 
       // First call: ENS Registry.resolver(namehash)
@@ -74,7 +79,9 @@ describe("ENSProvider", () => {
       const result = await provider.resolveName("vitalik.eth");
 
       expect(result).not.toBeNull();
-      expect(result!.address).toBe("0xd8da6bf26964af9d7eed9e03e53415d37aa96045");
+      expect(result!.address).toBe(
+        "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+      );
       expect(result!.chainType).toBe("eip155");
       expect(result!.name).toBe("vitalik.eth");
     });
@@ -86,7 +93,8 @@ describe("ENSProvider", () => {
       mockFetch({
         jsonrpc: "2.0",
         id: 1,
-        result: "0x0000000000000000000000000000000000000000000000000000000000000000",
+        result:
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
       });
 
       const result = await provider.resolveName("nonexistent.eth");
@@ -96,7 +104,8 @@ describe("ENSProvider", () => {
     it("should return null when addr returns zero", async () => {
       const provider = createProvider();
 
-      const resolverAddr = "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41";
+      const resolverAddr =
+        "0x0000000000000000000000004976fb03c32e5b8cfe2b6ccb31c09ba78ebaba41";
 
       // Resolver found
       mockFetch({
@@ -109,7 +118,8 @@ describe("ENSProvider", () => {
       mockFetch({
         jsonrpc: "2.0",
         id: 1,
-        result: "0x0000000000000000000000000000000000000000000000000000000000000000",
+        result:
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
       });
 
       const result = await provider.resolveName("unclaimed.eth");
@@ -148,7 +158,8 @@ describe("ENSProvider", () => {
       const provider = createProvider();
       const address = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
 
-      const resolverAddr = "0x000000000000000000000000a2c122beec4a08e26c3fd65ab3bf32b0c0d0c7b2";
+      const resolverAddr =
+        "0x000000000000000000000000a2c122beec4a08e26c3fd65ab3bf32b0c0d0c7b2";
 
       // First call: resolver for reverse node
       mockFetch({
@@ -159,8 +170,10 @@ describe("ENSProvider", () => {
 
       // Second call: resolver.name() returning encoded string
       const nameHex = "766974616c696b2e657468"; // "vitalik.eth" in hex
-      const lengthHex = "000000000000000000000000000000000000000000000000000000000000000b"; // 11 bytes
-      const offsetHex = "0000000000000000000000000000000000000000000000000000000000000020";
+      const lengthHex =
+        "000000000000000000000000000000000000000000000000000000000000000b"; // 11 bytes
+      const offsetHex =
+        "0000000000000000000000000000000000000000000000000000000000000020";
       mockFetch({
         jsonrpc: "2.0",
         id: 1,
@@ -182,7 +195,8 @@ describe("ENSProvider", () => {
       mockFetch({
         jsonrpc: "2.0",
         id: 1,
-        result: "0x0000000000000000000000000000000000000000000000000000000000000000",
+        result:
+          "0x0000000000000000000000000000000000000000000000000000000000000000",
       });
 
       const result = await provider.lookupAddress(ADDRESSES.ZERO);

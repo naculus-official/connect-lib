@@ -23,6 +23,7 @@ export type WalletErrorCode =
   | "intent_expired"
   | "namespace_mismatch"
   | "chain_unsupported"
+  | "chain_mismatch"
   | "method_not_allowed"
   | "method_unsupported"
   | "signature_rejected"

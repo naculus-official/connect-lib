@@ -74,7 +74,7 @@ describe("A — ERC20TokenHelper: RPC pipeline (mocked fetch)", () => {
 
   it("isTokenDeployed returns true when contract has code", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true,
-      json: async () => ({ result: "0x60806040..." }),
+      json: async () => ({ result: "0x6080604052" }),
     }));
     const deployed = await ERC20TokenHelper.isTokenDeployed(token);
     expect(deployed).toBe(true);
@@ -218,7 +218,7 @@ describe("B — SessionPersistence: save → load → expired-rejection → clea
       chainId: CHAINS.EVM_POLYGON,
       connectorId: "mock",
       rpcUrl: "https://mock-polygon.rpc",
-      nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+      nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
     } as ChainSession);
 
     const bundle: ActiveSessionBundle = {

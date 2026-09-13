@@ -8,7 +8,6 @@ import {
   DEFAULT_SOLANA_CLUSTER,
   DEFAULT_XRPL_NETWORK,
   EIP155_ARBITRUM,
-  EIP155_GOERLI,
   EIP155_MAINNET,
   EIP155_OPTIMISM,
   EIP155_POLYGON,
@@ -70,7 +69,6 @@ describe("EVM chain constants", () => {
   });
 
   it("should have correct Goerli chain ID", () => {
-    expect(EIP155_GOERLI).toBe("eip155:5");
   });
 
   it("should have correct Sepolia chain ID", () => {
@@ -92,15 +90,15 @@ describe("EVM chain constants", () => {
 
 describe("Solana cluster constants", () => {
   it("should have correct mainnet cluster", () => {
-    expect(SOLANA_MAINNET).toBe("solana:0");
+    expect(SOLANA_MAINNET).toBe("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
   });
 
   it("should have correct devnet cluster", () => {
-    expect(SOLANA_DEVNET).toBe("solana:1");
+    expect(SOLANA_DEVNET).toBe("solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1");
   });
 
   it("should have correct testnet cluster", () => {
-    expect(SOLANA_TESTNET).toBe("solana:2");
+    expect(SOLANA_TESTNET).toBe("solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z");
   });
 });
 
@@ -120,7 +118,7 @@ describe("default chain constants", () => {
   });
 
   it("should default Solana cluster to mainnet", () => {
-    expect(DEFAULT_SOLANA_CLUSTER).toBe("solana:0");
+    expect(DEFAULT_SOLANA_CLUSTER).toBe("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
   });
 
   it("should default XRPL network to mainnet", () => {

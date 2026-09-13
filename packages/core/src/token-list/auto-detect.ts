@@ -5,7 +5,8 @@
  * Results are cached in localStorage to avoid repeated RPC calls.
  */
 
-import { createStorageAdapter, type StorageAdapter } from "../storage";
+import { isValidAddress } from "../address-validation";
+import { createStorageAdapter } from "../storage";
 import type { TokenListEntry } from "./types";
 
 const CACHE_KEY = "naculus_auto_detected_tokens";
@@ -28,16 +29,23 @@ export async function detectTokenInfo(
   rpcUrl: string,
   options?: { skipCache?: boolean },
 ): Promise<TokenListEntry> {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new Error(`Invalid EVM chain ID: ${chainId}`);
+  }
+
+  const cleanAddress = address.trim();
+  if (!isValidAddress(cleanAddress, "eip155")) {
+    throw new Error(`Invalid ERC-20 contract address: ${address}`);
+  }
+
   // Check cache first
   if (!options?.skipCache) {
-    const cached = await getFromCache(address, chainId);
+    const cached = await getFromCache(cleanAddress, chainId);
     if (cached) return cached;
   }
 
   // Normalize address
-  const addr = address.startsWith("0x")
-    ? (address as `0x${string}`)
-    : `0x${address}`;
+  const addr = cleanAddress as `0x${string}`;
 
   // Build selectors and eth_call data for name, symbol, decimals
   const nameData = "0x06fdde03"; // keccak256("name()")[0:4]
@@ -150,7 +158,11 @@ function decodeString(hex: string): string {
   if (clean.length < 128) {
     // Try raw bytes decoding as fallback
     try {
-      const bytes = Buffer.from(clean, "hex");
+      if (clean.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(clean)) return "";
+      const bytes = new Uint8Array(clean.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+      }
       return new TextDecoder().decode(bytes).replace(/\0/g, "");
     } catch {
       return "";
@@ -171,5 +183,13 @@ function decodeString(hex: string): string {
 
 function decodeUint8(hex: string): number {
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  return parseInt(clean || "0", 16);
+  if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+    throw new Error("Invalid ERC-20 decimals response");
+  }
+
+  const value = BigInt(`0x${clean}`);
+  if (value > 255n) {
+    throw new Error("ERC-20 decimals value exceeds uint8");
+  }
+  return Number(value);
 }
