@@ -1,7 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { buildTransaction, cloneForBumping, resolveChainId } from "../transaction";
-import type { TransactionRequest } from "../signers/types";
+import { describe, expect, it } from "vitest";
 import type { ResolvedFeeOptions } from "../fee-oracle";
+import type { TransactionRequest } from "../signers/types";
+import {
+  buildTransaction,
+  cloneForBumping,
+  resolveChainId,
+} from "../transaction";
 
 // ── buildTransaction tests ────────────────────────────────────────
 
@@ -104,7 +108,9 @@ describe("cloneForBumping", () => {
 
 describe("resolveChainId", () => {
   it("uses tx.chainId if present", () => {
-    expect(resolveChainId({ to: "0xabcd", chainId: 137 }, "eip155:1")).toBe(137);
+    expect(resolveChainId({ to: "0xabcd", chainId: 137 }, "eip155:1")).toBe(
+      137,
+    );
   });
 
   it("parses from CAIP-2 chainId when tx.chainId is undefined", () => {

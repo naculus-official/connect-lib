@@ -1,11 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { WalletError } from "../errors";
 import { EVMSigner } from "../signers/evm";
 import type { TransactionRequest } from "../signers/types";
-import { WalletError } from "../errors";
 
 const signer = new EVMSigner();
-const TEST_KEY = "0x" + "ab".repeat(32) as `0x${string}`;
-const TEST_TO = "0x" + "cd".repeat(20) as `0x${string}`;
+const TEST_KEY = ("0x" + "ab".repeat(32)) as `0x${string}`;
+const TEST_TO = ("0x" + "cd".repeat(20)) as `0x${string}`;
 
 /**
  * Helper: parse a hex string into a Uint8Array
@@ -13,7 +13,8 @@ const TEST_TO = "0x" + "cd".repeat(20) as `0x${string}`;
 function hexToBytes(h: string): Uint8Array {
   const raw = h.startsWith("0x") ? h.slice(2) : h;
   const b = new Uint8Array(raw.length / 2);
-  for (let i = 0; i < raw.length; i += 2) b[i / 2] = parseInt(raw.slice(i, i + 2), 16);
+  for (let i = 0; i < raw.length; i += 2)
+    b[i / 2] = parseInt(raw.slice(i, i + 2), 16);
   return b;
 }
 
@@ -82,9 +83,9 @@ describe("EVMSigner EIP-1559", () => {
     });
 
     it("should throw when missing to address", async () => {
-      await expect(
-        signer.signTransaction({} as any, TEST_KEY),
-      ).rejects.toThrow("Missing 'to' address");
+      await expect(signer.signTransaction({} as any, TEST_KEY)).rejects.toThrow(
+        "Missing 'to' address",
+      );
     });
 
     it("should encode variable-length nonce correctly", async () => {

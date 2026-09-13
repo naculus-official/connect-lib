@@ -196,9 +196,15 @@ export class TxPoller {
     return Array.from(this.polls.keys());
   }
 
+  /**
+   * Poll one transaction immediately, bypassing backoff.
+   *
+   * An explicit request from the caller is not the traffic that backoff exists
+   * to suppress, so it is not throttled.
+   */
   async pollNow(hash: string, chainId: number): Promise<void> {
     const pollKey = `${chainId}:${hash}`;
-    await this.pollOnce(pollKey);
+    await this.pollOnce(pollKey, { force: true });
   }
 
   // ── Internal ────────────────────────────────────────────────────
@@ -247,9 +253,34 @@ export class TxPoller {
     await Promise.allSettled(promises);
   }
 
-  private async pollOnce(pollKey: string): Promise<void> {
+  /**
+   * Delay this entry must observe before it may be polled again.
+   *
+   * The chain timer is shared by every transaction on that chain, so backoff
+   * cannot be applied by slowing the timer — it is applied per entry here.
+   * Returns 0 while the entry is healthy.
+   */
+  private backoffDelayFor(entry: PollEntry): number {
+    if (entry.backoffCount === 0) return 0;
+    const { initialDelay, maxDelay, multiplier } = this.backoffConfig;
+    const grown = initialDelay * multiplier ** (entry.backoffCount - 1);
+    return Math.min(maxDelay, grown);
+  }
+
+  private async pollOnce(
+    pollKey: string,
+    opts?: { force?: boolean },
+  ): Promise<void> {
     const entry = this.polls.get(pollKey);
     if (!entry) return;
+
+    // Honour the backoff the error path has been accumulating. Without this
+    // the counter grew, the config was stored, and neither changed anything:
+    // a chain whose RPC was failing got hit at the full poll rate forever.
+    if (!opts?.force) {
+      const wait = this.backoffDelayFor(entry);
+      if (wait > 0 && Date.now() - entry.lastPollAt < wait) return;
+    }
 
     entry.lastPollAt = Date.now();
 

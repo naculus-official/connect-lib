@@ -1,23 +1,38 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { PocketWallet } from "../wallet";
+import { beforeAll, describe, expect, it } from "vitest";
 import type { StorageAdapter } from "../storage/types";
 import type { WalletData } from "../wallet";
+import { PocketWallet } from "../wallet";
 
-const TEST_MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 class MockStorage implements StorageAdapter {
   private data: WalletData | null = null;
   readonly type = "memory" as const;
-  isAvailable() { return true; }
-  async load() { return this.data; }
-  async save(data: WalletData) { this.data = data; }
-  async clear() { this.data = null; }
+  isAvailable() {
+    return true;
+  }
+  async load() {
+    return this.data;
+  }
+  async save(data: WalletData) {
+    this.data = data;
+  }
+  async clear() {
+    this.data = null;
+  }
 }
 
 describe("Financial Crypto Compliance: Key Security", () => {
   it("derives same address from same mnemonic (deterministic)", async () => {
-    const w1 = new PocketWallet({ storage: new MockStorage(), autoSave: false });
-    const w2 = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w1 = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
+    const w2 = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     await w1.importMnemonic(TEST_MNEMONIC);
     await w2.importMnemonic(TEST_MNEMONIC);
     const d1 = w1["data"];
@@ -37,7 +52,7 @@ describe("Financial Crypto Compliance: Key Security", () => {
     const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const tx = await w.signTransaction({
-      to: "0x" + "ab".repeat(20) as `0x${string}`,
+      to: ("0x" + "ab".repeat(20)) as `0x${string}`,
       value: "0xde0b6b3a7640000",
       nonce: "0x0" as `0x${string}`,
       maxFeePerGas: "0x59682f00" as `0x${string}`,
@@ -52,7 +67,7 @@ describe("Financial Crypto Compliance: Key Security", () => {
     const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const tx = await w.signTransaction({
-      to: "0x" + "ab".repeat(20) as `0x${string}`,
+      to: ("0x" + "ab".repeat(20)) as `0x${string}`,
       value: "0xde0b6b3a7640000",
       nonce: "0x0" as `0x${string}`,
       gasPrice: "0x4a817c800" as `0x${string}`,
@@ -81,8 +96,14 @@ describe("Financial Crypto Compliance: Address Derivation", () => {
 
 describe("Financial Crypto Compliance: Key Isolation", () => {
   it("two wallets have different addresses (different mnemonics)", async () => {
-    const w1 = new PocketWallet({ storage: new MockStorage(), autoSave: false });
-    const w2 = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w1 = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
+    const w2 = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     await w1.generate();
     await w2.generate();
     const d1 = w1["data"];

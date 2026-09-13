@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { TxHistoryStore, MemoryHistoryStorage } from "../TxHistoryStore";
+import { beforeEach, describe, expect, it } from "vitest";
+import { MemoryHistoryStorage, TxHistoryStore } from "../TxHistoryStore";
 import type { TxStatusEntry } from "../types";
 
 function makeEntry(overrides: Partial<TxStatusEntry> = {}): TxStatusEntry {
@@ -38,7 +38,11 @@ describe("TxHistoryStore", () => {
     const entry = makeEntry({ status: "pending" });
     await store.upsert(entry);
 
-    const updated = { ...entry, status: "confirmed" as const, confirmedAt: Date.now() };
+    const updated = {
+      ...entry,
+      status: "confirmed" as const,
+      confirmedAt: Date.now(),
+    };
     await store.upsert(updated);
 
     const retrieved = await store.get(entry.hash, entry.chainId);
@@ -47,7 +51,9 @@ describe("TxHistoryStore", () => {
   });
 
   it("queries by address (from)", async () => {
-    const entry = makeEntry({ from: "0xaaaabbbbccccddddeeeeffff0000111122223333" });
+    const entry = makeEntry({
+      from: "0xaaaabbbbccccddddeeeeffff0000111122223333",
+    });
     await store.upsert(entry);
 
     const results = await store.query({ address: entry.from });
@@ -68,14 +74,20 @@ describe("TxHistoryStore", () => {
 
   it("queries by status with limit and offset", async () => {
     for (let i = 0; i < 10; i++) {
-      await store.upsert(makeEntry({
-        hash: "0x" + i.toString(16).padStart(64, "0"),
-        status: "confirmed",
-        createdAt: Date.now() - i * 1000,
-      }));
+      await store.upsert(
+        makeEntry({
+          hash: "0x" + i.toString(16).padStart(64, "0"),
+          status: "confirmed",
+          createdAt: Date.now() - i * 1000,
+        }),
+      );
     }
 
-    const results = await store.query({ status: "confirmed", limit: 3, offset: 0 });
+    const results = await store.query({
+      status: "confirmed",
+      limit: 3,
+      offset: 0,
+    });
     expect(results.length).toBe(3);
   });
 
@@ -99,10 +111,12 @@ describe("TxHistoryStore", () => {
   it("cleans up entries older than retentionDays", async () => {
     // Insert 100 entries to bypass MIN_CLEANUP_ENTRIES check
     for (let i = 0; i < 100; i++) {
-      await store.upsert(makeEntry({
-        hash: "0x" + i.toString(16).padStart(64, "0"),
-        createdAt: Date.now() - 1 * 24 * 60 * 60 * 1000, // 1 day ago
-      }));
+      await store.upsert(
+        makeEntry({
+          hash: "0x" + i.toString(16).padStart(64, "0"),
+          createdAt: Date.now() - 1 * 24 * 60 * 60 * 1000, // 1 day ago
+        }),
+      );
     }
 
     // Add one very old entry
@@ -124,12 +138,14 @@ describe("TxHistoryStore", () => {
     await store.upsert(entry);
 
     const updated1 = { ...entry, status: "mined" as const, blockNumber: 100 };
-    const updated2 = { ...entry, status: "confirmed" as const, blockNumber: 100, confirmedAt: Date.now() };
+    const updated2 = {
+      ...entry,
+      status: "confirmed" as const,
+      blockNumber: 100,
+      confirmedAt: Date.now(),
+    };
 
-    await Promise.all([
-      store.upsert(updated1),
-      store.upsert(updated2),
-    ]);
+    await Promise.all([store.upsert(updated1), store.upsert(updated2)]);
 
     const retrieved = await store.get(entry.hash, entry.chainId);
     // Should be either mined or confirmed (last write wins)
@@ -160,7 +176,10 @@ describe("TxHistoryStore", () => {
 
   it("queries with fromDate filter", async () => {
     const now = Date.now();
-    const old = makeEntry({ hash: "0x" + "d".repeat(64), createdAt: now - 10_000 });
+    const old = makeEntry({
+      hash: "0x" + "d".repeat(64),
+      createdAt: now - 10_000,
+    });
     const recent = makeEntry({ hash: "0x" + "e".repeat(64), createdAt: now });
     await store.upsert(old);
     await store.upsert(recent);
@@ -172,7 +191,10 @@ describe("TxHistoryStore", () => {
 
   it("queries with toDate filter", async () => {
     const now = Date.now();
-    const old = makeEntry({ hash: "0x" + "f".repeat(64), createdAt: now - 10_000 });
+    const old = makeEntry({
+      hash: "0x" + "f".repeat(64),
+      createdAt: now - 10_000,
+    });
     const recent = makeEntry({ hash: "0x" + "g".repeat(64), createdAt: now });
     await store.upsert(old);
     await store.upsert(recent);
@@ -218,7 +240,9 @@ describe("TxHistoryStore", () => {
 
   it("getAllHashes filters by chainId", async () => {
     await store.upsert(makeEntry({ hash: "0x" + "j".repeat(64), chainId: 1 }));
-    await store.upsert(makeEntry({ hash: "0x" + "k".repeat(64), chainId: 137 }));
+    await store.upsert(
+      makeEntry({ hash: "0x" + "k".repeat(64), chainId: 137 }),
+    );
 
     const hashes = await store.getAllHashes(137);
     expect(hashes).toHaveLength(1);
@@ -245,9 +269,11 @@ describe("TxHistoryStore", () => {
 
     // Insert 100 valid entries so we bypass MIN_CLEANUP_ENTRIES
     for (let i = 0; i < 100; i++) {
-      await customStore.upsert(makeEntry({
-        hash: "0x" + i.toString(16).padStart(64, "0"),
-      }));
+      await customStore.upsert(
+        makeEntry({
+          hash: "0x" + i.toString(16).padStart(64, "0"),
+        }),
+      );
     }
 
     // Corrupt one entry's raw data so it hits both catch blocks

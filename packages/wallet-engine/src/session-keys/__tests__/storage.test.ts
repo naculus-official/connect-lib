@@ -1,16 +1,29 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionKeyStorage } from "../storage";
-import type { StoredSessionKey, SessionKeyScope, EncryptedKeyPair, SignedAuthorization } from "../types";
+import type {
+  EncryptedKeyPair,
+  SessionKeyScope,
+  SignedAuthorization,
+  StoredSessionKey,
+} from "../types";
 
 // Mock localStorage for testing
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
   return {
     getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
-    removeItem: vi.fn((key: string) => { delete store[key]; }),
-    clear: vi.fn(() => { store = {}; }),
-    get length() { return Object.keys(store).length; },
+    setItem: vi.fn((key: string, value: string) => {
+      store[key] = value;
+    }),
+    removeItem: vi.fn((key: string) => {
+      delete store[key];
+    }),
+    clear: vi.fn(() => {
+      store = {};
+    }),
+    get length() {
+      return Object.keys(store).length;
+    },
     key: vi.fn((index: number) => Object.keys(store)[index] ?? null),
   };
 })();
@@ -25,7 +38,10 @@ describe("session-keys / storage", () => {
     storage = new SessionKeyStorage();
   });
 
-  function createMockSession(id: string, overrides?: Partial<StoredSessionKey>): StoredSessionKey {
+  function createMockSession(
+    id: string,
+    overrides?: Partial<StoredSessionKey>,
+  ): StoredSessionKey {
     const scope: SessionKeyScope = {
       expiry: Math.floor(Date.now() / 1000) + 3600,
       mode: "offchain",
@@ -101,7 +117,9 @@ describe("session-keys / storage", () => {
   describe("listActive", () => {
     it("should only return active sessions", async () => {
       await storage.save(createMockSession("sk_active"));
-      await storage.save(createMockSession("sk_revoked", { status: "revoked" }));
+      await storage.save(
+        createMockSession("sk_revoked", { status: "revoked" }),
+      );
 
       const list = await storage.listActive();
       expect(list).toHaveLength(1);
@@ -109,9 +127,14 @@ describe("session-keys / storage", () => {
     });
 
     it("should mark expired sessions and exclude them", async () => {
-      await storage.save(createMockSession("sk_expired", {
-        scope: { expiry: Math.floor(Date.now() / 1000) - 60, mode: "offchain" },
-      }));
+      await storage.save(
+        createMockSession("sk_expired", {
+          scope: {
+            expiry: Math.floor(Date.now() / 1000) - 60,
+            mode: "offchain",
+          },
+        }),
+      );
 
       const list = await storage.listActive();
       expect(list).toHaveLength(0);
@@ -123,9 +146,14 @@ describe("session-keys / storage", () => {
 
   describe("autoCleanup", () => {
     it("should remove expired sessions", async () => {
-      await storage.save(createMockSession("sk_old", {
-        scope: { expiry: Math.floor(Date.now() / 1000) - 3600, mode: "offchain" },
-      }));
+      await storage.save(
+        createMockSession("sk_old", {
+          scope: {
+            expiry: Math.floor(Date.now() / 1000) - 3600,
+            mode: "offchain",
+          },
+        }),
+      );
       await storage.save(createMockSession("sk_fresh"));
 
       const cleaned = await storage.autoCleanup();

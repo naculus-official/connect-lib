@@ -8,11 +8,11 @@
  *   4 = localStorage          (🚫 XSS-vulnerable, switch browser)
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { PocketWallet } from "../wallet";
+import { describe, expect, it, vi } from "vitest";
 import { IndexedDbStorageAdapter } from "../storage/indexed-db";
 import { LocalStorageAdapter } from "../storage/local-storage";
 import type { StorageAdapter } from "../storage/types";
+import { PocketWallet } from "../wallet";
 
 describe("StorageAdapter.type property", () => {
   it("LocalStorageAdapter reports type 'localStorage'", () => {
@@ -31,13 +31,41 @@ describe("PocketWallet — storage security tier", () => {
   });
 
   it("storageType: 'localStorage' → tier 4", () => {
-    const w = new PocketWallet({ storageType: "localStorage", storageKey: "t" });
+    const w = new PocketWallet({
+      storageType: "localStorage",
+      storageKey: "t",
+    });
     expect(w.getStorageSecurityLevel()).toBe(4);
+  });
+
+  it("rejects unencrypted localStorage in a browser unless explicitly allowed", () => {
+    const previousWindow = (globalThis as any).window;
+    (globalThis as any).window = {};
+    try {
+      expect(
+        () =>
+          new PocketWallet({
+            storageType: "localStorage",
+            storageKey: "browser-secure",
+          }),
+      ).toThrow("Unencrypted localStorage is disabled");
+      expect(
+        new PocketWallet({
+          storageType: "localStorage",
+          storageKey: "browser-dev",
+          allowInsecureStorage: true,
+        }).getStorageSecurityLevel(),
+      ).toBe(4);
+    } finally {
+      if (previousWindow === undefined) delete (globalThis as any).window;
+      else (globalThis as any).window = previousWindow;
+    }
   });
 
   it("localStorage + encryptionPassphrase → tier 3", () => {
     const w = new PocketWallet({
-      storageType: "localStorage", storageKey: "t",
+      storageType: "localStorage",
+      storageKey: "t",
       encryptionPassphrase: async () => "p",
     });
     expect(w.getStorageSecurityLevel()).toBe(3);
@@ -53,7 +81,8 @@ describe("PocketWallet — storage security tier", () => {
 
   it("custom adapter takes precedence", () => {
     const a: StorageAdapter = {
-      type: "custom", isAvailable: () => true,
+      type: "custom",
+      isAvailable: () => true,
       load: vi.fn().mockResolvedValue(null),
       save: vi.fn().mockResolvedValue(undefined),
       clear: vi.fn().mockResolvedValue(undefined),
@@ -66,12 +95,19 @@ describe("PocketWallet — storage security tier", () => {
   it("encryptionPassphrase with IndexedDB (if available) → tier 1", () => {
     const idb = new IndexedDbStorageAdapter("t");
     if (!idb.isAvailable()) return; // skip in Node
-    const w = new PocketWallet({ storage: idb, storageKey: "t", encryptionPassphrase: async () => "p" });
+    const w = new PocketWallet({
+      storage: idb,
+      storageKey: "t",
+      encryptionPassphrase: async () => "p",
+    });
     expect(w.getStorageSecurityLevel()).toBe(1);
   });
 
   it("deprecated APIs still work", () => {
-    const w = new PocketWallet({ storageType: "localStorage", storageKey: "t" });
+    const w = new PocketWallet({
+      storageType: "localStorage",
+      storageKey: "t",
+    });
     expect(w.getStorageType()).toBe("localStorage");
     expect(w.isStorageDegraded()).toBe(true);
     expect(w.isEncrypted()).toBe(false);

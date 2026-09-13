@@ -95,14 +95,18 @@ describe("PocketWallet", () => {
     it("should reject short key", async () => {
       const pk = "0xabcd" as `0x${string}`;
       await expect(wallet.importPrivateKey(pk)).rejects.toThrow(
-        "Invalid private key",
+        // The message changed when import learned Solana formats; the
+        // refusal did not.
+        /Invalid private key|Unrecognized private key format/,
       );
     });
 
     it("should reject non-hex key", async () => {
       const pk = `0x${"zz".repeat(32)}` as `0x${string}`;
       await expect(wallet.importPrivateKey(pk)).rejects.toThrow(
-        "Invalid private key",
+        // The message changed when import learned Solana formats; the
+        // refusal did not.
+        /Invalid private key|Unrecognized private key format/,
       );
     });
   });
@@ -165,6 +169,28 @@ describe("PocketWallet signing", () => {
         "Missing",
       );
     });
+
+    it("uses the configured chain when the direct request omits chainId", async () => {
+      const signTransaction = vi.fn().mockResolvedValue({ signature: "0x" });
+      const signer = {
+        chainType: "eip155",
+        signMessage: vi.fn(),
+        signTransaction,
+      };
+      const configured = new PocketWallet({
+        storage: new MockStorage(),
+        autoSave: false,
+        chainId: "eip155:137",
+        signer,
+      });
+      await configured.importMnemonic(TEST_MNEMONIC);
+
+      await configured.signTransaction({ to: `0x${"ab".repeat(20)}` });
+      expect(signTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ chainId: 137 }),
+        expect.any(String),
+      );
+    });
   });
 });
 
@@ -183,7 +209,11 @@ describe("PocketWallet storage", () => {
     await wallet.generate();
     const loaded = await mockStorage.load();
     expect(loaded).not.toBeNull();
-    expect(loaded!.address).toBe(wallet.address);
+    // The stored record holds the account list. `address` on a live wallet is
+    // a view over it, and persisting a snapshot of that view would be a second
+    // copy that can disagree with the list it came from.
+    const evm = loaded!.accounts.find((a) => a.namespace === "eip155");
+    expect(evm?.address).toBe(wallet.address);
   });
 
   it("should not save when autoSave is false", async () => {

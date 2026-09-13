@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { PocketWallet } from "../wallet";
-import type { WalletData } from "../wallet";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletError } from "../errors";
 import type { StorageAdapter } from "../storage/types";
+import type { WalletData } from "../wallet";
+import { PocketWallet } from "../wallet";
 
 // Mock the core fee estimation module
 vi.mock("@naculus/connect-core", () => ({
@@ -10,7 +10,12 @@ vi.mock("@naculus/connect-core", () => ({
   WalletError: class WalletError extends Error {
     code: string;
     cause?: unknown;
-    constructor(code: string, message?: string, details?: unknown, cause?: unknown) {
+    constructor(
+      code: string,
+      message?: string,
+      details?: unknown,
+      cause?: unknown,
+    ) {
       super(message ?? code);
       this.name = "WalletError";
       this.code = code;
@@ -39,7 +44,8 @@ class MockStorage implements StorageAdapter {
   }
 }
 
-const TEST_MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 function mockRpc(handler: (method: string, params: unknown[]) => unknown) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (url, opts) => {
@@ -75,10 +81,14 @@ describe("EIP-1559 Integration", () => {
 
       const rpcMock = mockRpc((method) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
-          case "eth_sendRawTransaction": return "0x" + "ff".repeat(32);
-          default: return null;
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
+          case "eth_sendRawTransaction":
+            return "0x" + "ff".repeat(32);
+          default:
+            return null;
         }
       });
 
@@ -102,10 +112,14 @@ describe("EIP-1559 Integration", () => {
     it("should use user-provided maxFeePerGas and maxPriorityFeePerGas", async () => {
       const rpcMock = mockRpc((method) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
-          case "eth_sendRawTransaction": return "0x" + "ee".repeat(32);
-          default: return null;
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
+          case "eth_sendRawTransaction":
+            return "0x" + "ee".repeat(32);
+          default:
+            return null;
         }
       });
 
@@ -128,10 +142,14 @@ describe("EIP-1559 Integration", () => {
     it("should use user-provided gasPrice for legacy", async () => {
       const rpcMock = mockRpc((method) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
-          case "eth_sendRawTransaction": return "0x" + "dd".repeat(32);
-          default: return null;
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
+          case "eth_sendRawTransaction":
+            return "0x" + "dd".repeat(32);
+          default:
+            return null;
         }
       });
 
@@ -161,10 +179,14 @@ describe("EIP-1559 Integration", () => {
 
       const rpcMock = mockRpc((method) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
-          case "eth_sendRawTransaction": return "0x" + "cc".repeat(32);
-          default: return null;
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
+          case "eth_sendRawTransaction":
+            return "0x" + "cc".repeat(32);
+          default:
+            return null;
         }
       });
 
@@ -196,13 +218,17 @@ describe("EIP-1559 Integration", () => {
       let gasPriceCalled = false;
       const rpcMock = mockRpc((method, params) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
           case "eth_gasPrice":
             gasPriceCalled = true;
             return "0x4a817c800";
-          case "eth_sendRawTransaction": return "0x" + "bb".repeat(32);
-          default: return null;
+          case "eth_sendRawTransaction":
+            return "0x" + "bb".repeat(32);
+          default:
+            return null;
         }
       });
 
@@ -222,15 +248,15 @@ describe("EIP-1559 Integration", () => {
   describe("sendTransaction validation errors", () => {
     it("should throw when no wallet loaded", async () => {
       const empty = new PocketWallet({ storage: new MockStorage() });
-      await expect(
-        empty.sendTransaction({ to: "0xabcd" }),
-      ).rejects.toThrow("No wallet loaded");
+      await expect(empty.sendTransaction({ to: "0xabcd" })).rejects.toThrow(
+        "No wallet loaded",
+      );
     });
 
     it("should throw when 'to' is missing", async () => {
-      await expect(
-        wallet.sendTransaction({} as any),
-      ).rejects.toThrow("Missing 'to' address");
+      await expect(wallet.sendTransaction({} as any)).rejects.toThrow(
+        "Missing 'to' address",
+      );
     });
   });
 
@@ -239,11 +265,16 @@ describe("EIP-1559 Integration", () => {
       // Simulate an RPC that returns gasPrice (old behavior)
       const rpcMock = mockRpc((method) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
-          case "eth_sendRawTransaction": return "0x" + "aa".repeat(32);
-          case "eth_gasPrice": return "0x4a817c800";
-          default: return null;
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
+          case "eth_sendRawTransaction":
+            return "0x" + "aa".repeat(32);
+          case "eth_gasPrice":
+            return "0x4a817c800";
+          default:
+            return null;
         }
       });
 
@@ -262,9 +293,9 @@ describe("EIP-1559 Integration", () => {
   describe("bumpFee", () => {
     it("should throw WalletError when no wallet loaded", async () => {
       const empty = new PocketWallet({ storage: new MockStorage() });
-      await expect(
-        empty.bumpFee({ to: "0xabcd" }),
-      ).rejects.toThrow("No wallet loaded");
+      await expect(empty.bumpFee({ to: "0xabcd" })).rejects.toThrow(
+        "No wallet loaded",
+      );
     });
 
     it("should throw on invalid multiplier", async () => {

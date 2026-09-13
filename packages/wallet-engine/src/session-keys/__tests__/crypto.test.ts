@@ -1,9 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  decryptSessionKey,
+  encryptSessionKey,
   generateSessionKeyPair,
   signWithSessionKey,
-  encryptSessionKey,
-  decryptSessionKey,
 } from "../crypto";
 import type { SessionKeyPair } from "../types";
 
@@ -44,8 +44,14 @@ describe("session-keys / crypto", () => {
     it("should produce deterministic-like signatures (different hash → different sig)", async () => {
       const pair = await generateSessionKeyPair();
 
-      const sig1 = await signWithSessionKey(pair.privateKey, new TextEncoder().encode("msg1"));
-      const sig2 = await signWithSessionKey(pair.privateKey, new TextEncoder().encode("msg2"));
+      const sig1 = await signWithSessionKey(
+        pair.privateKey,
+        new TextEncoder().encode("msg1"),
+      );
+      const sig2 = await signWithSessionKey(
+        pair.privateKey,
+        new TextEncoder().encode("msg2"),
+      );
 
       expect(sig1.signature).not.toBe(sig2.signature);
     });
@@ -74,9 +80,7 @@ describe("session-keys / crypto", () => {
       const encrypted = await encryptSessionKey(original, testSeed);
 
       const wrongSeed = new Uint8Array(32).fill(0xcd);
-      await expect(
-        decryptSessionKey(encrypted, wrongSeed),
-      ).rejects.toThrow();
+      await expect(decryptSessionKey(encrypted, wrongSeed)).rejects.toThrow();
     });
 
     it("should produce different ciphertexts for the same key (different nonce)", async () => {

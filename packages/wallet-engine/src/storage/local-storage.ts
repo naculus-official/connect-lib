@@ -7,8 +7,8 @@ import type { StorageAdapter } from "./types";
  *
  * ⚠️  SECURITY: Data is base64-encoded JSON (NOT encrypted).
  *     Mnemonic phrases are stored in plaintext reachable by XSS.
- *     For production use, wrap with EncryptedStorageAdapter (AES-256-GCM)
- *     or use IndexedDbStorageAdapter which has better origin isolation.
+ *     For production use, wrap with EncryptedStorageAdapter (AES-256-GCM).
+ *     IndexedDB is origin-scoped but is also readable by same-origin XSS.
  *
  *     This adapter is the FALLBACK — only used when IndexedDB is unavailable.
  *     See storage/encrypted.ts for encrypted storage.

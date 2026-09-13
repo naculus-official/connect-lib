@@ -1,18 +1,27 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { PocketWallet } from "../wallet";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { IsolatedSigner } from "../signers/isolated-signer";
 import type { StorageAdapter } from "../storage/types";
 import type { WalletData } from "../wallet";
-import { IsolatedSigner } from "../signers/isolated-signer";
+import { PocketWallet } from "../wallet";
 
-const TEST_MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 class MockStorage implements StorageAdapter {
   private d: WalletData | null = null;
   readonly type = "memory" as const;
-  isAvailable() { return true; }
-  async load() { return this.d; }
-  async save(data: WalletData) { this.d = data; }
-  async clear() { this.d = null; }
+  isAvailable() {
+    return true;
+  }
+  async load() {
+    return this.d;
+  }
+  async save(data: WalletData) {
+    this.d = data;
+  }
+  async clear() {
+    this.d = null;
+  }
 }
 
 class MockWorker {
@@ -31,7 +40,9 @@ class MockWorker {
           break;
         case "signMessage":
         case "signTransaction":
-          fn({ data: { id, type: "signed", signature: "0x" + "ab".repeat(65) } });
+          fn({
+            data: { id, type: "signed", signature: "0x" + "ab".repeat(65) },
+          });
           break;
         case "clear":
           fn({ data: { id, type: "cleared" } });
@@ -40,7 +51,9 @@ class MockWorker {
     }, 5);
   }
   terminate() {}
-  addEventListener(type: string, fn: any) { if (type === "message") this.onmessageFn = fn; }
+  addEventListener(type: string, fn: any) {
+    if (type === "message") this.onmessageFn = fn;
+  }
 }
 
 describe("PocketWallet with isolation: worker", () => {
@@ -50,30 +63,52 @@ describe("PocketWallet with isolation: worker", () => {
   });
 
   it("creates IsolatedSigner when isolation=worker", () => {
-    const wallet = new PocketWallet({ storage: new MockStorage(), isolation: "worker", autoSave: false });
+    const wallet = new PocketWallet({
+      storage: new MockStorage(),
+      isolation: "worker",
+      autoSave: false,
+    });
     expect(wallet["_signer"]).toBeInstanceOf(IsolatedSigner);
   });
 
   it("creates EVMSigner when isolation not specified", () => {
-    const wallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const wallet = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     expect(wallet["_signer"]).not.toBeInstanceOf(IsolatedSigner);
   });
 
   it("generates wallet in worker isolation mode", async () => {
-    const wallet = new PocketWallet({ storage: new MockStorage(), isolation: "worker", autoSave: false });
+    const wallet = new PocketWallet({
+      storage: new MockStorage(),
+      isolation: "worker",
+      autoSave: false,
+    });
     await wallet.generate();
     expect(wallet["data"]).not.toBeNull();
   });
 
   it("imports mnemonic in worker isolation mode", async () => {
-    const wallet = new PocketWallet({ storage: new MockStorage(), isolation: "worker", autoSave: false });
+    const wallet = new PocketWallet({
+      storage: new MockStorage(),
+      isolation: "worker",
+      autoSave: false,
+    });
     await wallet.importMnemonic(TEST_MNEMONIC);
     expect(wallet["data"]).not.toBeNull();
   });
 
   it("generates deterministic address same as non-isolated", async () => {
-    const w1 = new PocketWallet({ storage: new MockStorage(), isolation: "worker", autoSave: false });
-    const w2 = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w1 = new PocketWallet({
+      storage: new MockStorage(),
+      isolation: "worker",
+      autoSave: false,
+    });
+    const w2 = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     await w1.importMnemonic(TEST_MNEMONIC);
     await w2.importMnemonic(TEST_MNEMONIC);
     const d1 = w1["data"];
@@ -82,7 +117,11 @@ describe("PocketWallet with isolation: worker", () => {
   });
 
   it("clears worker on wallet.clear", async () => {
-    const wallet = new PocketWallet({ storage: new MockStorage(), isolation: "worker", autoSave: false });
+    const wallet = new PocketWallet({
+      storage: new MockStorage(),
+      isolation: "worker",
+      autoSave: false,
+    });
     await wallet.generate();
     const signer = wallet["_signer"] as IsolatedSigner;
     const spy = vi.spyOn(signer, "clear");
@@ -91,7 +130,11 @@ describe("PocketWallet with isolation: worker", () => {
   });
 
   it("signs message in worker isolation mode", async () => {
-    const wallet = new PocketWallet({ storage: new MockStorage(), isolation: "worker", autoSave: false });
+    const wallet = new PocketWallet({
+      storage: new MockStorage(),
+      isolation: "worker",
+      autoSave: false,
+    });
     await wallet.importMnemonic(TEST_MNEMONIC);
     const result = await wallet.signMessage("hello");
     expect(result.signature).toMatch(/^0x[0-9a-f]{130}$/);

@@ -11,11 +11,15 @@
  * No hardcoded strings — all from test-constants.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import {
+  ADDRESSES,
+  AMOUNTS,
+  DECIMALS,
+} from "@naculus/test-utils/test-constants";
+import { describe, expect, it, vi } from "vitest";
 import { IndexedDbStorageAdapter } from "../storage/indexed-db";
 import { LocalStorageAdapter } from "../storage/local-storage";
 import type { WalletData } from "../wallet";
-import { ADDRESSES, DECIMALS, AMOUNTS } from "@naculus/test-utils/test-constants";
 
 // Inline bigint helpers — wallet-engine has no dependency on @naculus/connect-core
 function toBigInt(value: string, decimals: number): bigint {
@@ -27,7 +31,7 @@ function toBigInt(value: string, decimals: number): bigint {
 function fromBigInt(value: bigint, decimals: number): string {
   const str = value.toString().padStart(decimals + 1, "0");
   const int = str.slice(0, str.length - decimals) || "0";
-  let frac = str.slice(str.length - decimals).replace(/0+$/, "");
+  const frac = str.slice(str.length - decimals).replace(/0+$/, "");
   return frac ? `${int}.${frac}` : int;
 }
 
@@ -37,7 +41,8 @@ function fromBigInt(value: bigint, decimals: number): string {
 
 describe("A — Storage Security: localStorage vs IndexedDB", () => {
   const walletData: WalletData = {
-    mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    mnemonic:
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
     privateKey: "0x" + "ab".repeat(32),
     address: ADDRESSES.ALICE,
     createdAt: Date.now(),
@@ -211,7 +216,9 @@ describe("C — EIP-712 Typed Data", () => {
     expect(unlimited > 0n).toBe(true);
     // uint256.max in string form
     const asString = unlimited.toString();
-    expect(asString).toBe("115792089237316195423570985008687907853269984665640564039457584007913129639935");
+    expect(asString).toBe(
+      "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+    );
   });
 });
 
@@ -220,12 +227,15 @@ describe("C — EIP-712 Typed Data", () => {
 // ══════════════════════════════════════════════════════════════════════
 
 describe("D — EIP-2612 Permit Construction", () => {
-  const PERMIT_TYPEHASH = "0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9";
+  const PERMIT_TYPEHASH =
+    "0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9";
 
   it("PERMIT_TYPEHASH is the known keccak256 of Permit struct", () => {
     // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
     // This value is hardcoded in EIP-2612 and must match
-    expect(PERMIT_TYPEHASH).toBe("0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9");
+    expect(PERMIT_TYPEHASH).toBe(
+      "0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9",
+    );
     expect(PERMIT_TYPEHASH.length).toBe(66);
   });
 
@@ -287,8 +297,12 @@ describe("E — Seed Entropy Quality", () => {
     crypto.getRandomValues(buf1);
     crypto.getRandomValues(buf2);
     // Hex compare — infinitesimally unlikely to collide
-    const hex1 = Array.from(buf1).map((b) => b.toString(16).padStart(2, "0")).join("");
-    const hex2 = Array.from(buf2).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const hex1 = Array.from(buf1)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const hex2 = Array.from(buf2)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
     expect(hex1).not.toBe(hex2);
   });
 
@@ -313,7 +327,8 @@ describe("E — Seed Entropy Quality", () => {
   });
 
   it("mnemonic with 12 or 24 words passes word count check", () => {
-    const twelve = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    const twelve =
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     const twentyFour = ("abandon " + "abandon ".repeat(22)).trim() + " art";
     expect(twelve.trim().split(/\s+/).length).toBe(12);
     expect(twentyFour.trim().split(/\s+/).length).toBe(24);

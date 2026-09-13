@@ -1,12 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryHistoryStorage, TxHistoryStore } from "../TxHistoryStore";
 import { TxMonitor } from "../TxMonitor";
-import { TxHistoryStore, MemoryHistoryStorage } from "../TxHistoryStore";
 import type { ProviderLike, TxStatus } from "../types";
 
 class MockProvider {
   private receipts = new Map<string, any>();
   private blockNumber = 100;
-  private _customRequest: ((method: string, params?: unknown[]) => Promise<unknown>) | null = null;
+  private _customRequest:
+    | ((method: string, params?: unknown[]) => Promise<unknown>)
+    | null = null;
 
   setReceipt(hash: string, receipt: any | null): void {
     this.receipts.set(hash, receipt);
@@ -16,11 +18,19 @@ class MockProvider {
     this.blockNumber = n;
   }
 
-  setCustomRequest(fn: (method: string, params?: unknown[]) => Promise<unknown>): void {
+  setCustomRequest(
+    fn: (method: string, params?: unknown[]) => Promise<unknown>,
+  ): void {
     this._customRequest = fn;
   }
 
-  request({ method, params }: { method: string; params?: unknown[] }): Promise<unknown> {
+  request({
+    method,
+    params,
+  }: {
+    method: string;
+    params?: unknown[];
+  }): Promise<unknown> {
     if (this._customRequest) return this._customRequest(method, params);
     switch (method) {
       case "eth_getTransactionReceipt": {
@@ -101,7 +111,11 @@ describe("TxMonitor - State Transitions", () => {
     mockProvider.setBlockNumber(100); // 100 - 100 = 0 confirmations → mined
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "e".repeat(40), to: "0x" + "f".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "e".repeat(40),
+        to: "0x" + "f".repeat(40),
+        value: "0x0",
+      },
       requiredConfirmations: 2, // Require 2 so it stays in "mined"
     });
 
@@ -109,7 +123,8 @@ describe("TxMonitor - State Transitions", () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(onStatusChange).toHaveBeenCalled();
-    const lastCall = onStatusChange.mock.calls[onStatusChange.mock.calls.length - 1][0];
+    const lastCall =
+      onStatusChange.mock.calls[onStatusChange.mock.calls.length - 1][0];
     expect(lastCall.status).toBe("mined");
   });
 
@@ -127,7 +142,11 @@ describe("TxMonitor - State Transitions", () => {
     mockProvider.setBlockNumber(101); // 101 - 99 = 2 confs
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "j".repeat(40), to: "0x" + "k".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "j".repeat(40),
+        to: "0x" + "k".repeat(40),
+        value: "0x0",
+      },
       requiredConfirmations: 2,
     });
 
@@ -151,7 +170,11 @@ describe("TxMonitor - State Transitions", () => {
     });
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "n".repeat(40), to: "0x" + "o".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "n".repeat(40),
+        to: "0x" + "o".repeat(40),
+        value: "0x0",
+      },
     });
 
     await vi.advanceTimersByTimeAsync(10);
@@ -176,7 +199,11 @@ describe("TxMonitor - State Transitions", () => {
     mockProvider.setBlockNumber(101);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "r".repeat(40), to: "0x" + "s".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "r".repeat(40),
+        to: "0x" + "s".repeat(40),
+        value: "0x0",
+      },
     });
 
     await vi.advanceTimersByTimeAsync(10);
@@ -198,7 +225,11 @@ describe("TxMonitor - State Transitions", () => {
     mockProvider.setBlockNumber(101);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "v".repeat(40), to: "0x" + "w".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "v".repeat(40),
+        to: "0x" + "w".repeat(40),
+        value: "0x0",
+      },
       requiredConfirmations: 1,
     });
 
@@ -217,7 +248,11 @@ describe("TxMonitor - State Transitions", () => {
     mockProvider.setReceipt(hash, null);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "y".repeat(40), to: "0x" + "z".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "y".repeat(40),
+        to: "0x" + "z".repeat(40),
+        value: "0x0",
+      },
     });
 
     const status = monitor.getTxStatus(hash, 1);
@@ -235,7 +270,11 @@ describe("TxMonitor - State Transitions", () => {
     mockProvider.setReceipt(hash, null);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "bb".repeat(20), to: "0x" + "cc".repeat(20), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "bb".repeat(20),
+        to: "0x" + "cc".repeat(20),
+        value: "0x0",
+      },
     });
 
     expect(monitor._watcherCount()).toBe(1);
@@ -274,7 +313,11 @@ describe("TxMonitor - Reorg Handling", () => {
     mockProvider.setBlockNumber(100);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "b".repeat(40), to: "0x" + "c".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "b".repeat(40),
+        to: "0x" + "c".repeat(40),
+        value: "0x0",
+      },
       requiredConfirmations: 2, // Require 2 confs so it stays in mined
     });
 
@@ -328,7 +371,11 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setBlockNumber(101);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "f".repeat(40), to: "0x" + "g".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "f".repeat(40),
+        to: "0x" + "g".repeat(40),
+        value: "0x0",
+      },
     });
     await vi.advanceTimersByTimeAsync(10);
 
@@ -340,7 +387,11 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setReceipt(hash, null);
 
     const entry1 = await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "i".repeat(40), to: "0x" + "j".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "i".repeat(40),
+        to: "0x" + "j".repeat(40),
+        value: "0x0",
+      },
     });
 
     const entry2 = await monitor.watchTx(hash, 1);
@@ -375,7 +426,11 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setReceipt(hash, null);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "p".repeat(40), to: "0x" + "q".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "p".repeat(40),
+        to: "0x" + "q".repeat(40),
+        value: "0x0",
+      },
     });
 
     expect(monitor._watcherCount()).toBe(1);
@@ -395,15 +450,27 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setBlockNumber(100); // 0 confs → mined (needs 2 to confirm)
 
     await monitor.watchTx("0x" + "r".repeat(64), 1, {
-      initialEntry: { from: "0x" + "u".repeat(40), to: "0x" + "v".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "u".repeat(40),
+        to: "0x" + "v".repeat(40),
+        value: "0x0",
+      },
       requiredConfirmations: 2,
     });
     await monitor.watchTx("0x" + "s".repeat(64), 1, {
-      initialEntry: { from: "0x" + "w".repeat(40), to: "0x" + "x".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "w".repeat(40),
+        to: "0x" + "x".repeat(40),
+        value: "0x0",
+      },
       requiredConfirmations: 2,
     });
     await monitor.watchTx("0x" + "t".repeat(64), 137, {
-      initialEntry: { from: "0x" + "y".repeat(40), to: "0x" + "z".repeat(40), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "y".repeat(40),
+        to: "0x" + "z".repeat(40),
+        value: "0x0",
+      },
       requiredConfirmations: 2,
     });
 
@@ -424,7 +491,11 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setReceipt(hash, null);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "bb".repeat(20), to: "0x" + "cc".repeat(20), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "bb".repeat(20),
+        to: "0x" + "cc".repeat(20),
+        value: "0x0",
+      },
     });
 
     const history = await monitor.getTxHistory("0x" + "bb".repeat(20));
@@ -438,8 +509,20 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setReceipt(hash1, null);
     mockProvider.setReceipt(hash2, null);
 
-    await monitor.watchTx(hash1, 1, { initialEntry: { from: "0x" + "ff".repeat(20), to: "0x" + "gg".repeat(20), value: "0x0" } });
-    await monitor.watchTx(hash2, 137, { initialEntry: { from: "0x" + "hh".repeat(20), to: "0x" + "ii".repeat(20), value: "0x0" } });
+    await monitor.watchTx(hash1, 1, {
+      initialEntry: {
+        from: "0x" + "ff".repeat(20),
+        to: "0x" + "gg".repeat(20),
+        value: "0x0",
+      },
+    });
+    await monitor.watchTx(hash2, 137, {
+      initialEntry: {
+        from: "0x" + "hh".repeat(20),
+        to: "0x" + "ii".repeat(20),
+        value: "0x0",
+      },
+    });
 
     const history = await monitor.getTxHistory(undefined, 137);
     expect(history).toHaveLength(1);
@@ -455,7 +538,11 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setBlockNumber(101);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "ll".repeat(20), to: "0x" + "mm".repeat(20), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "ll".repeat(20),
+        to: "0x" + "mm".repeat(20),
+        value: "0x0",
+      },
     });
 
     const status = monitor.getTxStatus(hash, 1)!;
@@ -464,7 +551,9 @@ describe("TxMonitor - Event Management", () => {
     await vi.advanceTimersByTimeAsync(10);
     await monitor.refreshTx(hash, 1);
 
-    expect(monitor.getTxStatus(hash, 1)!.updatedAt).toBeGreaterThanOrEqual(oldUpdatedAt);
+    expect(monitor.getTxStatus(hash, 1)!.updatedAt).toBeGreaterThanOrEqual(
+      oldUpdatedAt,
+    );
   });
 
   it("refreshTx resolves chainId from store when not being watched", async () => {
@@ -496,7 +585,11 @@ describe("TxMonitor - Event Management", () => {
     mockProvider.setBlockNumber(100);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "ss".repeat(20), to: "0x" + "tt".repeat(20), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "ss".repeat(20),
+        to: "0x" + "tt".repeat(20),
+        value: "0x0",
+      },
       requiredConfirmations: 2, // stays mined
     });
 
@@ -589,7 +682,11 @@ describe("TxMonitor - Lifecycle & Error Handling", () => {
     mockProvider.setReceipt(hash, null);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "rr".repeat(20), to: "0x" + "ss".repeat(20), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "rr".repeat(20),
+        to: "0x" + "ss".repeat(20),
+        value: "0x0",
+      },
     });
 
     await monitor.clearHistory();
@@ -614,7 +711,11 @@ describe("TxMonitor - Lifecycle & Error Handling", () => {
     mockProvider.setBlockNumber(100);
 
     await monitor.watchTx(hash, 1, {
-      initialEntry: { from: "0x" + "vv".repeat(20), to: "0x" + "ww".repeat(20), value: "0x0" },
+      initialEntry: {
+        from: "0x" + "vv".repeat(20),
+        to: "0x" + "ww".repeat(20),
+        value: "0x0",
+      },
       requiredConfirmations: 2,
     });
 
@@ -624,7 +725,8 @@ describe("TxMonitor - Lifecycle & Error Handling", () => {
     // Make next poll throw
     onStatusChange.mockClear();
     mockProvider.setCustomRequest((method: string) => {
-      if (method === "eth_getTransactionReceipt") return Promise.reject(new Error("RPC down"));
+      if (method === "eth_getTransactionReceipt")
+        return Promise.reject(new Error("RPC down"));
       return Promise.resolve("0x64");
     });
 

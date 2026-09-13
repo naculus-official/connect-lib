@@ -1,11 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TxPoller, DEFAULT_POLL_INTERVAL } from "../poller";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_POLL_INTERVAL, TxPoller } from "../poller";
 import type { ProviderLike } from "../types";
 
 class MockProvider {
   private receipts = new Map<string, any>();
   private blockNumber = 100;
-  private _request: ((method: string, params?: unknown[]) => Promise<unknown>) | null = null;
+  private _request:
+    | ((method: string, params?: unknown[]) => Promise<unknown>)
+    | null = null;
 
   setReceipt(hash: string, receipt: any | null): void {
     this.receipts.set(hash, receipt);
@@ -15,11 +17,19 @@ class MockProvider {
     this.blockNumber = n;
   }
 
-  setCustomRequest(fn: (method: string, params?: unknown[]) => Promise<unknown>): void {
+  setCustomRequest(
+    fn: (method: string, params?: unknown[]) => Promise<unknown>,
+  ): void {
     this._request = fn;
   }
 
-  request({ method, params }: { method: string; params?: unknown[] }): Promise<unknown> {
+  request({
+    method,
+    params,
+  }: {
+    method: string;
+    params?: unknown[];
+  }): Promise<unknown> {
     if (this._request) return this._request(method, params);
     switch (method) {
       case "eth_getTransactionReceipt": {
@@ -101,9 +111,11 @@ describe("TxPoller", () => {
     // Current block 99, tx block 99 → 0 confirmations → mined
     mockProvider.setBlockNumber(99);
 
-        poller.startPolling(hash, 1, onStatus, onError, 100, { requiredConfirmations: 3 } as any);
+    poller.startPolling(hash, 1, onStatus, onError, 100, {
+      requiredConfirmations: 3,
+    } as any);
 
-        // Wait for immediate poll
+    // Wait for immediate poll
     await vi.advanceTimersByTimeAsync(10);
 
     expect(onStatus).toHaveBeenCalled();
@@ -149,7 +161,8 @@ describe("TxPoller", () => {
 
     // Make the provider throw for the receipt call only
     mockProvider.setCustomRequest((method: string) => {
-      if (method === "eth_getTransactionReceipt") return Promise.reject(new Error("RPC error"));
+      if (method === "eth_getTransactionReceipt")
+        return Promise.reject(new Error("RPC error"));
       return Promise.resolve("0x64");
     });
 
@@ -194,7 +207,9 @@ describe("TxPoller", () => {
     });
     mockProvider.setBlockNumber(100); // 0 confs → mined, entry stays alive
 
-    poller.startPolling(hash, 1, onStatus, onError, 100, { requiredConfirmations: 2 } as any);
+    poller.startPolling(hash, 1, onStatus, onError, 100, {
+      requiredConfirmations: 2,
+    } as any);
     await vi.advanceTimersByTimeAsync(10);
     onStatus.mockClear();
 
@@ -259,7 +274,8 @@ describe("TxPoller", () => {
 
     mockProvider.setCustomRequest((method: string) => {
       if (method === "eth_getTransactionReceipt") return Promise.resolve(null);
-      if (method === "eth_getTransactionByHash") return Promise.resolve({ hash, blockNumber: null });
+      if (method === "eth_getTransactionByHash")
+        return Promise.resolve({ hash, blockNumber: null });
       if (method === "eth_blockNumber") return Promise.resolve("0x64");
       return Promise.resolve(null);
     });
@@ -287,7 +303,8 @@ describe("TxPoller", () => {
 
     mockProvider.setCustomRequest((method: string) => {
       if (method === "eth_getTransactionReceipt") return Promise.resolve(null);
-      if (method === "eth_getTransactionByHash") return Promise.resolve({ hash, blockNumber: null });
+      if (method === "eth_getTransactionByHash")
+        return Promise.resolve({ hash, blockNumber: null });
       if (method === "eth_blockNumber") return Promise.resolve("0x64");
       return Promise.resolve(null);
     });
@@ -306,7 +323,8 @@ describe("TxPoller", () => {
     const onError = vi.fn();
 
     mockProvider.setCustomRequest((method: string) => {
-      if (method === "eth_getTransactionReceipt") return Promise.reject("string error");
+      if (method === "eth_getTransactionReceipt")
+        return Promise.reject("string error");
       return Promise.resolve("0x64");
     });
 
@@ -315,5 +333,109 @@ describe("TxPoller", () => {
 
     expect(onError).toHaveBeenCalled();
     expect(onError.mock.calls[0][0]).toBeInstanceOf(Error);
+  });
+});
+
+describe("TxPoller exponential backoff", () => {
+  /**
+   * The class documented "Exponential backoff on errors" while backoffConfig
+   * was stored and never read and backoffCount was incremented and never
+   * consulted. A failing RPC therefore got hit at the full poll rate for as
+   * long as the watch lived — the opposite of backoff.
+   */
+  const HASH = `0x${"ab".repeat(32)}`;
+
+  function failingPoller(backoff?: {
+    initialDelay: number;
+    maxDelay: number;
+    multiplier: number;
+  }) {
+    let calls = 0;
+    const provider = {
+      request: () => {
+        calls++;
+        return Promise.reject(new Error("RPC down"));
+      },
+    } as unknown as ProviderLike;
+    const poller = new TxPoller(() => provider, 10_000, backoff);
+    return { poller, calls: () => calls };
+  }
+
+  afterEach(() => vi.useRealTimers());
+
+  it("skips polls while an entry is backing off", async () => {
+    vi.useFakeTimers();
+    const { poller, calls } = failingPoller({
+      initialDelay: 1_000,
+      maxDelay: 30_000,
+      multiplier: 2,
+    });
+    poller.startPolling(
+      HASH,
+      1,
+      () => {},
+      () => {},
+    );
+
+    await poller.pollNow(HASH, 1);
+    const afterFirst = calls();
+    expect(afterFirst).toBeGreaterThan(0);
+
+    // Immediately after a failure the entry is inside its backoff window.
+    vi.setSystemTime(Date.now() + 100);
+    await (poller as never as { pollOnce(k: string): Promise<void> }).pollOnce(
+      `1:${HASH}`,
+    );
+    expect(calls()).toBe(afterFirst);
+
+    poller.stopPolling(HASH, 1);
+  });
+
+  it("polls again once the backoff window has elapsed", async () => {
+    vi.useFakeTimers();
+    const { poller, calls } = failingPoller({
+      initialDelay: 1_000,
+      maxDelay: 30_000,
+      multiplier: 2,
+    });
+    poller.startPolling(
+      HASH,
+      1,
+      () => {},
+      () => {},
+    );
+
+    await poller.pollNow(HASH, 1);
+    const afterFirst = calls();
+
+    vi.setSystemTime(Date.now() + 2_000);
+    await (poller as never as { pollOnce(k: string): Promise<void> }).pollOnce(
+      `1:${HASH}`,
+    );
+    expect(calls()).toBeGreaterThan(afterFirst);
+
+    poller.stopPolling(HASH, 1);
+  });
+
+  it("pollNow bypasses backoff because the caller asked explicitly", async () => {
+    vi.useFakeTimers();
+    const { poller, calls } = failingPoller({
+      initialDelay: 60_000,
+      maxDelay: 60_000,
+      multiplier: 2,
+    });
+    poller.startPolling(
+      HASH,
+      1,
+      () => {},
+      () => {},
+    );
+
+    await poller.pollNow(HASH, 1);
+    const afterFirst = calls();
+    await poller.pollNow(HASH, 1);
+    expect(calls()).toBeGreaterThan(afterFirst);
+
+    poller.stopPolling(HASH, 1);
   });
 });

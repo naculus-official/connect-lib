@@ -154,9 +154,15 @@ export class SessionKeyStorage {
         scope: k.scope,
         status: k.status as SessionKeyStatus,
         createdAt: k.createdAt,
-        expiresAt: k.scope.expiry,
+        // Keep the public SessionKeyInfo contract aligned with connect-core.
+        expiresAt: k.scope.expiry * 1000,
         useCount: k.useCount,
         signerAddress: k.authorization.signerAddress,
+        authorized: Boolean(
+          k.authorization.rawSignature || k.authorization.authorization,
+        ),
+        authorizationType: k.authorization.type,
+        authorizationMessage: k.authorization.message,
       }));
   }
 

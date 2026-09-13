@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WalletError } from "../errors";
+import type { ResolvedFeeOptions } from "../fee-oracle";
 import {
+  applyMultiplier,
   shouldUseEIP1559,
   validateFeeParams,
-  applyMultiplier,
 } from "../fee-oracle";
-import type { ResolvedFeeOptions } from "../fee-oracle";
-import { WalletError } from "../errors";
 
 // ── shouldUseEIP1559 tests ─────────────────────────────────────────
 
@@ -19,7 +19,9 @@ describe("shouldUseEIP1559", () => {
   });
 
   it("returns true when maxFeePerGas is present (even with gasPrice)", () => {
-    expect(shouldUseEIP1559({ maxFeePerGas: "0x100", gasPrice: "0x100" })).toBe(true);
+    expect(shouldUseEIP1559({ maxFeePerGas: "0x100", gasPrice: "0x100" })).toBe(
+      true,
+    );
   });
 
   it("returns true when maxPriorityFeePerGas is present", () => {
@@ -42,7 +44,7 @@ describe("validateFeeParams", () => {
     it("passes validation for valid EIP-1559 fees", () => {
       const fees: ResolvedFeeOptions = {
         type: "eip1559",
-        maxFeePerGas: "0x59682f00",     // 1.5 gwei
+        maxFeePerGas: "0x59682f00", // 1.5 gwei
         maxPriorityFeePerGas: "0x3b9aca00", // 1 gwei
       };
       expect(() => validateFeeParams(fees)).not.toThrow();
@@ -55,7 +57,9 @@ describe("validateFeeParams", () => {
         maxPriorityFeePerGas: "0x3b9aca00",
       };
       expect(() => validateFeeParams(fees)).toThrow(WalletError);
-      expect(() => validateFeeParams(fees)).toThrow("maxFeePerGas must be greater than zero");
+      expect(() => validateFeeParams(fees)).toThrow(
+        "maxFeePerGas must be greater than zero",
+      );
     });
 
     it("throws when maxPriorityFeePerGas is zero", () => {
@@ -65,17 +69,21 @@ describe("validateFeeParams", () => {
         maxPriorityFeePerGas: "0x0",
       };
       expect(() => validateFeeParams(fees)).toThrow(WalletError);
-      expect(() => validateFeeParams(fees)).toThrow("maxPriorityFeePerGas must be greater than zero");
+      expect(() => validateFeeParams(fees)).toThrow(
+        "maxPriorityFeePerGas must be greater than zero",
+      );
     });
 
     it("throws when maxFeePerGas < maxPriorityFeePerGas", () => {
       const fees: ResolvedFeeOptions = {
         type: "eip1559",
-        maxFeePerGas: "0x3b9aca00",     // 1 gwei
+        maxFeePerGas: "0x3b9aca00", // 1 gwei
         maxPriorityFeePerGas: "0x59682f00", // 1.5 gwei
       };
       expect(() => validateFeeParams(fees)).toThrow(WalletError);
-      expect(() => validateFeeParams(fees)).toThrow("maxFeePerGas must be greater than or equal to maxPriorityFeePerGas");
+      expect(() => validateFeeParams(fees)).toThrow(
+        "maxFeePerGas must be greater than or equal to maxPriorityFeePerGas",
+      );
     });
 
     it("throws when maxFeePerGas equals maxPriorityFeePerGas (edge: allowed)", () => {
@@ -104,7 +112,9 @@ describe("validateFeeParams", () => {
         gasPrice: "0x0",
       };
       expect(() => validateFeeParams(fees)).toThrow(WalletError);
-      expect(() => validateFeeParams(fees)).toThrow("gasPrice must be greater than zero");
+      expect(() => validateFeeParams(fees)).toThrow(
+        "gasPrice must be greater than zero",
+      );
     });
   });
 });
@@ -123,6 +133,13 @@ describe("applyMultiplier", () => {
     expect(result).toBe("0x100");
   });
 
+  it("rejects non-finite or non-positive multipliers", () => {
+    expect(() => applyMultiplier("0x100", 0)).toThrow();
+    expect(() => applyMultiplier("0x100", Number.NaN)).toThrow();
+    expect(() => applyMultiplier("0x100", Number.POSITIVE_INFINITY)).toThrow();
+    expect(() => applyMultiplier("0x01", 1.1)).toThrow();
+  });
+
   it("doubles value with 2.0 multiplier", () => {
     const result = applyMultiplier("0x100", 2.0);
     expect(result).toBe("0x200");
@@ -130,7 +147,7 @@ describe("applyMultiplier", () => {
 
   it("handles large hex values", () => {
     const result = applyMultiplier("0x59682f00", 1.5);
-    expect(BigInt(result)).toBe(BigInt("0x59682f00") * 150n / 100n);
+    expect(BigInt(result)).toBe((BigInt("0x59682f00") * 150n) / 100n);
   });
 
   it("works with 0x0 as input (outcome is 0x0)", () => {

@@ -1,22 +1,36 @@
-import { describe, it, expect } from "vitest";
-import { PocketWallet } from "../wallet";
+import { describe, expect, it } from "vitest";
 import { WalletError } from "../errors";
 import type { StorageAdapter } from "../storage/types";
 import type { WalletData } from "../wallet";
+import { PocketWallet } from "../wallet";
 
 class VoidStorage implements StorageAdapter {
   private d: WalletData | null = null;
   readonly type = "memory" as const;
-  isAvailable() { return true; }
-  async load() { return this.d; }
-  async save(data: WalletData) { this.d = data; }
-  async clear() { this.d = null; }
+  isAvailable() {
+    return true;
+  }
+  async load() {
+    return this.d;
+  }
+  async save(data: WalletData) {
+    this.d = data;
+  }
+  async clear() {
+    this.d = null;
+  }
 }
 
 function randomHex(len: number): `0x${string}` {
   let s = "0x";
-  for (let i = 0; i < len; i++) s += "0123456789abcdef"[Math.floor(Math.random() * 16)];
+  for (let i = 0; i < len; i++)
+    s += "0123456789abcdef"[Math.floor(Math.random() * 16)];
   return s as `0x${string}`;
+}
+
+function randomQuantity(bytes: number): `0x${string}` {
+  const value = BigInt(randomHex(bytes));
+  return `0x${value.toString(16)}` as `0x${string}`;
 }
 
 function randomBytes(n: number): Uint8Array {
@@ -26,17 +40,23 @@ function randomBytes(n: number): Uint8Array {
 describe("Fuzz: PocketWallet input validation", () => {
   it("rejects invalid private key format (short)", async () => {
     const w = new PocketWallet({ storage: new VoidStorage(), autoSave: false });
-    await expect(w.importPrivateKey("0x" + "ab".repeat(31) as `0x${string}`)).rejects.toThrow();
+    await expect(
+      w.importPrivateKey(("0x" + "ab".repeat(31)) as `0x${string}`),
+    ).rejects.toThrow();
   });
 
   it("rejects invalid private key format (long)", async () => {
     const w = new PocketWallet({ storage: new VoidStorage(), autoSave: false });
-    await expect(w.importPrivateKey("0x" + "ab".repeat(33) as `0x${string}`)).rejects.toThrow();
+    await expect(
+      w.importPrivateKey(("0x" + "ab".repeat(33)) as `0x${string}`),
+    ).rejects.toThrow();
   });
 
   it("rejects private key with non-hex chars", async () => {
     const w = new PocketWallet({ storage: new VoidStorage(), autoSave: false });
-    await expect(w.importPrivateKey("0x" + "zz".repeat(32) as `0x${string}`)).rejects.toThrow();
+    await expect(
+      w.importPrivateKey(("0x" + "zz".repeat(32)) as `0x${string}`),
+    ).rejects.toThrow();
   });
 
   it("signs with random 32-byte key (does not crash)", async () => {
@@ -48,12 +68,16 @@ describe("Fuzz: PocketWallet input validation", () => {
 
   it("rejects all-zeros key (not a valid secp256k1 scalar)", async () => {
     const w = new PocketWallet({ storage: new VoidStorage(), autoSave: false });
-    await expect(w.importPrivateKey(("0x" + "00".repeat(32)) as `0x${string}`)).rejects.toThrow();
+    await expect(
+      w.importPrivateKey(("0x" + "00".repeat(32)) as `0x${string}`),
+    ).rejects.toThrow();
   });
 
   it("rejects all-FF key (exceeds secp256k1 curve order)", async () => {
     const w = new PocketWallet({ storage: new VoidStorage(), autoSave: false });
-    await expect(w.importPrivateKey(("0x" + "ff".repeat(32)) as `0x${string}`)).rejects.toThrow();
+    await expect(
+      w.importPrivateKey(("0x" + "ff".repeat(32)) as `0x${string}`),
+    ).rejects.toThrow();
   });
 
   it("signs empty message", async () => {
@@ -84,10 +108,10 @@ describe("Fuzz: PocketWallet input validation", () => {
     for (let i = 0; i < 5; i++) {
       const sig = await w.signTransaction({
         to: randomHex(40),
-        value: randomHex(8),
-        nonce: randomHex(2),
+        value: randomQuantity(8),
+        nonce: randomQuantity(2),
         gas: "0x5208",
-        gasPrice: "0x" + Math.floor(Math.random() * 1e9).toString(16),
+        gasPrice: randomQuantity(4),
         chainId: 1,
       });
       expect(sig.signature).toMatch(/^0x[0-9a-f]+$/);
@@ -118,6 +142,10 @@ describe("Fuzz: PocketWallet input validation", () => {
     await expect(w.importMnemonic("")).rejects.toThrow();
     await expect(w.importMnemonic("   ")).rejects.toThrow();
     await expect(w.importMnemonic("hello world")).rejects.toThrow();
-    await expect(w.importMnemonic("abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon")).rejects.toThrow();
+    await expect(
+      w.importMnemonic(
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon",
+      ),
+    ).rejects.toThrow();
   });
 });

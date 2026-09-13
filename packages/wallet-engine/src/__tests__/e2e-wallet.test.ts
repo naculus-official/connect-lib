@@ -15,18 +15,20 @@
  * - Live testnet checks: use Sepolia public RPC, tested only when network is available
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { PocketWallet } from "../wallet";
-import type { WalletData } from "../wallet";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletError } from "../errors";
 import { LocalStorageAdapter } from "../storage/local-storage";
 import type { StorageAdapter } from "../storage/types";
+import type { WalletData } from "../wallet";
+import { PocketWallet } from "../wallet";
 
 // ── Constants ──────────────────────────────────────────────────────
 
-const TEST_MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-const KNOWN_ADDRESS_FROM_TEST_MNEMONIC = "0x9858effd232b4033e47d90003d41ec34ecaeda94";
+const KNOWN_ADDRESS_FROM_TEST_MNEMONIC =
+  "0x9858effd232b4033e47d90003d41ec34ecaeda94";
 
 /**
  * Sepolia public RPC endpoints for live testnet tests.
@@ -67,14 +69,16 @@ class MockStorage implements StorageAdapter {
 function mockFetchRpc(
   handler: (method: string, params: unknown[]) => unknown,
 ): ReturnType<typeof vi.spyOn> {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, opts) => {
-    const body = JSON.parse((opts as RequestInit).body as string);
-    const result = handler(body.method, body.params);
-    return {
-      ok: true,
-      json: async () => ({ jsonrpc: "2.0", id: body.id, result }),
-    } as Response;
-  });
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (_url, opts) => {
+      const body = JSON.parse((opts as RequestInit).body as string);
+      const result = handler(body.method, body.params);
+      return {
+        ok: true,
+        json: async () => ({ jsonrpc: "2.0", id: body.id, result }),
+      } as Response;
+    });
 }
 
 /**
@@ -102,9 +106,7 @@ async function isSepoliaReachable(): Promise<string | null> {
         const json = await res.json();
         if (json.result && !json.error) return url;
       }
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   return null;
 }
@@ -133,7 +135,9 @@ describe("E2E: Wallet Creation", () => {
 
     // Wallet state must reflect the new wallet
     expect(wallet.hasWallet).toBe(true);
-    expect(wallet.state.address?.toLowerCase()).toBe(data.address.toLowerCase());
+    expect(wallet.state.address?.toLowerCase()).toBe(
+      data.address.toLowerCase(),
+    );
     expect(wallet.state.isConnected).toBe(true);
   });
 
@@ -145,7 +149,10 @@ describe("E2E: Wallet Creation", () => {
 
   it("should generate different wallets each time", async () => {
     const w1 = await wallet.generate();
-    const w2 = await new PocketWallet({ storage: new MockStorage(), autoSave: false }).generate();
+    const w2 = await new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    }).generate();
     expect(w1.address).not.toBe(w2.address);
     expect(w1.mnemonic).not.toBe(w2.mnemonic);
   });
@@ -159,11 +166,15 @@ describe("E2E: Wallet Creation", () => {
   });
 
   it("should reject invalid mnemonic", async () => {
-    await expect(wallet.importMnemonic("foo bar baz")).rejects.toThrow("Invalid mnemonic");
+    await expect(wallet.importMnemonic("foo bar baz")).rejects.toThrow(
+      "Invalid mnemonic",
+    );
   });
 
   it("should reject invalid private key", async () => {
-    await expect(wallet.importPrivateKey("0xabcd" as `0x${string}`)).rejects.toThrow("Invalid private key");
+    await expect(
+      wallet.importPrivateKey("0xabcd" as `0x${string}`),
+    ).rejects.toThrow(/Invalid private key|Unrecognized private key format/);
   });
 });
 
@@ -181,7 +192,7 @@ describe("E2E: Wallet Persistence", () => {
     const data = await w.generate();
     const saved = await storage.load();
     expect(saved).not.toBeNull();
-    expect(saved!.address).toBe(data.address);
+    expect(saved!.accounts[0].address).toBe(data.address);
   });
 
   it("should not save when autoSave is disabled", async () => {
@@ -248,8 +259,10 @@ describe("E2E: Wallet Persistence", () => {
     await w.save();
 
     const saved = await storage.load();
-    expect(saved!.address).not.toBe(addr1);
-    expect(saved!.address.toLowerCase()).toBe(KNOWN_ADDRESS_FROM_TEST_MNEMONIC);
+    expect(saved!.accounts[0].address).not.toBe(addr1);
+    expect(saved!.accounts[0].address.toLowerCase()).toBe(
+      KNOWN_ADDRESS_FROM_TEST_MNEMONIC,
+    );
   });
 });
 
@@ -283,7 +296,10 @@ describe("E2E: Message Signing", () => {
   });
 
   it("should produce different signatures for different wallets", async () => {
-    const w2 = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w2 = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     await w2.generate();
 
     const r1 = await wallet.signMessage("msg");
@@ -309,7 +325,7 @@ describe("E2E: Transaction Signing (local, no RPC)", () => {
 
   it("should sign a legacy transaction (type 0)", async () => {
     const tx = {
-      to: "0x" + "ab".repeat(20) as `0x${string}`,
+      to: ("0x" + "ab".repeat(20)) as `0x${string}`,
       value: "0xde0b6b3a7640000",
       nonce: "0x5" as `0x${string}`,
       gasPrice: "0x4a817c800" as `0x${string}`,
@@ -327,7 +343,7 @@ describe("E2E: Transaction Signing (local, no RPC)", () => {
 
   it("should sign an EIP-1559 transaction (type 2)", async () => {
     const tx = {
-      to: "0x" + "ab".repeat(20) as `0x${string}`,
+      to: ("0x" + "ab".repeat(20)) as `0x${string}`,
       value: "0xde0b6b3a7640000",
       nonce: "0x5" as `0x${string}`,
       maxFeePerGas: "0x59682f00" as `0x${string}`,
@@ -344,7 +360,7 @@ describe("E2E: Transaction Signing (local, no RPC)", () => {
 
   it("should produce deterministic signatures for the same tx and key", async () => {
     const tx = {
-      to: "0x" + "ab".repeat(20) as `0x${string}`,
+      to: ("0x" + "ab".repeat(20)) as `0x${string}`,
       value: "0x0",
       nonce: "0x0" as `0x${string}`,
       maxFeePerGas: "0x100" as `0x${string}`,
@@ -364,7 +380,9 @@ describe("E2E: Transaction Signing (local, no RPC)", () => {
 
   it("should throw when no wallet loaded", async () => {
     const empty = new PocketWallet({ storage: new MockStorage() });
-    await expect(empty.signTransaction({ to: "0xabcd" } as any)).rejects.toThrow("No wallet loaded");
+    await expect(
+      empty.signTransaction({ to: "0xabcd" } as any),
+    ).rejects.toThrow("No wallet loaded");
   });
 });
 
@@ -400,6 +418,17 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
       expect(rpcSpy).toHaveBeenCalled();
     });
 
+    it("should reject a non-canonical RPC balance", async () => {
+      rpcSpy = mockFetchRpc((method) => {
+        if (method === "eth_getBalance") return "0x00";
+        return null;
+      });
+
+      await expect(wallet.getBalance()).rejects.toThrow(
+        "non-canonical eth_getBalance quantity",
+      );
+    });
+
     it("should throw when no wallet loaded", async () => {
       const empty = new PocketWallet({ storage: new MockStorage() });
       await expect(empty.getBalance()).rejects.toThrow("No wallet loaded");
@@ -410,15 +439,19 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
     it("should build, sign, and broadcast a legacy transaction", async () => {
       rpcSpy = mockFetchRpc((method) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
-          case "eth_sendRawTransaction": return "0x" + "ff".repeat(32);
-          default: return null;
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
+          case "eth_sendRawTransaction":
+            return "0x" + "ff".repeat(32);
+          default:
+            return null;
         }
       });
 
       const result = await wallet.sendTransaction({
-        to: "0x" + "ab".repeat(20) as `0x${string}`,
+        to: ("0x" + "ab".repeat(20)) as `0x${string}`,
         value: "0xde0b6b3a7640000",
         gasPrice: "0x4a817c800" as `0x${string}`,
       });
@@ -434,15 +467,19 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
     it("should build, sign, and broadcast an EIP-1559 transaction", async () => {
       rpcSpy = mockFetchRpc((method) => {
         switch (method) {
-          case "eth_getTransactionCount": return "0x5";
-          case "eth_estimateGas": return "0x5208";
-          case "eth_sendRawTransaction": return "0x" + "ee".repeat(32);
-          default: return null;
+          case "eth_getTransactionCount":
+            return "0x5";
+          case "eth_estimateGas":
+            return "0x5208";
+          case "eth_sendRawTransaction":
+            return "0x" + "ee".repeat(32);
+          default:
+            return null;
         }
       });
 
       const result = await wallet.sendTransaction({
-        to: "0x" + "cd".repeat(20) as `0x${string}`,
+        to: ("0x" + "cd".repeat(20)) as `0x${string}`,
         value: "0x0",
         maxFeePerGas: "0x59682f00" as `0x${string}`,
         maxPriorityFeePerGas: "0x3b9aca00" as `0x${string}`,
@@ -455,23 +492,35 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
     });
 
     it("should throw when RPC is not configured", async () => {
-      const noRpcWallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+      const noRpcWallet = new PocketWallet({
+        storage: new MockStorage(),
+        autoSave: false,
+      });
       await noRpcWallet.importMnemonic(TEST_MNEMONIC);
       await expect(
-        noRpcWallet.sendTransaction({ to: "0x" + "ab".repeat(20) as `0x${string}` }),
+        noRpcWallet.sendTransaction({
+          to: ("0x" + "ab".repeat(20)) as `0x${string}`,
+        }),
       ).rejects.toThrow("RPC URL not configured");
     });
 
     it("should throw when sending to an empty address", async () => {
       rpcSpy = mockFetchRpc(() => null);
-      await expect(wallet.sendTransaction({ to: "" as any })).rejects.toThrow("Missing 'to' address");
+      await expect(wallet.sendTransaction({ to: "" as any })).rejects.toThrow(
+        "Missing 'to' address",
+      );
     });
   });
 
   describe("estimateFee", () => {
     it("should throw when no RPC URL configured", async () => {
-      const noRpcWallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
-      await expect(noRpcWallet.estimateFee()).rejects.toThrow("RPC URL not configured");
+      const noRpcWallet = new PocketWallet({
+        storage: new MockStorage(),
+        autoSave: false,
+      });
+      await expect(noRpcWallet.estimateFee()).rejects.toThrow(
+        "RPC URL not configured",
+      );
     });
   });
 });
@@ -517,7 +566,9 @@ describe("E2E: Edge Cases", () => {
   });
 
   it("should throw when signing without wallet", async () => {
-    await expect(wallet.signMessage("test")).rejects.toThrow("No wallet loaded");
+    await expect(wallet.signMessage("test")).rejects.toThrow(
+      "No wallet loaded",
+    );
   });
 
   it("should throw when getting balance without wallet", async () => {
@@ -560,7 +611,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
     const w = new PocketWallet({ storage, autoSave: false });
     await w.generate();
     const dataBefore = w.getWalletData()!;
-    expect(dataBefore.privateKey).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(dataBefore!.accounts[0].privateKey).toMatch(/^0x[0-9a-f]{64}$/);
 
     w.destroySession();
     expect(w.getWalletData()).toBeNull();
@@ -619,7 +670,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
     // Internal check: after destroySession, the original data object should have zeroed fields
     // but not be accessible via getWalletData
     const dataBefore = w.getWalletData()!;
-    expect(dataBefore.address.length).toBeGreaterThan(0);
+    expect(dataBefore!.accounts[0].address.length).toBeGreaterThan(0);
 
     w.destroySession();
     expect(w.getWalletData()).toBeNull();
@@ -628,7 +679,11 @@ describe("E2E: Memory Isolation — destroySession", () => {
 
 describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should create wallet in secure mode and sign successfully", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
+    const w = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      isolation: "secure",
+    });
     await w.generate();
 
     // In secure mode, secrets should be encrypted
@@ -641,15 +696,22 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
     // The zero-filled private key won't be usable standalone (all 0x00 chars === all '0' in hex)
     // Instead verify that decrypting fails without the key, and that the original
     // key was actually zero-filled
-    expect(rawData.privateKey.length).toBe(66); // 0x + 64 hex chars
+    expect(rawData!.accounts[0].privateKey.length).toBe(66); // 0x + 64 hex chars
     // Verify signing still works (uses encrypted blob internally)
     const sig = await w.signMessage("hello secure mode");
     expect(sig.signature).toMatch(/^0x[0-9a-f]{130}$/);
   });
 
   it("should produce same signatures as memory mode", async () => {
-    const wMem = new PocketWallet({ storage: new MockStorage(), autoSave: false });
-    const wSec = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
+    const wMem = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
+    const wSec = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      isolation: "secure",
+    });
 
     await wMem.importMnemonic(TEST_MNEMONIC);
     await wSec.importMnemonic(TEST_MNEMONIC);
@@ -661,8 +723,12 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   });
 
   it("should import from private key in secure mode", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
-    const pk = `0x${'ab'.repeat(32)}` as `0x${string}`;
+    const w = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      isolation: "secure",
+    });
+    const pk = `0x${"ab".repeat(32)}` as `0x${string}`;
     await w.importPrivateKey(pk);
 
     // Sign should work
@@ -671,11 +737,15 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
 
     // In-memory secrets should have correct length after seal
     const rawData = w.getWalletData()!;
-    expect(rawData.privateKey.length).toBe(66);
+    expect(rawData!.accounts[0].privateKey.length).toBe(66);
   });
 
   it("should properly clean decrypted data after signing", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
+    const w = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      isolation: "secure",
+    });
     await w.importMnemonic(TEST_MNEMONIC);
 
     // Sign once
@@ -687,7 +757,11 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   });
 
   it("should handle secure mode with destroySession", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
+    const w = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      isolation: "secure",
+    });
     await w.importMnemonic(TEST_MNEMONIC);
 
     // Should be functional
@@ -721,12 +795,20 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
 
   it("should load from storage in secure mode", async () => {
     const storage = new MockStorage();
-    const w1 = new PocketWallet({ storage, autoSave: true, isolation: "secure" });
+    const w1 = new PocketWallet({
+      storage,
+      autoSave: true,
+      isolation: "secure",
+    });
     await w1.generate();
     const originalAddr = w1.address;
 
     // Load into new instance
-    const w2 = new PocketWallet({ storage, autoSave: false, isolation: "secure" });
+    const w2 = new PocketWallet({
+      storage,
+      autoSave: false,
+      isolation: "secure",
+    });
     const loaded = await w2.load();
     expect(loaded).toBe(true);
     expect(w2.address?.toLowerCase()).toBe(originalAddr?.toLowerCase());
@@ -738,13 +820,17 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
     // In-memory data should have correct length after seal
     const rawData = w2.getWalletData()!;
     // String length is preserved (66 = 0x + 64 zero chars)
-    expect(rawData.privateKey.length).toBe(66);
+    expect(rawData!.accounts[0].privateKey.length).toBe(66);
   });
 
   it("should work without Web Crypto (graceful fallback)", async () => {
     // In environments without Web Crypto, secure mode sealSecrets is a no-op
     // but the wallet should still function normally
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false, isolation: "secure" });
+    const w = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      isolation: "secure",
+    });
     await w.importMnemonic(TEST_MNEMONIC);
 
     const sig = await w.signMessage("no-webcrypto test");
@@ -795,15 +881,19 @@ describe("E2E: Full Wallet Lifecycle", () => {
     // Step 5: Mock RPC calls and send a transaction
     rpcSpy = mockFetchRpc((method) => {
       switch (method) {
-        case "eth_getTransactionCount": return "0x1";
-        case "eth_estimateGas": return "0x5208";
-        case "eth_sendRawTransaction": return "0x" + "a1".repeat(32);
-        default: return null;
+        case "eth_getTransactionCount":
+          return "0x1";
+        case "eth_estimateGas":
+          return "0x5208";
+        case "eth_sendRawTransaction":
+          return "0x" + "a1".repeat(32);
+        default:
+          return null;
       }
     });
 
     const result = await w2.sendTransaction({
-      to: "0x" + "ab".repeat(20) as `0x${string}`,
+      to: ("0x" + "ab".repeat(20)) as `0x${string}`,
       value: "0xde0b6b3a7640000",
       maxFeePerGas: "0x59682f00" as `0x${string}`,
       maxPriorityFeePerGas: "0x3b9aca00" as `0x${string}`,
@@ -846,10 +936,16 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     }
   });
 
-  it("should read latest block number from Sepolia", { timeout: 15_000 }, async () => {
+  it("should read latest block number from Sepolia", {
+    timeout: 15_000,
+  }, async () => {
     if (!rpcUrl) return; // skip
 
-    const wallet = new PocketWallet({ rpcUrl, storage: new MockStorage(), autoSave: false });
+    const wallet = new PocketWallet({
+      rpcUrl,
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     // Inject mnemonic so we have a wallet even though we can't control this address
     await wallet.importMnemonic(TEST_MNEMONIC);
 
@@ -863,7 +959,11 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
   it("should get gas price from Sepolia", { timeout: 15_000 }, async () => {
     if (!rpcUrl) return;
 
-    const wallet = new PocketWallet({ rpcUrl, storage: new MockStorage(), autoSave: false });
+    const wallet = new PocketWallet({
+      rpcUrl,
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     await wallet.importMnemonic(TEST_MNEMONIC);
 
     const gasPrice = await (wallet as any).rpcCall("eth_gasPrice");
@@ -872,12 +972,19 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     expect(priceWei).toBeGreaterThan(0n);
   });
 
-  it("should read balance of a Sepolia test address", { timeout: 15_000 }, async () => {
+  it("should read balance of a Sepolia test address", {
+    timeout: 15_000,
+  }, async () => {
     if (!rpcUrl) return;
 
-    const wallet = new PocketWallet({ rpcUrl, storage: new MockStorage(), autoSave: false });
+    const wallet = new PocketWallet({
+      rpcUrl,
+      storage: new MockStorage(),
+      autoSave: false,
+    });
     // Use the actual derived key from TEST_MNEMONIC — it's a valid secp256k1 key
-    const validKey: `0x${string}` = '0x1ab42cc412b618bdea3a599e3c9bae199ebf030895b039e9db1e30dafb12b727';
+    const validKey: `0x${string}` =
+      "0x1ab42cc412b618bdea3a599e3c9bae199ebf030895b039e9db1e30dafb12b727";
     await wallet.importPrivateKey(validKey);
 
     const balance = await wallet.getBalance();
@@ -885,11 +992,18 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     expect(BigInt(balance)).toBeGreaterThanOrEqual(0n);
   });
 
-  it("should get transaction count for a Sepolia test address", { timeout: 15_000 }, async () => {
+  it("should get transaction count for a Sepolia test address", {
+    timeout: 15_000,
+  }, async () => {
     if (!rpcUrl) return;
 
-    const wallet = new PocketWallet({ rpcUrl, storage: new MockStorage(), autoSave: false });
-    const validKey: `0x${string}` = '0x1ab42cc412b618bdea3a599e3c9bae199ebf030895b039e9db1e30dafb12b727';
+    const wallet = new PocketWallet({
+      rpcUrl,
+      storage: new MockStorage(),
+      autoSave: false,
+    });
+    const validKey: `0x${string}` =
+      "0x1ab42cc412b618bdea3a599e3c9bae199ebf030895b039e9db1e30dafb12b727";
     await wallet.importPrivateKey(validKey);
 
     // Internal rpcCall used for eth_getTransactionCount
