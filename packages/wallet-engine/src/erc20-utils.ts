@@ -23,10 +23,16 @@ export interface Erc20WalletContext {
 // ── ABI Helpers ─────────────────────────────────────────────────────
 
 export function abiEncodeAddress(addr: `0x${string}`): string {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    throw new WalletError("invalid_input", "Invalid ERC-20 address.");
+  }
   return addr.toLowerCase().replace("0x", "").padStart(64, "0");
 }
 
 export function abiEncodeUint256(value: bigint): string {
+  if (value < 0n || value >= 1n << 256n) {
+    throw new WalletError("invalid_input", "ERC-20 amount exceeds uint256.");
+  }
   return value.toString(16).padStart(64, "0");
 }
 
@@ -64,7 +70,7 @@ export async function getERC20Decimals(
     await getSelector("decimals()"),
     "",
   );
-  return Number(BigInt(raw));
+  return decodeUint8(raw);
 }
 
 export async function erc20Call(
@@ -73,24 +79,59 @@ export async function erc20Call(
   selector: string,
   argsHex: string,
 ): Promise<string> {
-  const data = selector + argsHex.replace("0x", "");
-  const res = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_call",
-      params: [{ to, data }, "latest"],
-    }),
-  });
-  const json: any = await res.json();
-  if (json.error)
-    throw new WalletError("rpc_error", `RPC error: ${json.error.message}`);
-  return json.result as string;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(to)) {
+    throw new WalletError("invalid_input", "Invalid ERC-20 contract address.");
+  }
+  if (!/^0x[0-9a-fA-F]{8}$/.test(selector)) {
+    throw new WalletError("invalid_input", "Invalid ERC-20 function selector.");
+  }
+  const data = selector + argsHex.replace(/^0x/, "");
+  if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(data)) {
+    throw new WalletError("invalid_input", "Invalid ERC-20 calldata.");
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "eth_call",
+        params: [{ to, data }, "latest"],
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new WalletError("rpc_error", `RPC returned HTTP ${res.status}.`);
+    }
+    const json = (await res.json()) as {
+      result?: unknown;
+      error?: { message?: string };
+    };
+    if (json.error) {
+      throw new WalletError(
+        "rpc_error",
+        `RPC error: ${json.error.message ?? "unknown error"}`,
+      );
+    }
+    if (typeof json.result !== "string") {
+      throw new WalletError("rpc_error", "RPC returned no hex result.");
+    }
+    return json.result;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export function parseUnits(amount: string, decimals: number): bigint {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+    throw new WalletError(
+      "invalid_input",
+      "Decimals must be an integer from 0 to 255.",
+    );
+  }
   if (typeof amount !== "string") {
     throw new WalletError("invalid_input", "Amount must be a string.");
   }
@@ -99,8 +140,18 @@ export function parseUnits(amount: string, decimals: number): bigint {
   let hasDot = false;
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i];
-    if (ch === ".") { if (hasDot) throw new WalletError("invalid_input", `Multiple decimal points in amount: ${amount}`); hasDot = true; }
-    else if (ch < "0" || ch > "9") throw new WalletError("invalid_input", `Invalid character '${ch}' in amount: ${amount}`);
+    if (ch === ".") {
+      if (hasDot)
+        throw new WalletError(
+          "invalid_input",
+          `Multiple decimal points in amount: ${amount}`,
+        );
+      hasDot = true;
+    } else if (ch < "0" || ch > "9")
+      throw new WalletError(
+        "invalid_input",
+        `Invalid character '${ch}' in amount: ${amount}`,
+      );
   }
   if (trimmed === "" || trimmed === ".") {
     throw new WalletError("invalid_input", `Invalid amount: ${amount}`);
@@ -120,14 +171,68 @@ export function parseUnits(amount: string, decimals: number): bigint {
 
 export function decodeERC20String(hex: string): string {
   const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
-  if (clean.length < 128) return "";
-  const length = parseInt(clean.slice(64, 128), 16);
-  const dataHex = clean.slice(128, 128 + length * 2);
-  const bytes = new Uint8Array(length);
-  for (let i = 0; i < length; i++) {
-    bytes[i] = parseInt(dataHex.slice(i * 2, i * 2 + 2), 16);
+  if (!/^[0-9a-fA-F]*$/.test(clean) || clean.length % 2 !== 0) return "";
+  if (clean.length === 64) {
+    const end = clean.search(/00/);
+    const dataHex = end === -1 ? clean : clean.slice(0, end);
+    return decodeHexText(dataHex);
+  }
+  if (clean.length < 128 || BigInt(`0x${clean.slice(0, 64)}`) !== 32n)
+    return "";
+  const length = BigInt(`0x${clean.slice(64, 128)}`);
+  const availableBytes = BigInt((clean.length - 128) / 2);
+  if (length > availableBytes || length > BigInt(Number.MAX_SAFE_INTEGER))
+    return "";
+  return decodeHexText(clean.slice(128, 128 + Number(length) * 2));
+}
+
+function decodeHexText(hex: string): string {
+  if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) return "";
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return new TextDecoder().decode(bytes);
+}
+
+function decodeUint256(hex: string): bigint {
+  if (typeof hex !== "string" || !/^0x[0-9a-fA-F]+$/.test(hex)) {
+    throw new WalletError("rpc_error", "RPC returned an invalid uint256.");
+  }
+  const clean = hex.slice(2);
+  if (clean.length > 64 || clean.length % 2 !== 0) {
+    throw new WalletError("rpc_error", "RPC returned an invalid uint256.");
+  }
+  return BigInt(hex);
+}
+
+function decodeUint8(hex: string): number {
+  const value = decodeUint256(hex);
+  if (value > 255n) {
+    throw new WalletError(
+      "rpc_error",
+      "RPC returned an out-of-range decimals value.",
+    );
+  }
+  return Number(value);
+}
+
+function assertChainContext(ctx: Erc20WalletContext, chainId: number): void {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new WalletError(
+      "invalid_input",
+      "Chain ID must be a positive safe integer.",
+    );
+  }
+  const configured = ctx.chainId.startsWith("eip155:")
+    ? ctx.chainId.slice("eip155:".length)
+    : ctx.chainId;
+  if (configured !== String(chainId)) {
+    throw new WalletError(
+      "chain_mismatch",
+      `ERC-20 operation requested chain ${chainId}, but wallet is configured for ${ctx.chainId}.`,
+    );
+  }
 }
 
 // ── Public ERC-20 Methods ───────────────────────────────────────────
@@ -139,6 +244,7 @@ export async function sendERC20Transfer(
   to: `0x${string}`,
   amount: string,
 ): Promise<TransactionResult> {
+  assertChainContext(ctx, chainId);
   if (!ctx.address) throw new WalletError("no_wallet", "No wallet loaded.");
   if (!ctx.rpcUrl) throw new WalletError("no_rpc", "RPC URL not configured.");
 
@@ -163,6 +269,7 @@ export async function sendERC20Approve(
   spender: `0x${string}`,
   amount: string,
 ): Promise<TransactionResult> {
+  assertChainContext(ctx, chainId);
   if (!ctx.address) throw new WalletError("no_wallet", "No wallet loaded.");
   if (!ctx.rpcUrl) throw new WalletError("no_rpc", "RPC URL not configured.");
 
@@ -186,6 +293,7 @@ export async function getERC20Allowance(
   owner: `0x${string}`,
   spender: `0x${string}`,
 ): Promise<bigint> {
+  assertChainContext(ctx, chainId);
   if (!ctx.rpcUrl) throw new WalletError("no_rpc", "RPC URL not configured.");
   const result = await erc20Call(
     ctx.rpcUrl,
@@ -193,7 +301,7 @@ export async function getERC20Allowance(
     await getSelector("allowance(address,address)"),
     abiEncodeAddress(owner) + abiEncodeAddress(spender),
   );
-  return BigInt(result);
+  return decodeUint256(result);
 }
 
 export async function getERC20TokenInfo(
@@ -206,42 +314,21 @@ export async function getERC20TokenInfo(
   decimals: number;
   totalSupply: bigint;
 }> {
+  assertChainContext(ctx, chainId);
   if (!ctx.rpcUrl) throw new WalletError("no_rpc", "RPC URL not configured.");
   const rpcUrl = ctx.rpcUrl;
-  const { keccak_256 } = await import("@noble/hashes/sha3");
-  const { bytesToHex } = await import("@noble/hashes/utils");
-
-  const selector = (sig: string) =>
-    `0x${bytesToHex(keccak_256(new TextEncoder().encode(sig))).slice(0, 8)}`;
-
-  const call = async (data: string): Promise<string> => {
-    const res = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_call",
-        params: [{ to: tokenAddress, data }, "latest"],
-      }),
-    });
-    const json: any = await res.json();
-    if (json.error)
-      throw new WalletError("rpc_error", `RPC error: ${json.error.message}`);
-    return json.result as string;
-  };
 
   const [nameRaw, symbolRaw, decimalsRaw, totalSupplyRaw] = await Promise.all([
-    call(selector("name()")),
-    call(selector("symbol()")),
-    call(selector("decimals()")),
-    call(selector("totalSupply()")),
+    erc20Call(rpcUrl, tokenAddress, await getSelector("name()"), ""),
+    erc20Call(rpcUrl, tokenAddress, await getSelector("symbol()"), ""),
+    erc20Call(rpcUrl, tokenAddress, await getSelector("decimals()"), ""),
+    erc20Call(rpcUrl, tokenAddress, await getSelector("totalSupply()"), ""),
   ]);
 
   return {
     name: decodeERC20String(nameRaw),
     symbol: decodeERC20String(symbolRaw),
-    decimals: Number(BigInt(decimalsRaw)),
-    totalSupply: BigInt(totalSupplyRaw),
+    decimals: decodeUint8(decimalsRaw),
+    totalSupply: decodeUint256(totalSupplyRaw),
   };
 }

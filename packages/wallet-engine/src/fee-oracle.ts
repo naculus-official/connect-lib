@@ -130,6 +130,31 @@ export async function resolveFeeOptions(
     return { type: "legacy", gasPrice: tx.gasPrice };
   }
 
+  if (feeOptions?.type === "legacy") {
+    return await legacyFallback(rpcUrl);
+  }
+
+  if (
+    feeOptions?.baseFeeMultiplier !== undefined &&
+    (!Number.isInteger(Number(feeOptions.baseFeeMultiplier)) ||
+      feeOptions.baseFeeMultiplier <= 0n)
+  ) {
+    throw new WalletError(
+      "invalid_fee",
+      "baseFeeMultiplier must be a positive integer.",
+    );
+  }
+
+  if (
+    feeOptions?.maxPriorityFeePerGas !== undefined &&
+    !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(feeOptions.maxPriorityFeePerGas)
+  ) {
+    throw new WalletError(
+      "invalid_fee",
+      "maxPriorityFeePerGas must be a canonical hexadecimal quantity.",
+    );
+  }
+
   // Need to estimate — build config
   const config: FeeEstimationConfig = {
     rpcUrl,
@@ -145,6 +170,13 @@ export async function resolveFeeOptions(
     const fees = await estimateFees(config);
     return convertFeeValues(fees);
   } catch (error) {
+    if (feeOptions?.type === "eip1559") {
+      throw new WalletError(
+        "fee_estimation_failed",
+        "EIP-1559 was requested but fee estimation failed; refusing to downgrade to legacy fees.",
+        error,
+      );
+    }
     // Fallback to legacy eth_gasPrice
     return await legacyFallback(rpcUrl);
   }
@@ -183,6 +215,12 @@ async function legacyFallback(rpcUrl: string): Promise<ResolvedFeeOptions> {
         params: [],
       }),
     });
+    if (!response.ok) {
+      throw new WalletError(
+        "rpc_error",
+        `RPC returned HTTP ${response.status} while reading gas price.`,
+      );
+    }
     const json = (await response.json()) as {
       result?: string;
       error?: { message: string };
@@ -190,7 +228,13 @@ async function legacyFallback(rpcUrl: string): Promise<ResolvedFeeOptions> {
     if (json.error) {
       throw new WalletError("rpc_error", `RPC error: ${json.error.message}`);
     }
-    return { type: "legacy", gasPrice: json.result! };
+    if (
+      typeof json.result !== "string" ||
+      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(json.result)
+    ) {
+      throw new WalletError("rpc_error", "RPC returned an invalid gas price.");
+    }
+    return { type: "legacy", gasPrice: json.result };
   } catch (error) {
     throw new WalletError(
       "fee_estimation_failed",
@@ -247,6 +291,16 @@ export function validateFeeParams(fees: ResolvedFeeOptions): void {
  * Used for fee bumping (RBF).
  */
 export function applyMultiplier(hexValue: string, multiplier: number): string {
+  if (
+    !Number.isFinite(multiplier) ||
+    multiplier <= 0 ||
+    !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(hexValue)
+  ) {
+    throw new WalletError(
+      "invalid_multiplier",
+      "Fee multiplier and value must be finite, positive, canonical quantities.",
+    );
+  }
   const value = BigInt(hexValue);
   const scaled = (value * BigInt(Math.round(multiplier * 100))) / 100n;
   return "0x" + scaled.toString(16);

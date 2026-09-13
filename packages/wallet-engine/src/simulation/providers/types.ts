@@ -1,7 +1,7 @@
 /**
  * SimulationProvider — Abstract interface for simulation backends.
  *
- * All simulation providers (eth_call, Blowfish, Tenderly) implement
+ * All simulation providers (eth_call and any future ones) implement
  * this interface so they can be swapped transparently by SimulationManager.
  *
  * @see /docs/features/transaction-simulation.md §6.4

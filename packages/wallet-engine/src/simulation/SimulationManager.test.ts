@@ -3,7 +3,7 @@ import type { SimulationProvider, SimulationResult } from "./index";
 import { SimulationManager } from "./SimulationManager";
 
 class MockProvider implements SimulationProvider {
-  name = "blowfish" as const;
+  name = "tenderly" as const;
   readonly supportedChains: number[] = [1];
   private _result: SimulationResult;
   private _available: boolean;
@@ -14,7 +14,7 @@ class MockProvider implements SimulationProvider {
       balanceChanges: [],
       approvalChanges: [],
       riskAssessment: { level: "unknown", score: 0, warnings: [] },
-      provider: "blowfish",
+      provider: "tenderly",
       changesDetected: false,
       ...result,
     };
@@ -105,14 +105,14 @@ describe("SimulationManager", () => {
 
   it("registerProvider and uses it", async () => {
     const mock = new MockProvider();
-    manager.registerProvider("blowfish", mock);
+    manager.registerProvider("tenderly", mock);
     const result = await manager.simulate(
       { to: "0x1234", data: "0x", value: "0x0" },
       "0xabcd",
       { chainId: 1 },
     );
     expect(result.status).toBe("success");
-    expect(result.provider).toBe("blowfish");
+    expect(result.provider).toBe("tenderly");
   });
 
   it("registerProvider overwrites existing", async () => {
@@ -126,8 +126,8 @@ describe("SimulationManager", () => {
   });
 
   it("unregisterProvider removes provider", () => {
-    manager.registerProvider("blowfish", new MockProvider());
-    manager.unregisterProvider("blowfish");
+    manager.registerProvider("tenderly", new MockProvider());
+    manager.unregisterProvider("tenderly");
     // should not throw
   });
 
@@ -146,37 +146,37 @@ describe("SimulationManager", () => {
   });
 
   it("uses named provider when defaultProvider is set", async () => {
-    const blowfish = new MockProvider(
-      { status: "success", provider: "blowfish" },
+    const tenderly = new MockProvider(
+      { status: "success", provider: "tenderly" },
       true,
     );
-    manager.registerProvider("blowfish", blowfish);
-    const m = new SimulationManager({ defaultProvider: "blowfish" });
-    m.registerProvider("blowfish", blowfish);
+    manager.registerProvider("tenderly", tenderly);
+    const m = new SimulationManager({ defaultProvider: "tenderly" });
+    m.registerProvider("tenderly", tenderly);
     const result = await m.simulate(
       { to: "0x1234", data: "0x", value: "0x0" },
       "0xabcd",
       { chainId: 1 },
     );
-    expect(result.provider).toBe("blowfish");
+    expect(result.provider).toBe("tenderly");
   });
 
   it("falls back from unavailable named provider to eth_call", async () => {
-    // blowfish is set as default but not registered → _selectProvider skips it
-    // Then auto mode: no blowfish registered, eth_call available → falls back
-    // But we need the test where blowfish IS registered but returns unavailable
-    const blowfish = new MockProvider(
-      { status: "unavailable", provider: "blowfish" },
+    // tenderly is set as default but not registered → _selectProvider skips it
+    // Then auto mode: no tenderly registered, eth_call available → falls back
+    // But we need the test where tenderly IS registered but returns unavailable
+    const tenderly = new MockProvider(
+      { status: "unavailable", provider: "tenderly" },
       true,
     );
     const m = new SimulationManager();
-    m.registerProvider("blowfish", blowfish);
+    m.registerProvider("tenderly", tenderly);
     const result = await m.simulate(
       { to: "0x1234", data: "0x", value: "0x0" },
       "0xabcd",
       { chainId: 1 },
     );
-    // simulate returns blowfish unavailable → fallback to eth_call
+    // simulate returns tenderly unavailable → fallback to eth_call
     // But eth_call has no RPC URL → eth_call returns unavailable
     expect(result.status).toBe("unavailable");
     // warnings from both providers are merged
@@ -225,36 +225,36 @@ describe("SimulationManager", () => {
 });
 
 describe("SimulationManager — provider selection", () => {
-  it("auto mode picks registered blowfish over eth_call", async () => {
-    const blowfish = new MockProvider(undefined, true);
-    // blowfish supports chain 1, eth_call supports all
-    // In auto mode, blowfish is checked first
+  it("auto mode picks registered tenderly over eth_call", async () => {
+    const tenderly = new MockProvider(undefined, true);
+    // tenderly supports chain 1, eth_call supports all
+    // In auto mode, tenderly is checked first
     const m = new SimulationManager();
-    m.registerProvider("blowfish", blowfish);
-    // Mock the eth_call exist but blowfish is preferred
+    m.registerProvider("tenderly", tenderly);
+    // Mock the eth_call exist but tenderly is preferred
     const result = await m.simulate(
       { to: "0x1234", data: "0x", value: "0x0" },
       "0xabcd",
       { chainId: 1 },
     );
-    expect(result.provider).toBe("blowfish");
+    expect(result.provider).toBe("tenderly");
   });
 
   it("named provider when registered and available", async () => {
-    const blowfish = new MockProvider(undefined, true);
-    const m = new SimulationManager({ defaultProvider: "blowfish" });
-    m.registerProvider("blowfish", blowfish);
+    const tenderly = new MockProvider(undefined, true);
+    const m = new SimulationManager({ defaultProvider: "tenderly" });
+    m.registerProvider("tenderly", tenderly);
     const result = await m.simulate(
       { to: "0x1234", data: "0x", value: "0x0" },
       "0xabcd",
       { chainId: 1 },
     );
-    expect(result.provider).toBe("blowfish");
+    expect(result.provider).toBe("tenderly");
   });
 
-  it("named provider skips unavailable blowfish, falls to eth_call", async () => {
-    const m = new SimulationManager({ defaultProvider: "blowfish" });
-    // blowfish not registered, so _selectProvider skips it, falls to eth_call
+  it("named provider skips unavailable tenderly, falls to eth_call", async () => {
+    const m = new SimulationManager({ defaultProvider: "tenderly" });
+    // tenderly not registered, so _selectProvider skips it, falls to eth_call
     const result = await m.simulate(
       { to: "0x1234", data: "0x", value: "0x0" },
       "0xabcd",
@@ -376,9 +376,31 @@ describe("SimulationManager — erc20 static call via RPC", () => {
     expect(fetch).toHaveBeenCalled();
   });
 
-  it("_erc20StaticCall throws on missing RPC URL", async () => {
+  it("falls back to the manager's configured RPC when the caller gives none", async () => {
+    // This previously asserted that it throws here, which encoded the bug:
+    // the manager was built with an endpoint and the lookup refused to use
+    // it, so every simulateERC20Transfer without explicit decimals failed.
+    const calls: unknown[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      calls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ result: `0x${"0".repeat(63)}6` }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
     const fn = (SimulationManager.prototype as any)["_erc20StaticCall"].bind(
       manager,
+    );
+    await fn("0x1234", "0xaabb", "", 1, undefined);
+    expect(calls[0]).toBe("https://rpc.test");
+  });
+
+  it("throws only when no RPC URL exists anywhere", async () => {
+    const bare = new SimulationManager({});
+    const fn = (SimulationManager.prototype as any)["_erc20StaticCall"].bind(
+      bare,
     );
     await expect(fn("0x1234", "0xaabb", "", 1, undefined)).rejects.toThrow(
       "No RPC URL available",

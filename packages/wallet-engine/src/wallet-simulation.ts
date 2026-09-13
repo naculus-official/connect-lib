@@ -26,7 +26,20 @@ export interface WalletSimContext {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 export function parseChainIdNumber(chainId: string): number {
-  return parseInt(chainId.replace("eip155:", ""), 10);
+  if (!/^eip155:(0|[1-9][0-9]*)$/.test(chainId)) {
+    throw new WalletError(
+      "invalid_input",
+      `Invalid EIP-155 CAIP-2 chain ID: ${chainId}`,
+    );
+  }
+  const value = BigInt(chainId.slice("eip155:".length));
+  if (value <= 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new WalletError(
+      "invalid_input",
+      `EIP-155 chain ID must be a positive safe integer: ${chainId}`,
+    );
+  }
+  return Number(value);
 }
 
 // ── Public API ──────────────────────────────────────────────────────

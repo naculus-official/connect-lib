@@ -21,7 +21,7 @@ import type { SimulationProvider } from "./types";
 // ── Constants ─────────────────────────────────────────────────────
 
 const ETH_NATIVE_CHAINS = [1, 5, 11155111, 10, 42161, 421614, 8453, 84532];
-const MATIC_NATIVE_CHAINS = [137, 80002];
+const POLYGON_NATIVE_CHAINS = [137, 80002];
 const BNB_NATIVE_CHAINS = [56, 97];
 
 // ── Helper: Parse revert reason from error data ───────────────────
@@ -82,7 +82,9 @@ function parseRevertReason(errorData: string): string | undefined {
  */
 function getNativeSymbol(chainId: number): string {
   if (ETH_NATIVE_CHAINS.includes(chainId)) return "ETH";
-  if (MATIC_NATIVE_CHAINS.includes(chainId)) return "MATIC";
+  if (POLYGON_NATIVE_CHAINS.includes(chainId)) {
+    return chainId === 137 ? "POL" : "MATIC";
+  }
   if (BNB_NATIVE_CHAINS.includes(chainId)) return "BNB";
   return "ETH";
 }
@@ -100,6 +102,10 @@ function buildSuccessResult(
     `0x0000000000000000000000000000000000000000` as `0x${string}`;
   return {
     status: "success",
+    // eth_call executes the call; it cannot observe what moved.
+
+    coverage: { balanceChanges: false, approvalChanges: false, risk: false },
+
     balanceChanges: [],
     approvalChanges: [],
     riskAssessment: {
@@ -124,6 +130,10 @@ function buildRevertedResult(
   return {
     status: "reverted",
     revertReason,
+    // eth_call executes the call; it cannot observe what moved.
+
+    coverage: { balanceChanges: false, approvalChanges: false, risk: false },
+
     balanceChanges: [],
     approvalChanges: [],
     riskAssessment: {
@@ -160,6 +170,18 @@ export class EthCallProvider implements SimulationProvider {
   }
 
   /**
+   * The RPC endpoint this provider was configured with.
+   *
+   * Exposed because SimulationManager's ERC-20 helpers need it for their own
+   * static calls. Without it they had no endpoint to reach and the decimals
+   * lookup failed outright, which took every simulateERC20Transfer that did
+   * not receive an explicit `decimals` down with it.
+   */
+  get rpcUrl(): string | undefined {
+    return this.defaultRpcUrl;
+  }
+
+  /**
    * Simulate a transaction via eth_call.
    *
    * eth_call returns only the function return data — it does not expose
@@ -181,6 +203,14 @@ export class EthCallProvider implements SimulationProvider {
     if (!rpcUrl) {
       return {
         status: "unavailable",
+        // eth_call executes the call; it cannot observe what moved.
+
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
+
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {
@@ -236,6 +266,14 @@ export class EthCallProvider implements SimulationProvider {
     } catch (err) {
       return {
         status: "unavailable",
+        // eth_call executes the call; it cannot observe what moved.
+
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
+
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {

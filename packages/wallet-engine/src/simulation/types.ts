@@ -16,25 +16,59 @@
 
 // ── Provider ──────────────────────────────────────────────────────
 
-export type SimulationProviderName =
-  | "eth_call"
-  | "blowfish"
-  | "tenderly"
-  | "auto";
+export type SimulationProviderName = "eth_call" | "tenderly" | "auto";
 
 // ── Core Result ───────────────────────────────────────────────────
 
 export type SimulationStatus = "success" | "reverted" | "unavailable";
+
+/**
+ * What a provider actually examined.
+ *
+ * Without this, an empty `balanceChanges` means two incompatible things: the
+ * provider looked and the transaction moves no tokens, or the provider cannot
+ * look at all. A UI cannot tell them apart, and renders the second as the
+ * first — "no balance changes" beside a Sign button reads as reassurance when
+ * it means nothing was inspected.
+ *
+ * The built-in `eth_call` provider reports false for all three: executing a
+ * call tells you whether it reverts, not what moved. Populating them needs
+ * state-diff tracing or a third-party service.
+ */
+export interface SimulationCoverage {
+  /** Token movement was examined. */
+  balanceChanges: boolean;
+  /** Approval grants were examined. */
+  approvalChanges: boolean;
+  /** A risk judgement was produced, rather than defaulted to "unknown". */
+  risk: boolean;
+}
 
 export interface SimulationResult {
   /** Whether the simulation completed, reverted, or was unavailable */
   status: SimulationStatus;
   /** Revert reason (when status === "reverted") */
   revertReason?: string;
-  /** Predicted balance changes */
+  /**
+   * Predicted balance changes.
+   *
+   * Empty does not mean "none" unless `coverage.balanceChanges` is true. Check
+   * coverage before presenting this as a finding.
+   */
   balanceChanges: BalanceChange[];
-  /** Predicted approval changes */
+  /**
+   * Predicted approval changes.
+   *
+   * Same contract as `balanceChanges`: check `coverage.approvalChanges`.
+   */
   approvalChanges: ApprovalChange[];
+  /**
+   * What the provider examined.
+   *
+   * Optional so existing providers keep compiling; absent should be read as
+   * "unknown coverage", which a UI must treat as conservatively as false.
+   */
+  coverage?: SimulationCoverage;
   /** Risk assessment */
   riskAssessment: RiskAssessment;
   /** Gas estimation details */
@@ -57,7 +91,16 @@ export interface BalanceChange {
   /** Token symbol (e.g. "USDC", "ETH") */
   tokenSymbol: string;
   /** Number of decimals */
-  tokenDecimals: number;
+  /**
+   * Token precision, or undefined when it could not be determined.
+   *
+   * Not narrowed to `number`. A caller that cannot tell "unknown" from a real
+   * value has no choice but to guess one, and guessing 18 for a 6-decimal
+   * token understates an amount by a factor of a trillion. The core copy of
+   * this type already admitted undefined; this one did not, so the same value
+   * was optional on one side of the workspace and guaranteed on the other.
+   */
+  tokenDecimals: number | undefined;
   /** Raw change amount in smallest unit (stringified bigint) */
   amount: string;
   /** Direction of the balance change */
@@ -151,8 +194,6 @@ export interface TransactionDescriptor {
 // ── Configuration ─────────────────────────────────────────────────
 
 export interface SimulationConfig {
-  /** Blowfish API key (optional; enables Blowfish provider) */
-  blowfishApiKey?: string;
   /** Default provider to use (default: "auto") */
   defaultProvider?: SimulationProviderName;
   /** Whether simulation is enabled globally (default: true) */

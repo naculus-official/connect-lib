@@ -96,6 +96,12 @@ export class SimulationManager {
     if (!this._enabled) {
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
+
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: { ...DEFAULT_UNAVAILABLE_RISK },
@@ -111,6 +117,12 @@ export class SimulationManager {
     if (!provider) {
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
+
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {
@@ -196,11 +208,19 @@ export class SimulationManager {
     amount: string,
     chainId: number,
     decimals?: number,
+    /**
+     * Endpoint for this call, overriding the manager's own.
+     *
+     * `simulate` already accepted a per-call RPC URL; this path did not
+     * forward one, so the override was unreachable from the ERC-20 helper.
+     */
+    rpcUrl?: string,
   ): Promise<SimulationResult> {
     try {
       // Fetch decimals if not provided
       const tokenDecimals =
-        decimals ?? (await this._getERC20Decimals(tokenAddress, chainId));
+        decimals ??
+        (await this._getERC20Decimals(tokenAddress, chainId, rpcUrl));
 
       // Parse amount to raw units
       const rawAmount = this._parseUnits(amount, tokenDecimals);
@@ -218,11 +238,17 @@ export class SimulationManager {
           from,
         },
         from,
-        { chainId },
+        { chainId, rpcUrl },
       );
     } catch (err) {
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
+
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {
@@ -308,13 +334,20 @@ export class SimulationManager {
       }
     }
 
-    // "auto" mode: check blowfish first (if registered + chain supported), fall back to eth_call
-    const blowfish = this.providers.get("blowfish");
-    if (blowfish && blowfish.isAvailable(chainId)) {
-      return blowfish;
+    // "auto" mode prefers any richer provider a consumer has registered, then
+    // falls back to eth_call.
+    //
+    // This used to name one third-party provider explicitly. That provider was
+    // removed when its service went away, and naming it was what made the
+    // preference work at all — a consumer registering anything else was
+    // ignored here. Selecting by "not the built-in fallback" keeps the
+    // capability without the SDK having to know who supplies it.
+    for (const [name, provider] of this.providers) {
+      if (name === "eth_call") continue;
+      if (provider.isAvailable(chainId)) return provider;
     }
 
-    // Fallback: eth_call is available on all EVM chains
+    // eth_call is available on all EVM chains
     const ethCall = this.providers.get("eth_call");
     if (ethCall && ethCall.isAvailable(chainId)) {
       return ethCall;
@@ -358,7 +391,11 @@ export class SimulationManager {
     const provider = this.providers.get("eth_call") as
       | EthCallProvider
       | undefined;
-    const providerRpcUrl = rpcUrl; // caller provides rpcUrl; otherwise we need the provider's URL
+    // Falls back to the endpoint this manager was constructed with. Reading
+    // only the caller's argument meant the configured URL was unreachable
+    // here, so this threw for every caller that did not pass one — which was
+    // all of them, since simulateERC20Transfer never forwarded it.
+    const providerRpcUrl = rpcUrl ?? provider?.rpcUrl;
 
     if (!providerRpcUrl) {
       throw new Error("No RPC URL available for ERC-20 decimals lookup");
@@ -397,8 +434,11 @@ export class SimulationManager {
     let hasDot = false;
     for (let i = 0; i < trimmed.length; i++) {
       const ch = trimmed[i];
-      if (ch === ".") { if (hasDot) throw new Error(`Invalid amount: ${amount}`); hasDot = true; }
-      else if (ch < "0" || ch > "9") throw new Error(`Invalid amount: ${amount}`);
+      if (ch === ".") {
+        if (hasDot) throw new Error(`Invalid amount: ${amount}`);
+        hasDot = true;
+      } else if (ch < "0" || ch > "9")
+        throw new Error(`Invalid amount: ${amount}`);
     }
     if (trimmed === "" || trimmed === ".") {
       throw new Error(`Invalid amount: ${amount}`);
