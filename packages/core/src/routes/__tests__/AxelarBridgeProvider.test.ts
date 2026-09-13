@@ -2,75 +2,66 @@
  * AxelarBridgeProvider Tests
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { AxelarBridgeProvider } from '../providers/AxelarBridgeProvider'
-import { RouteEngineError } from '../types'
-import type { Token } from '../types'
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { AxelarBridgeProvider } from "../providers/AxelarBridgeProvider";
+import { RouteEngineError } from "../types";
+import type { Token } from "../types";
 
 const USDC_ETH: Token = {
   chainId: 1,
-  address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+  address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   decimals: 6,
-  symbol: 'USDC',
-}
+  symbol: "USDC",
+};
 
 const USDC_POLY: Token = {
   chainId: 137,
-  address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+  address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
   decimals: 6,
-  symbol: 'USDC',
-}
+  symbol: "USDC",
+};
 
-describe('AxelarBridgeProvider', () => {
-  let provider: AxelarBridgeProvider
+describe("AxelarBridgeProvider", () => {
+  let provider: AxelarBridgeProvider;
 
   beforeEach(() => {
-    provider = new AxelarBridgeProvider({ apiUrl: 'https://api.axelarscan.io' })
-  })
+    provider = new AxelarBridgeProvider({
+      apiUrl: "https://api.axelarscan.io",
+    });
+  });
 
   afterEach(() => {
-    vi.restoreAllMocks()
-  })
+    vi.restoreAllMocks();
+  });
 
-  it('returns a RouteQuote for a valid bridge estimate', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+  it("fails closed when the public fee endpoint lacks route data", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
-        baseFee: '5000000000000000', // 0.005 in 18 decimals
-        sourceGasFee: '250000000000000', // 0.00025
-        destinationGasFee: '300000000000000', // 0.0003
+        baseFee: "5000000000000000", // 0.005 in 18 decimals
+        sourceGasFee: "250000000000000", // 0.00025
+        destinationGasFee: "300000000000000", // 0.0003
       }),
-    } as Response)
+    } as Response);
 
-    const quote = await provider.estimate({
-      amount: 1_000_000n,
-      fromChain: { chainId: 1 },
-      toChain: { chainId: 137 },
-      fromToken: USDC_ETH,
-      toToken: USDC_POLY,
-    })
+    await expect(
+      provider.estimate({
+        amount: 1_000_000n,
+        fromChain: { chainId: 1 },
+        toChain: { chainId: 137 },
+        fromToken: USDC_ETH,
+        toToken: USDC_POLY,
+      }),
+    ).rejects.toMatchObject({ code: "no_routes_available" });
+  });
 
-    expect(quote.provider).toBe('Axelar')
-    expect(quote.estimatedTimeMs).toBe(120_000)
-    expect(quote.slippage).toBe(0)
-    expect(quote.steps).toHaveLength(1)
-    expect(quote.steps[0].type).toBe('bridge')
-
-    // totalCost = baseFee + sourceGasFee + destGasFee
-    const expectedTotal =
-      5_000_000_000_000_000n +
-      250_000_000_000_000n +
-      300_000_000_000_000n
-    expect(quote.totalCost).toBe(expectedTotal)
-  })
-
-  it('throws when Axelar API returns non-200', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+  it("throws when Axelar API returns non-200", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: false,
       status: 500,
-      statusText: 'Internal Server Error',
-    } as Response)
+      statusText: "Internal Server Error",
+    } as Response);
 
     await expect(
       provider.estimate({
@@ -80,7 +71,7 @@ describe('AxelarBridgeProvider', () => {
         fromToken: USDC_ETH,
         toToken: USDC_POLY,
       }),
-    ).rejects.toThrow(RouteEngineError)
+    ).rejects.toThrow(RouteEngineError);
 
     await expect(
       provider.estimate({
@@ -90,53 +81,53 @@ describe('AxelarBridgeProvider', () => {
         fromToken: USDC_ETH,
         toToken: USDC_POLY,
       }),
-    ).rejects.toMatchObject({ code: 'no_routes_available' })
-  })
+    ).rejects.toMatchObject({ code: "no_routes_available" });
+  });
 
-  it('handles missing fee fields gracefully', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+  it("fails closed when fee data has no executable route", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({}), // no fee fields
-    } as Response)
+    } as Response);
 
-    const quote = await provider.estimate({
-      amount: 1_000_000n,
-      fromChain: { chainId: 1 },
-      toChain: { chainId: 137 },
-      fromToken: USDC_ETH,
-      toToken: USDC_POLY,
-    })
+    await expect(
+      provider.estimate({
+        amount: 1_000_000n,
+        fromChain: { chainId: 1 },
+        toChain: { chainId: 137 },
+        fromToken: USDC_ETH,
+        toToken: USDC_POLY,
+      }),
+    ).rejects.toMatchObject({ code: "no_routes_available" });
+  });
 
-    // All fees should default to 0n
-    expect(quote.totalCost).toBe(0n)
-    expect(quote.steps[0].estimatedGas).toBe(0n)
-  })
-
-  it('uses correct Axelar chain names', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+  it("uses correct Axelar chain names", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       status: 200,
       json: async () => ({}),
-    } as Response)
+    } as Response);
 
-    await provider.estimate({
-      amount: 1_000_000n,
-      fromChain: { chainId: 1 },
-      toChain: { chainId: 137 },
-      fromToken: USDC_ETH,
-      toToken: USDC_POLY,
-    })
+    await expect(
+      provider.estimate({
+        amount: 1_000_000n,
+        fromChain: { chainId: 1 },
+        toChain: { chainId: 137 },
+        fromToken: USDC_ETH,
+        toToken: USDC_POLY,
+      }),
+    ).rejects.toMatchObject({ code: "no_routes_available" });
 
-    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
-    expect(body.sourceChain).toBe('ethereum')
-    expect(body.destinationChain).toBe('polygon')
-  })
+    const body = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string);
+    expect(body.sourceChain).toBe("ethereum");
+    expect(body.destinationChain).toBe("polygon");
+  });
 
-  it('execute throws with a clear message', async () => {
+  it("execute throws with a clear message", async () => {
     const route = {
-      fromChain: { chainId: 1, name: 'Ethereum' },
-      toChain: { chainId: 137, name: 'Polygon' },
+      fromChain: { chainId: 1, name: "Ethereum" },
+      toChain: { chainId: 137, name: "Polygon" },
       inputToken: USDC_ETH,
       outputToken: USDC_POLY,
       inputAmount: 1_000_000n,
@@ -144,8 +135,8 @@ describe('AxelarBridgeProvider', () => {
       totalCost: 1_000_000n,
       slippage: 0,
       steps: [],
-    }
+    };
 
-    await expect(provider.execute(route)).rejects.toThrow(RouteEngineError)
-  })
-})
+    await expect(provider.execute(route)).rejects.toThrow(RouteEngineError);
+  });
+});

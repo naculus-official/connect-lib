@@ -43,6 +43,19 @@ export class RouteEngine {
       usdcPriorityThreshold: config?.usdcPriorityThreshold ?? 0.5,
       chainRpcs: config?.chainRpcs,
     };
+    if (
+      !Number.isFinite(this.config.defaultSlippage) ||
+      this.config.defaultSlippage < 0 ||
+      this.config.defaultSlippage > 100 ||
+      !Number.isFinite(this.config.usdcPriorityThreshold) ||
+      this.config.usdcPriorityThreshold < 0 ||
+      this.config.usdcPriorityThreshold > 100
+    ) {
+      throw new RouteEngineError(
+        "no_routes_available",
+        "Route slippage thresholds must be between 0 and 100.",
+      );
+    }
   }
 
   // ── Executor Registration ──────────────────────────────────────────
@@ -114,6 +127,18 @@ export class RouteEngine {
     fromChain: { chainId: number };
     toChain: { chainId: number };
   }): Promise<Route | null> {
+    if (
+      params.amount <= 0n ||
+      params.fromChain.chainId <= 0 ||
+      params.toChain.chainId <= 0 ||
+      params.inputToken.chainId !== params.fromChain.chainId ||
+      params.outputToken.chainId !== params.toChain.chainId
+    ) {
+      throw new RouteEngineError(
+        "no_routes_available",
+        "Invalid route parameters.",
+      );
+    }
     const quotes: RouteQuote[] = [];
 
     // Collect swap provider quotes
@@ -152,8 +177,10 @@ export class RouteEngine {
     fromChain: { chainId: number };
     toChain: { chainId: number };
   }): Promise<Route | null> {
-    const usdcToken: Token = this.buildUSDCToken(params.fromChain.chainId);
-    const usdtToken: Token = this.buildUSDTToken(params.fromChain.chainId);
+    // The route's output token belongs to the destination chain. Using the
+    // source chain here would make every cross-chain priority quote invalid.
+    const usdcToken: Token = this.buildUSDCToken(params.toChain.chainId);
+    const usdtToken: Token = this.buildUSDTToken(params.toChain.chainId);
 
     // Step 1: Compute USDC path
     const usdcRoute = await this.getBestRoute({
@@ -202,16 +229,19 @@ export class RouteEngine {
    * Polls the chain for transaction receipt via RPC.
    *
    * Uses chainRpcs from the config to determine which RPC URL to use.
-   * If no RPC URLs are configured, returns a placeholder status.
+   * If no RPC URL is configured, returns `unavailable`; this is distinct from
+   * `pending`, which is only returned when the chain reports no receipt yet.
    */
   async getRouteStatus(
     txHash: string,
     chainId?: number,
-  ): Promise<{ status: string; confirmations: number }> {
+  ): Promise<{
+    status: "pending" | "confirmed" | "failed" | "unavailable";
+    confirmations: number;
+  }> {
     const chainRpcs = this.config.chainRpcs;
     if (!chainRpcs || !chainId || !chainRpcs[chainId]) {
-      // No RPC configured, return placeholder
-      return { status: "pending", confirmations: 0 };
+      return { status: "unavailable", confirmations: 0 };
     }
 
     const rpcUrl = chainRpcs[chainId];
@@ -228,7 +258,7 @@ export class RouteEngine {
       });
 
       if (!response.ok) {
-        return { status: "pending", confirmations: 0 };
+        return { status: "unavailable", confirmations: 0 };
       }
 
       const data = (await response.json()) as {
@@ -272,7 +302,7 @@ export class RouteEngine {
 
       return { status: "confirmed", confirmations };
     } catch {
-      return { status: "pending", confirmations: 0 };
+      return { status: "unavailable", confirmations: 0 };
     }
   }
 
@@ -342,11 +372,12 @@ export class RouteEngine {
     },
     quote: RouteQuote,
   ): Route {
-    // Estimate output amount based on quote cost
-    // For same-chain swaps: output ≈ input - cost
-    // For bridges: output ≈ input - bridge fee
-    const adjustedOutput =
-      params.amount > quote.totalCost ? params.amount - quote.totalCost : 0n;
+    if (quote.outputAmount < 0n) {
+      throw new RouteEngineError(
+        "no_routes_available",
+        "Provider returned a negative output amount.",
+      );
+    }
 
     const fromName =
       CHAINS[params.fromChain.chainId]?.name ??
@@ -366,7 +397,7 @@ export class RouteEngine {
       inputToken: params.inputToken,
       outputToken: params.outputToken,
       inputAmount: params.amount,
-      outputAmount: adjustedOutput,
+      outputAmount: quote.outputAmount,
       steps: quote.steps,
       totalCost: quote.totalCost,
       slippage: quote.slippage,
@@ -387,6 +418,7 @@ export class RouteEngine {
       address: info.usdcAddress,
       decimals: info.usdcDecimals ?? 6,
       symbol: "USDC",
+      variant: info.usdcVariant,
     };
   }
 

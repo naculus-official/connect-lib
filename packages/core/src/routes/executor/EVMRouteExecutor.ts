@@ -9,6 +9,7 @@
  * - If viem is not available, the executor will throw a clear error.
  */
 
+import { isValidAddress } from "../../address-validation";
 import type { Route, RouteStep } from "../types";
 import { RouteEngineError } from "../types";
 
@@ -121,19 +122,39 @@ export class EVMRouteExecutor {
    * Handle approve + swap/bridge/transfer flow.
    */
   private async executeTransferStep(step: RouteStep): Promise<string> {
-    const fromAddress = step.fromToken.address as `0x${string}`;
-
-    // If the from token is not native ETH, we may need an approve step
-    if (fromAddress !== "0x0000000000000000000000000000000000000000") {
-      // Approve step would be done before this via a separate call
-      // The caller is responsible for handling approvals separately
+    const transaction = step.transaction;
+    if (!transaction) {
+      throw new RouteEngineError(
+        "execution_failed",
+        "Route step has no provider transaction request; refusing to send fabricated calldata.",
+      );
     }
-
-    // Execute the swap/bridge/transfer
+    if (
+      !isValidAddress(transaction.to, "eip155") ||
+      !/^0x[0-9a-fA-F]*$/.test(transaction.data) ||
+      transaction.data.length % 2 !== 0
+    ) {
+      throw new RouteEngineError(
+        "execution_failed",
+        "Route step contains invalid EVM calldata.",
+      );
+    }
+    if (
+      transaction.chainId === undefined ||
+      !Number.isSafeInteger(transaction.chainId) ||
+      transaction.chainId <= 0 ||
+      transaction.chainId !== step.fromToken.chainId
+    ) {
+      throw new RouteEngineError(
+        "execution_failed",
+        "Route step must include the provider-authoritative source chain ID.",
+      );
+    }
     const txHash = await this.walletClient.sendTransaction({
-      to: fromAddress,
-      data: "0x", // In production, encode the proper swap/bridge calldata
-      value: step.amount,
+      to: transaction.to,
+      data: transaction.data,
+      value: transaction.value ?? 0n,
+      chainId: transaction.chainId,
     });
 
     return txHash;
@@ -148,6 +169,16 @@ export class EVMRouteExecutor {
     spender: `0x${string}`,
     amount: bigint,
   ): Promise<{ txHash: string }> {
+    if (
+      !isValidAddress(tokenAddress, "eip155") ||
+      !isValidAddress(spender, "eip155") ||
+      amount < 0n
+    ) {
+      throw new RouteEngineError(
+        "execution_failed",
+        "Invalid ERC-20 approval parameters.",
+      );
+    }
     if (!this.walletClient.writeContract) {
       throw new RouteEngineError(
         "execution_failed",

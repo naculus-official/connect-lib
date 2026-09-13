@@ -6,17 +6,19 @@
  */
 
 import { CHAINS } from "../../chain-registry";
-import type {
-  BridgeProvider,
-  Route,
-  RouteQuote,
-  RouteStep,
-  Token,
-} from "../types";
+import { isValidAddress } from "../../address-validation";
+import type { BridgeProvider, Route, RouteQuote, Token } from "../types";
 import { RouteEngineError } from "../types";
 
 function chainIdToAxelar(chainId: number): string {
-  return CHAINS[chainId]?.axelarName ?? String(chainId);
+  const name = CHAINS[chainId]?.axelarName;
+  if (!name) {
+    throw new RouteEngineError(
+      "no_routes_available",
+      `Unsupported Axelar chain ID: ${chainId}`,
+    );
+  }
+  return name;
 }
 
 // ─── AxelarBridgeProvider ──────────────────────────────────────────────
@@ -40,6 +42,16 @@ export class AxelarBridgeProvider implements BridgeProvider {
     this.apiUrl = config?.apiUrl ?? "https://api.axelarscan.io";
     this.estimatedTimeMs = config?.estimatedTimeMs ?? 120_000;
     this.slippage = config?.slippage ?? 0;
+    if (
+      !Number.isFinite(this.slippage) ||
+      this.slippage < 0 ||
+      this.slippage > 100
+    ) {
+      throw new RouteEngineError(
+        "no_routes_available",
+        "Axelar slippage must be between 0 and 100.",
+      );
+    }
   }
 
   async estimate(params: {
@@ -50,6 +62,19 @@ export class AxelarBridgeProvider implements BridgeProvider {
     toToken: Token;
   }): Promise<RouteQuote> {
     const { amount, fromChain, toChain, fromToken, toToken } = params;
+
+    if (
+      amount <= 0n ||
+      fromToken.chainId !== fromChain.chainId ||
+      toToken.chainId !== toChain.chainId ||
+      !isValidAddress(fromToken.address, "eip155") ||
+      !isValidAddress(toToken.address, "eip155")
+    ) {
+      throw new RouteEngineError(
+        "no_routes_available",
+        "Invalid Axelar route parameters.",
+      );
+    }
 
     const axelarFrom = chainIdToAxelar(fromChain.chainId);
     const axelarTo = chainIdToAxelar(toChain.chainId);
@@ -73,35 +98,18 @@ export class AxelarBridgeProvider implements BridgeProvider {
       );
     }
 
-    const gmpData = (await gmpResponse.json()) as {
-      baseFee?: string;
-      sourceGasFee?: string;
-      destinationGasFee?: string;
-    };
-
-    const baseFee = BigInt(gmpData.baseFee ?? "0");
-    const sourceGasFee = BigInt(gmpData.sourceGasFee ?? "0");
-    const destGasFee = BigInt(gmpData.destinationGasFee ?? "0");
-    const totalCost = baseFee + sourceGasFee + destGasFee;
-
-    const steps: RouteStep[] = [
-      {
-        type: "bridge",
-        fromToken,
-        toToken,
-        amount,
-        estimatedGas: sourceGasFee,
-        description: `Bridge ${fromToken.symbol} from ${axelarFrom} → ${axelarTo} via Axelar GMP`,
-      },
-    ];
-
-    return {
-      totalCost,
-      estimatedTimeMs: this.estimatedTimeMs,
-      slippage: this.slippage,
-      steps,
-      provider: this.name,
-    };
+    // The public GMP fee endpoint returns fee components only. It does not
+    // provide the destination amount, a source gateway transaction, or a
+    // route identifier. Returning `outputAmount: amount` here would invent a
+    // cross-chain conversion and could make a caller display or sign an
+    // incorrect route. Require a trusted route builder (the modern
+    // AxelarProvider backend path) for executable quotes instead.
+    void axelarFrom;
+    void axelarTo;
+    throw new RouteEngineError(
+      "no_routes_available",
+      "Axelar GMP fee endpoint does not provide an authoritative route; use a trusted route backend.",
+    );
   }
 
   async execute(_route: Route): Promise<{ txHash: string }> {

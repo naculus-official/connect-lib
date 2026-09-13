@@ -14,6 +14,8 @@ export interface Token {
   address: string;
   decimals: number;
   symbol: string;
+  /** Distinguishes issuer-native tokens from bridged representations. */
+  variant?: "native" | "bridged";
 }
 
 export interface ChainInfo {
@@ -30,12 +32,21 @@ export interface RouteStep {
   amount: bigint;
   estimatedGas: bigint;
   description: string;
+  /** Provider-supplied transaction request. Execution is rejected when absent. */
+  transaction?: {
+    to: `0x${string}`;
+    data: `0x${string}`;
+    value?: bigint;
+    chainId?: number;
+  };
 }
 
 // ─── Route Quote ──────────────────────────────────────────────────────
 
 export interface RouteQuote {
   totalCost: bigint; // total cost in gas token wei
+  /** Provider-authoritative amount received on the destination token. */
+  outputAmount: bigint;
   estimatedTimeMs: number; // estimated time in ms
   slippage: number; // slippage percentage (0-100)
   steps: RouteStep[];

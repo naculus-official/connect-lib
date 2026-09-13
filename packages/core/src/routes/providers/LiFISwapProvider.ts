@@ -5,6 +5,8 @@
  * Calls the LiFi API for swap quotes and execution.
  */
 
+import { isValidAddress } from "../../address-validation";
+import { getChainInfo } from "../../chain-registry";
 import type { ApiKeyConfig } from "../../shared-types";
 import type {
   Route,
@@ -20,7 +22,10 @@ import { RouteEngineError } from "../types";
  * The lookup validates against the canonical chain registry.
  */
 function caip2ToLiFiChain(chainId: number): string {
-  // Chains not in the registry will fail downstream at LiFi API
+  // Keep provider requests constrained to the SDK's canonical registry.
+  // Sending arbitrary numeric IDs to a provider would make chain support
+  // dependent on an undocumented external fallback.
+  getChainInfo(chainId);
   return String(chainId);
 }
 
@@ -38,7 +43,7 @@ export function parseBigIntSafe(
       `LiFi ${fieldName} is empty or missing`,
     );
   }
-  if (!/^(0x)?[a-fA-F0-9]+$/.test(value)) {
+  if (!/^(?:0x[0-9a-fA-F]+|[0-9]+)$/.test(value)) {
     throw new RouteEngineError(
       "provider_unavailable",
       `LiFi ${fieldName} contains invalid characters: ${value}`,
@@ -52,7 +57,7 @@ export function parseBigIntSafe(
 export interface LiFISwapProviderConfig extends ApiKeyConfig {
   /** LI.FI API base URL */
   apiUrl?: string;
-  /** Default gas price (wei) fallback when LiFi API omits gasPrice */
+  /** Optional caller-supplied gas price (wei) fallback when LiFi omits gasPrice. */
   defaultGasPrice?: bigint;
   /** Slippage tolerance percent (default 0.5) */
   slippage?: number;
@@ -64,16 +69,35 @@ export class LiFISwapProvider implements SwapProvider {
   name = "LiFi";
   private apiUrl: string;
   private apiKey?: string;
-  private defaultGasPrice: bigint;
+  private defaultGasPrice: bigint | undefined;
   private slippage: number;
   private estimatedTimeMs: number;
 
   constructor(config?: LiFISwapProviderConfig) {
     this.apiUrl = config?.apiUrl ?? "https://li.quest/v1";
     this.apiKey = config?.apiKey;
-    this.defaultGasPrice = config?.defaultGasPrice ?? 50_000_000_000n;
+    // Never invent a market gas price. A fallback is accepted only when the
+    // integrator explicitly supplies one; otherwise a quote without an
+    // authoritative gas price is rejected below.
+    this.defaultGasPrice = config?.defaultGasPrice;
+    if (this.defaultGasPrice !== undefined && this.defaultGasPrice < 0n) {
+      throw new RouteEngineError(
+        "provider_unavailable",
+        "LiFi default gas price cannot be negative.",
+      );
+    }
     this.slippage = config?.slippage ?? 0.5;
     this.estimatedTimeMs = config?.estimatedTimeMs ?? 30_000;
+    if (
+      !Number.isFinite(this.slippage) ||
+      this.slippage < 0 ||
+      this.slippage > 100
+    ) {
+      throw new RouteEngineError(
+        "provider_unavailable",
+        "LiFi slippage must be between 0 and 100.",
+      );
+    }
   }
 
   async estimate(params: {
@@ -130,7 +154,12 @@ export class LiFISwapProvider implements SwapProvider {
       id?: string;
     };
 
-    if (!data?.estimate?.toAmount || !data?.transactionRequest) {
+    if (
+      !data?.estimate?.toAmount ||
+      !data?.estimate?.toAmountMin ||
+      !data?.estimate?.fromAmount ||
+      !data?.transactionRequest
+    ) {
       throw new RouteEngineError(
         "no_routes_available",
         "LiFi returned incomplete quote data",
@@ -147,6 +176,39 @@ export class LiFISwapProvider implements SwapProvider {
       data.estimate.toAmountMin,
       "estimate.toAmountMin",
     );
+    const fromAmount = parseBigIntSafe(
+      data.estimate.fromAmount,
+      "estimate.fromAmount",
+    );
+    if (fromAmount !== amount || toAmountMin > toAmount) {
+      throw new RouteEngineError(
+        "provider_unavailable",
+        "LiFi returned an inconsistent quote amount.",
+      );
+    }
+
+    const request = data.transactionRequest;
+    if (
+      !isValidAddress(request.to, "eip155") ||
+      !/^0x[0-9a-fA-F]*$/.test(request.data) ||
+      request.data.length % 2 !== 0
+    ) {
+      throw new RouteEngineError(
+        "provider_unavailable",
+        "LiFi returned invalid EVM transaction calldata.",
+      );
+    }
+    if (
+      !Number.isSafeInteger(request.chainId) ||
+      request.chainId <= 0 ||
+      request.chainId !== fromToken.chainId
+    ) {
+      throw new RouteEngineError(
+        "provider_unavailable",
+        "LiFi returned a transaction for the wrong chain.",
+      );
+    }
+    const txValue = parseBigIntSafe(request.value, "transactionRequest.value");
 
     const gasLimit = parseBigIntSafe(
       data.transactionRequest.gasLimit,
@@ -158,6 +220,12 @@ export class LiFISwapProvider implements SwapProvider {
           "transactionRequest.gasPrice",
         )
       : this.defaultGasPrice;
+    if (gasPrice === undefined) {
+      throw new RouteEngineError(
+        "provider_unavailable",
+        "LiFi omitted transactionRequest.gasPrice; provide an authoritative gas price or an explicit fallback.",
+      );
+    }
     const totalGas = gasLimit * gasPrice;
 
     // Gather any protocol fees from the estimate
@@ -173,11 +241,18 @@ export class LiFISwapProvider implements SwapProvider {
         amount,
         estimatedGas: gasLimit,
         description: `Swap ${fromToken.symbol} → ${toToken.symbol} via LiFi`,
+        transaction: {
+          to: request.to as `0x${string}`,
+          data: request.data as `0x${string}`,
+          value: txValue,
+          chainId: request.chainId,
+        },
       },
     ];
 
     return {
       totalCost: totalGas + totalFees,
+      outputAmount: toAmount,
       estimatedTimeMs: this.estimatedTimeMs,
       slippage: this.slippage,
       steps,
