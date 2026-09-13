@@ -42,7 +42,9 @@ export function isInIframe(): boolean {
  *
  * @returns A promise that resolves to `true` if a Safe App environment is detected.
  */
-export async function isSafeAppEnvironment(): Promise<boolean> {
+export async function isSafeAppEnvironment(
+  allowedOrigins?: SafeAllowedOrigins,
+): Promise<boolean> {
   // Must be in a browser environment
   if (typeof window === "undefined") return false;
 
@@ -53,7 +55,7 @@ export async function isSafeAppEnvironment(): Promise<boolean> {
   // Safe App frames respond to "ready" messages. If we get a response
   // within the timeout, we know it's a Safe environment.
   try {
-    return await detectViaHandshake(500);
+    return await detectViaHandshake(500, allowedOrigins);
   } catch {
     // Handshake timed out — this is not a Safe App iframe
     return false;
@@ -68,10 +70,13 @@ export async function isSafeAppEnvironment(): Promise<boolean> {
  * protocol to wait until the environment is confirmed.
  *
  * @param timeoutMs Maximum time to wait (default 5000ms)
+ * @param allowedOrigins Optional RegExps the answering origin must match, as
+ *   in @safe-global/safe-apps-sdk. Omit to accept any parent-frame origin.
  * @throws If the environment is not a Safe App or the handshake times out.
  */
 export async function waitForSafeEnvironment(
   timeoutMs = 5000,
+  allowedOrigins?: SafeAllowedOrigins,
 ): Promise<import("./types").SafeEnvironment> {
   if (typeof window === "undefined") {
     throw new Error("Safe App environment detection not available in SSR");
@@ -83,7 +88,7 @@ export async function waitForSafeEnvironment(
 
   // Use the SDK's internal handshake mechanism by posting a "ready" message
   // and listening for the Safe interface response.
-  const safeInfo = await handshakeForSafeInfo(timeoutMs);
+  const safeInfo = await handshakeForSafeInfo(timeoutMs, allowedOrigins);
 
   return {
     isSafeApp: true,
@@ -97,9 +102,64 @@ export async function waitForSafeEnvironment(
 }
 
 /**
- * Safe UUID generator that works in all browser contexts.
- * In non-secure contexts (HTTP), `crypto.randomUUID()` throws,
- * so we fall back to Math.random-based generation.
+ * Origins permitted to answer a Safe handshake.
+ *
+ * Mirrors the `allowedOrigins` option of the official
+ * `@safe-global/safe-apps-sdk` PostMessageCommunicator: a list of RegExps
+ * supplied by the consumer, defaulting to "unrestricted". No built-in domain
+ * list is hard-coded here on purpose — the Safe interface is self-hostable, so
+ * any fixed list would be both incomplete and stale, and pinning one would be
+ * inventing a security boundary the protocol does not define.
+ */
+export type SafeAllowedOrigins = readonly RegExp[];
+
+/**
+ * Gate every handshake reply on the sender actually being our parent frame.
+ *
+ * This is the same hard gate the official SDK applies
+ * (`source === window.parent`), and it is origin-independent, which matters:
+ * `window.location.ancestorOrigins` is a WebKit-derived API that Firefox does
+ * not implement, so a guard written only as
+ * `if (parentOrigin && event.origin !== parentOrigin)` accepted every sender
+ * on that browser.
+ *
+ * A malicious *parent* can still claim to be a Safe interface — no postMessage
+ * protocol can prevent that without a pinned origin — which is exactly why
+ * `allowedOrigins` exists for consumers that need to pin one.
+ */
+function isTrustedSafeMessage(
+  event: MessageEvent,
+  requestId: string,
+  allowedOrigins?: SafeAllowedOrigins,
+): boolean {
+  // The browser sets `source`; another window cannot forge it.
+  if (event.source !== window.parent) return false;
+  if (window.parent === window.self) return false;
+
+  // Browser-supplied, not guessed: only present where the engine implements it.
+  const parentOrigin = window.location.ancestorOrigins?.[0];
+  if (parentOrigin && event.origin !== parentOrigin) return false;
+
+  if (allowedOrigins && !allowedOrigins.some((re) => re.test(event.origin))) {
+    return false;
+  }
+
+  // Correlate when the peer echoes our id. The Safe interface is not required
+  // to echo it on these probes, so a missing id is tolerated; a mismatched one
+  // is not.
+  const data = event.data as { messageId?: unknown; requestId?: unknown };
+  if (typeof data?.messageId === "string" && data.messageId !== requestId)
+    return false;
+  if (typeof data?.requestId === "string" && data.requestId !== requestId)
+    return false;
+
+  return true;
+}
+
+/**
+ * Correlation id for a handshake. Always cryptographically random: a
+ * predictable id would let a sender that slips past the origin gate replay a
+ * plausible-looking reply.
  */
 function safeUUID(): string {
   if (
@@ -109,15 +169,21 @@ function safeUUID(): string {
     try {
       return crypto.randomUUID();
     } catch {
-      // Fall through for non-secure contexts
+      // Non-secure contexts throw; fall through to getRandomValues.
     }
   }
-  // Fallback for insecure contexts or older browsers
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  throw new Error(
+    "A cryptographically secure random source is required for the Safe handshake.",
+  );
 }
 
 /**
@@ -126,17 +192,19 @@ function safeUUID(): string {
  * The Safe interface responds to certain postMessage patterns.
  * We listen for a specific environment message from the parent.
  */
-async function detectViaHandshake(timeoutMs: number): Promise<boolean> {
+async function detectViaHandshake(
+  timeoutMs: number,
+  allowedOrigins?: SafeAllowedOrigins,
+): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
+    const requestId = safeUUID();
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("Handshake timed out"));
     }, timeoutMs);
 
     const handler = (event: MessageEvent) => {
-      // Only accept messages from the parent frame (Safe interface)
-      const parentOrigin = window.location.ancestorOrigins?.[0];
-      if (parentOrigin && event.origin !== parentOrigin) return;
+      if (!isTrustedSafeMessage(event, requestId, allowedOrigins)) return;
       // Safe App messages have a specific data structure.
       // We look for Safe environment data messages.
       const data = event.data;
@@ -164,7 +232,7 @@ async function detectViaHandshake(timeoutMs: number): Promise<boolean> {
     // Ask the parent frame to identify itself as a Safe interface
     try {
       window.parent.postMessage(
-        { source: "sdk", method: "ready", messageId: safeUUID() },
+        { source: "sdk", method: "ready", messageId: requestId },
         window.location.ancestorOrigins?.[0] || "*",
       );
     } catch {
@@ -183,17 +251,17 @@ async function detectViaHandshake(timeoutMs: number): Promise<boolean> {
  */
 async function handshakeForSafeInfo(
   timeoutMs: number,
+  allowedOrigins?: SafeAllowedOrigins,
 ): Promise<Record<string, unknown>> {
   return new Promise<Record<string, unknown>>((resolve, reject) => {
+    const requestId = safeUUID();
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("Safe environment handshake timed out"));
     }, timeoutMs);
 
     const handler = (event: MessageEvent) => {
-      // Only accept messages from the parent frame (Safe interface)
-      const parentOrigin = window.location.ancestorOrigins?.[0];
-      if (parentOrigin && event.origin !== parentOrigin) return;
+      if (!isTrustedSafeMessage(event, requestId, allowedOrigins)) return;
       const data = event.data;
       if (data && typeof data === "object") {
         // Look for Safe environment info response
@@ -222,7 +290,7 @@ async function handshakeForSafeInfo(
         {
           source: "sdk",
           method: "getEnvInfo",
-          messageId: safeUUID(),
+          messageId: requestId,
         },
         window.location.ancestorOrigins?.[0] || "*",
       );

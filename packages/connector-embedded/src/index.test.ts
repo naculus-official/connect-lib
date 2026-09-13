@@ -37,6 +37,7 @@ vi.mock("@scure/bip39", () => ({
 
 vi.mock("@noble/curves/secp256k1", () => ({
   secp256k1: {
+    utils: { isValidPrivateKey: vi.fn(() => true) },
     getPublicKey: vi.fn(() => {
       const pub = new Uint8Array(65);
       pub[0] = 0x04;
@@ -157,6 +158,27 @@ describe("PocketConnector", () => {
       // disconnect nullifies the internal wallet reference
       expect(connector.getWallet()).toBeNull();
     });
+
+    it("does not sign with a session after disconnect", async () => {
+      const connector = createPocketConnector({ autoSave: true });
+      const session = await connector.connect();
+      await connector.disconnect();
+      await expect(
+        connector.signMessage(session, { message: "stale session" }),
+      ).rejects.toMatchObject({ code: "session_expired" });
+    });
+
+    it("does not reconnect a session with a missing namespace", async () => {
+      const connector = createPocketConnector({
+        autoSave: true,
+        storageKey: "reconnect_namespace",
+      });
+      const session = await connector.connect();
+      const malformed = { ...session, namespaces: {} } as typeof session;
+      await expect(connector.reconnect(malformed)).rejects.toMatchObject({
+        code: "session_expired",
+      });
+    });
   });
 
   describe("getAccounts", () => {
@@ -195,6 +217,70 @@ describe("PocketConnector", () => {
           to: "0x1234567890123456789012345678901234567890",
         }),
       ).rejects.toThrow("RPC URL not configured");
+    });
+
+    it("accepts the public { transaction, chainId } input shape", async () => {
+      const connector = createPocketConnector();
+      const session = await connector.connect();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: { to: "0x1234567890123456789012345678901234567890" },
+          chainId: "eip155:1",
+        }),
+      ).rejects.toThrow("RPC URL not configured");
+    });
+
+    it("rejects a request chain that differs from the configured chain", async () => {
+      const connector = createPocketConnector({ chainId: "eip155:1" });
+      const session = await connector.connect();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: {
+            to: "0x1234567890123456789012345678901234567890",
+          },
+          chainId: "eip155:8453",
+        }),
+      ).rejects.toMatchObject({ code: "chain_mismatch" });
+    });
+
+    it("rejects conflicting outer and transaction chain IDs", async () => {
+      const connector = createPocketConnector();
+      const session = await connector.connect();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: {
+            to: "0x1234567890123456789012345678901234567890",
+            chainId: 8453,
+          },
+          chainId: "eip155:1",
+        }),
+      ).rejects.toMatchObject({ code: "chain_mismatch" });
+    });
+
+    it("rejects malformed transaction chain IDs", async () => {
+      const connector = createPocketConnector();
+      const session = await connector.connect();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: {
+            to: "0x1234567890123456789012345678901234567890",
+          },
+          chainId: "eip155:0",
+        }),
+      ).rejects.toMatchObject({ code: "chain_unsupported" });
+    });
+
+    it("rejects a transaction from a different account", async () => {
+      const connector = createPocketConnector();
+      const session = await connector.connect();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: {
+            from: "0x0000000000000000000000000000000000000001",
+            to: "0x1234567890123456789012345678901234567890",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_input" });
     });
   });
 
@@ -284,7 +370,9 @@ describe("PocketConnector", () => {
       const connector = createPocketConnector({ autoSave: false });
       await expect(
         connector.importFromPrivateKey("0xinvalid" as unknown as `0x${string}`),
-      ).rejects.toThrow("Invalid private key");
+        // The message changed when import learned Solana formats; the refusal
+        // did not.
+      ).rejects.toThrow(/Invalid private key|Unrecognized private key format/);
     });
   });
 
@@ -309,6 +397,19 @@ describe("PocketConnector", () => {
       } as any);
       expect(result).toHaveProperty("signature");
       expect((result as any).signature).toMatch(/^0x[0-9a-fA-F]+$/);
+    });
+
+    it("rejects a nested transaction chain that differs from the configured chain", async () => {
+      const connector = createPocketConnector({ chainId: "eip155:1" });
+      const session = await connector.connect();
+      await expect(
+        connector.signTransaction(session, {
+          transaction: {
+            to: "0x1234567890123456789012345678901234567890",
+            chainId: "0x2105",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "chain_mismatch" });
     });
   });
 

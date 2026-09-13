@@ -1,21 +1,10 @@
-import type {
-  Namespace,
-  SessionNamespace,
-  UniversalConnector,
-  UniversalWalletSession,
-} from "@naculus/connect-core";
-import { extractAccounts, WalletError } from "@naculus/connect-core";
+import type { UniversalWalletSession } from "@naculus/connect-core";
+import { WalletError } from "@naculus/connect-core";
 import {
   type WalletConnectConfig,
   WalletConnectConnector,
 } from "@naculus/connector-walletconnect";
-import {
-  type Account,
-  type Chain,
-  createClient,
-  custom,
-  type Transport,
-} from "viem";
+import type { Chain } from "viem";
 import {
   ChainNotConfiguredError,
   type Connector,
@@ -24,6 +13,49 @@ import {
 } from "wagmi";
 
 export type { WalletConnectConfig };
+
+function extractEvmAccounts(
+  session: UniversalWalletSession,
+): readonly `0x${string}`[] {
+  const accounts = session.namespaces.eip155?.accounts ?? [];
+  return accounts.flatMap((account) => {
+    const [namespace, , address] = account.split(":");
+    if (
+      namespace !== "eip155" ||
+      !address ||
+      !/^0x[a-fA-F0-9]{40}$/.test(address)
+    )
+      return [];
+    return [`0x${address.replace(/^0x/i, "")}` as `0x${string}`];
+  });
+}
+
+function assertChainId(chainId: number): number {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new WalletError(
+      "chain_unsupported",
+      `Invalid EIP-155 chain ID: ${chainId}`,
+    );
+  }
+  return chainId;
+}
+
+function parseEip155ChainId(chainId: string): number {
+  if (!/^eip155:[1-9][0-9]*$/.test(chainId)) {
+    throw new WalletError(
+      "chain_unsupported",
+      `Invalid EIP-155 chain ID: ${chainId}`,
+    );
+  }
+  const value = BigInt(chainId.slice("eip155:".length));
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new WalletError(
+      "chain_unsupported",
+      `EIP-155 chain ID exceeds wagmi's numeric range: ${chainId}`,
+    );
+  }
+  return Number(value);
+}
 
 /**
  * Naculus Wagmi-compatible Connector
@@ -74,6 +106,7 @@ export function createNaculusConnector(
     // Track session internally
     let currentSession: UniversalWalletSession | undefined;
     let currentChainId: number | undefined;
+    let activeConnector: WalletConnectConnector | undefined;
 
     const emitter = wagmiParams.emitter;
 
@@ -92,16 +125,31 @@ export function createNaculusConnector(
         accounts: readonly `0x${string}`[];
         chainId: number;
       }> {
+        if (parameters?.chainId !== undefined)
+          assertChainId(parameters.chainId);
         const connector = new WalletConnectConnector({
           projectId: config.projectId,
           metadata: config.metadata,
         });
 
-        const wcChains = parameters?.chainId
-          ? [`eip155:${parameters?.chainId}`]
-          : eip155Chains.length > 0
-            ? eip155Chains
-            : ["eip155:1"];
+        const requestedChainId = parameters?.chainId;
+        if (requestedChainId === undefined && eip155Chains.length === 0) {
+          throw new WalletError(
+            "chain_unsupported",
+            "Configure at least one EIP-155 chain before connecting.",
+          );
+        }
+        if (
+          requestedChainId !== undefined &&
+          eip155Chains.length > 0 &&
+          !eip155Chains.includes(`eip155:${requestedChainId}`)
+        ) {
+          throw new ChainNotConfiguredError();
+        }
+        const wcChains =
+          requestedChainId !== undefined
+            ? [`eip155:${requestedChainId}`]
+            : eip155Chains;
 
         const session = await connector.connect({
           requiredNamespaces: {
@@ -113,17 +161,25 @@ export function createNaculusConnector(
           },
         });
 
+        const sessionChains = session.namespaces.eip155?.chains ?? [];
+        const selectedChain =
+          requestedChainId !== undefined
+            ? `eip155:${requestedChainId}`
+            : sessionChains[0];
+        if (!selectedChain || !sessionChains.includes(selectedChain)) {
+          throw new WalletError(
+            "namespace_mismatch",
+            "WalletConnect session did not approve a requested EIP-155 chain.",
+          );
+        }
+        const parsedChainId = parseEip155ChainId(selectedChain);
         currentSession = session;
-        currentChainId = parameters?.chainId ?? (chains.length > 0 ? chains[0].id : 1);
+        activeConnector = connector;
+        currentChainId = parsedChainId;
 
-        const accounts = extractAccounts(session.namespaces).map(
-          (a: string) => {
-            const addr = a.split(":").pop();
-            return `0x${addr!.replace(/^0x/, "")}` as `0x${string}`;
-          },
-        );
+        const accounts = extractEvmAccounts(session);
 
-        emitter.emit("connect", { accounts, chainId: currentChainId ?? 1 });
+        emitter.emit("connect", { accounts, chainId: currentChainId });
 
         return {
           accounts,
@@ -133,12 +189,15 @@ export function createNaculusConnector(
 
       async disconnect(): Promise<void> {
         if (currentSession) {
-          const connector = new WalletConnectConnector({
-            projectId: config.projectId,
-            metadata: config.metadata,
-          });
+          const connector =
+            activeConnector ??
+            new WalletConnectConnector({
+              projectId: config.projectId,
+              metadata: config.metadata,
+            });
           await connector.disconnect(currentSession);
           currentSession = undefined;
+          activeConnector = undefined;
           currentChainId = undefined;
           emitter.emit("disconnect");
         }
@@ -146,23 +205,21 @@ export function createNaculusConnector(
 
       async getAccounts(): Promise<readonly `0x${string}`[]> {
         if (!currentSession) return [];
-        const accounts = extractAccounts(currentSession.namespaces).map(
-          (a: string) => {
-            const addr = a.split(":").pop();
-            return `0x${addr!.replace(/^0x/, "")}` as `0x${string}`;
-          },
-        );
+        const accounts = extractEvmAccounts(currentSession);
         return accounts;
       },
 
       async getChainId(): Promise<number> {
-        if (currentChainId) return currentChainId;
+        if (currentChainId !== undefined) return currentChainId;
         // Fallback: try to determine from session
         if (currentSession?.namespaces.eip155?.chains[0]) {
           const chainStr = currentSession.namespaces.eip155.chains[0];
-          return Number(chainStr.split(":")[1]);
+          return parseEip155ChainId(chainStr);
         }
-        return chains.length > 0 ? chains[0].id : 1;
+        throw new WalletError(
+          "session_expired",
+          "No active WalletConnect session.",
+        );
       },
 
       async isAuthorized(): Promise<boolean> {
@@ -170,20 +227,25 @@ export function createNaculusConnector(
       },
 
       async switchChain({ chainId }: { chainId: number }): Promise<Chain> {
-        const chain = [...chains].find(c => c.id === chainId);
+        assertChainId(chainId);
+        const chain = [...chains].find((c) => c.id === chainId);
         if (!chain) {
           throw new ChainNotConfiguredError();
         }
 
         if (currentSession) {
-          const connector = new WalletConnectConnector({
-            projectId: config.projectId,
-            metadata: config.metadata,
-          });
+          const connector =
+            activeConnector ??
+            new WalletConnectConnector({
+              projectId: config.projectId,
+              metadata: config.metadata,
+            });
           try {
             await connector.switchChain(currentSession, `eip155:${chainId}`);
           } catch {
-            throw new SwitchChainNotSupportedError({ connector: connector as any });
+            throw new SwitchChainNotSupportedError({
+              connector: connector as any,
+            });
           }
         }
 
@@ -195,32 +257,60 @@ export function createNaculusConnector(
       },
 
       async onAccountsChanged(accounts: string[]): Promise<void> {
+        accounts = accounts.filter((account) =>
+          /^0x[a-fA-F0-9]{40}$/.test(account),
+        );
         if (accounts.length === 0) {
+          currentSession = undefined;
+          activeConnector = undefined;
+          currentChainId = undefined;
           emitter.emit("disconnect");
           return;
+        }
+
+        const namespace = currentSession?.namespaces.eip155;
+        if (namespace) {
+          const chainReference = namespace.chains[0]?.split(":")[1];
+          if (!chainReference) return;
+          namespace.accounts = accounts.map(
+            (account) => `eip155:${chainReference}:${account}`,
+          );
         }
         emitter.emit("change", { accounts: accounts as `0x${string}`[] });
       },
 
       onChainChanged(chainId: string): void {
-        const newChainId = Number(chainId);
-        if (!isNaN(newChainId)) {
-          currentChainId = newChainId;
-          emitter.emit("change", { chainId: newChainId });
+        try {
+          if (
+            !/^(?:0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)|[1-9][0-9]*)$/.test(chainId)
+          )
+            return;
+          const newChainId = Number(BigInt(chainId));
+          if (Number.isSafeInteger(newChainId) && newChainId > 0) {
+            currentChainId = newChainId;
+            emitter.emit("change", { chainId: newChainId });
+          }
+        } catch {
+          // Ignore malformed provider events; never persist a guessed chain.
         }
       },
 
       async onDisconnect(_error?: Error): Promise<void> {
+        currentSession = undefined;
+        activeConnector = undefined;
+        currentChainId = undefined;
         emitter.emit("disconnect");
       },
 
       async getProvider(): Promise<unknown> {
-        const connector = new WalletConnectConnector({
-          projectId: config.projectId,
-          metadata: config.metadata,
-        });
+        const providerConnector =
+          activeConnector ??
+          new WalletConnectConnector({
+            projectId: config.projectId,
+            metadata: config.metadata,
+          });
         return {
-          connector,
+          connector: providerConnector,
           request: async ({
             method,
             params,
@@ -232,7 +322,11 @@ export function createNaculusConnector(
             if (!session) {
               throw new WalletError("session_expired", "No active session.");
             }
-            return connector.request({
+            const requestConnector = activeConnector;
+            if (!requestConnector) {
+              throw new WalletError("session_expired", "No active connector.");
+            }
+            return requestConnector.request({
               method,
               params: params ?? [],
             }) as Promise<unknown>;

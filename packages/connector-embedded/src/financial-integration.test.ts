@@ -1,6 +1,10 @@
 import { ERC20TokenHelper, parseUnits } from "@naculus/connect-core";
 import type { WalletData } from "@naculus/wallet-engine";
-import { PocketWallet, type StorageAdapter, type StorageType } from "@naculus/wallet-engine";
+import {
+  PocketWallet,
+  type StorageAdapter,
+  type StorageType,
+} from "@naculus/wallet-engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ─── Crypto Mocks ──────────────────────────────────────────────
@@ -19,6 +23,7 @@ vi.mock("@scure/bip39", () => ({
 
 vi.mock("@noble/curves/secp256k1", () => ({
   secp256k1: {
+    utils: { isValidPrivateKey: vi.fn(() => true) },
     getPublicKey: vi.fn(() => {
       const pub = new Uint8Array(65);
       pub[0] = 0x04;

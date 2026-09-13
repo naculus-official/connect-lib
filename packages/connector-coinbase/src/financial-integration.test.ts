@@ -62,6 +62,7 @@ function createSession(): UniversalWalletSession {
 
 async function createConnectedConnector() {
   const connector = new CoinbaseConnector({ appName: "Test DApp" });
+  mockProvider.request.mockReset();
   mockProvider.request
     .mockResolvedValueOnce([ACCOUNT])
     .mockResolvedValueOnce("0x1");
@@ -101,7 +102,7 @@ describe("Coinbase Financial: sendTransaction value passthrough", () => {
     });
     expect(mockProvider.request).toHaveBeenCalledWith({
       method: "eth_sendTransaction",
-      params: [expect.objectContaining({ value: "1000000000000000000" })],
+      params: [expect.objectContaining({ value: "0xde0b6b3a7640000" })],
     });
   });
 
@@ -112,7 +113,7 @@ describe("Coinbase Financial: sendTransaction value passthrough", () => {
     });
     expect(mockProvider.request).toHaveBeenCalledWith({
       method: "eth_sendTransaction",
-      params: [expect.objectContaining({ value: "0" })],
+      params: [expect.objectContaining({ value: "0x0" })],
     });
   });
 
@@ -135,7 +136,7 @@ describe("Coinbase Financial: sendTransaction value passthrough", () => {
     });
     expect(mockProvider.request).toHaveBeenCalledWith({
       method: "eth_sendTransaction",
-      params: [expect.objectContaining({ value: large })],
+      params: [expect.objectContaining({ value: "0x200000000003e8" })],
     });
   });
 
@@ -185,7 +186,12 @@ describe("Coinbase Financial: signTransaction value passthrough", () => {
     await connector.signTransaction(session, { transaction: tx });
     expect(mockProvider.request).toHaveBeenCalledWith({
       method: "eth_signTransaction",
-      params: [tx],
+      params: [
+        expect.objectContaining({
+          ...tx,
+          from: ACCOUNT,
+        }),
+      ],
     });
   });
 
@@ -226,7 +232,32 @@ describe("Coinbase Financial: sendCalls batch values", () => {
     await connector.sendCalls(session, calls, "eip155:1");
     expect(mockProvider.request).toHaveBeenCalledWith({
       method: "wallet_sendCalls",
-      params: [{ calls, chainId: "eip155:1" }],
+      params: [
+        {
+          version: "2.0.0",
+          from: ACCOUNT,
+          chainId: "0x1",
+          atomicRequired: false,
+          calls,
+        },
+      ],
+    });
+  });
+
+  it("allows contract-creation calls without a to address", async () => {
+    mockProvider.request.mockResolvedValueOnce("0x" + "af".repeat(32));
+    await connector.sendCalls(
+      session,
+      [{ data: "0x6000600055", value: "0x0" }],
+      "eip155:1",
+    );
+    expect(mockProvider.request).toHaveBeenCalledWith({
+      method: "wallet_sendCalls",
+      params: [
+        expect.objectContaining({
+          calls: [{ data: "0x6000600055", value: "0x0" }],
+        }),
+      ],
     });
   });
 
@@ -264,7 +295,7 @@ describe("Coinbase Financial: sendCalls batch values", () => {
 
   it("returns single hash for single-call fallback (no comma)", async () => {
     mockProvider.request
-      .mockRejectedValueOnce(new Error("not authorized"))
+      .mockRejectedValueOnce(new Error("method not supported"))
       .mockResolvedValueOnce("0x" + "ee".repeat(32));
     const calls: BatchCall[] = [{ to: RECIPIENT, value: "0x1", data: "0x" }];
     const result = await connector.sendCalls(session, calls);
@@ -325,9 +356,9 @@ describe("Coinbase Financial: switchChain chainId conversion", () => {
   });
 
   it("rejects non-EVM namespace", async () => {
-    await expect(connector.switchChain(session, "solana:0")).rejects.toThrow(
-      "only supports EVM chains",
-    );
+    await expect(
+      connector.switchChain(session, "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"),
+    ).rejects.toThrow("only supports EVM chains");
   });
 });
 
@@ -379,6 +410,16 @@ describe("Coinbase Financial: getBalance BigInt", () => {
     } as Response);
     const balance = await connector.getBalance();
     expect(BigInt(balance)).toBe(0n);
+  });
+
+  it("rejects a non-canonical RPC balance", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ jsonrpc: "2.0", id: 1, result: "123" }),
+    } as Response);
+    await expect(connector.getBalance()).rejects.toThrow(
+      "non-canonical eth_getBalance quantity",
+    );
   });
 
   it("throws when not connected", async () => {
@@ -444,7 +485,7 @@ describe("Coinbase Financial: input validation", () => {
 // 7. PRODUCTION CODE NUMBER() VIOLATION — switchChain
 // ═══════════════════════════════════════════════════════════════
 
-describe("Coinbase Financial: switchChain Number() violation", () => {
+describe("Coinbase Financial: precise switchChain chain IDs", () => {
   let connector: InstanceType<typeof CoinbaseConnector>;
   let session: UniversalWalletSession;
 
@@ -453,14 +494,12 @@ describe("Coinbase Financial: switchChain Number() violation", () => {
     session = createSession();
   });
 
-  it("uses Number() in switchChain — known violation for chainId > 2^53", () => {
-    // connector.ts:402: const hexChainId = `0x${Number(numericChainId).toString(16)}`;
-    // This truncates chain IDs larger than Number.MAX_SAFE_INTEGER.
-    // Per ARCHITECTURE.md: "All financial operations use BigInt (Number conversion prohibited)"
-    // This should eventually use BigInt instead of Number.
-    const spy = vi.spyOn(globalThis, "Number");
-    void connector.switchChain(session, "eip155:137");
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+  it("preserves chain IDs above Number.MAX_SAFE_INTEGER", async () => {
+    mockProvider.request.mockResolvedValueOnce(undefined);
+    await connector.switchChain(session, "eip155:9007199254740993");
+    expect(mockProvider.request).toHaveBeenCalledWith({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: "0x20000000000001" }],
+    });
   });
 });

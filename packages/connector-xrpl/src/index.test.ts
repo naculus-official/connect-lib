@@ -132,7 +132,7 @@ describe("XRPLConnector", () => {
               data: {
                 type: "XAMAN_CONNECTED",
                 wallet: {
-                  address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
+                  address: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
                   publicKey: "PUBKEY123",
                 },
               },
@@ -159,9 +159,9 @@ describe("XRPLConnector", () => {
       const session = await promise;
 
       expect(connector.isConnected()).toBe(true);
-      expect(session.walletId).toBe("rG1Euv9U7M9dV5B7z9wJkZqAB");
+      expect(session.walletId).toBe("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh");
       expect(session.namespaces.xrpl.accounts).toContain(
-        "xrpl:rG1Euv9U7M9dV5B7z9wJkZqAB",
+        "xrpl:0:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
       );
     });
 
@@ -175,7 +175,7 @@ describe("XRPLConnector", () => {
   });
 
   describe("signMessage", () => {
-    it("should throw when not connected", async () => {
+    it("rejects arbitrary-message signing explicitly", async () => {
       const connector = new XRPLConnector();
       const session = {
         id: "test",
@@ -183,58 +183,7 @@ describe("XRPLConnector", () => {
       } as any;
       await expect(
         connector.signMessage(session, { message: "hello" }),
-      ).rejects.toThrow("Session expired");
-    });
-
-    it("should throw on missing message", async () => {
-      const connector = new XRPLConnector();
-      (connector as any).activeSession = {
-        wallet: {
-          address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
-          publicKey: "PUBKEY123",
-        },
-      };
-      const session = {
-        namespaces: { xrpl: { chains: [], accounts: [] } },
-      } as any;
-      await expect(connector.signMessage(session, {} as any)).rejects.toThrow(
-        "Missing message parameter",
-      );
-    });
-
-    it("should throw when signTransaction times out", async () => {
-      const connector = new XRPLConnector();
-      (connector as any).activeSession = {
-        wallet: {
-          address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
-          publicKey: "PUBKEY123",
-        },
-      };
-      vi.stubGlobal("window", {
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        document: {
-          createElement: () => ({
-            href: "",
-            style: {},
-            click: vi.fn(),
-          }),
-          body: {
-            appendChild: vi.fn(),
-            removeChild: vi.fn(),
-          },
-        },
-      } as any);
-      vi.useFakeTimers();
-
-      const session = {
-        namespaces: { xrpl: { chains: [], accounts: [] } },
-      } as any;
-      const promise = connector.signMessage(session, { message: "hello" });
-      vi.advanceTimersByTime(300001);
-      await expect(promise).rejects.toThrow("timed out");
-
-      vi.useRealTimers();
+      ).rejects.toThrow("does not expose cryptographic");
     });
   });
 
@@ -253,7 +202,7 @@ describe("XRPLConnector", () => {
       const connector = new XRPLConnector();
       (connector as any).activeSession = {
         wallet: {
-          address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
+          address: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
           publicKey: "PUBKEY123",
         },
       };
@@ -271,7 +220,7 @@ describe("XRPLConnector", () => {
       const connector = new XRPLConnector();
       (connector as any).activeSession = {
         wallet: {
-          address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
+          address: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
           publicKey: "PUBKEY123",
         },
       };
@@ -297,7 +246,7 @@ describe("XRPLConnector", () => {
       } as any;
       const promise = connector.sendTransaction(session, {
         transaction: {
-          Account: "rG1Euv9U7M9dV5B7z9wJkZqAB",
+          Account: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
           TransactionType: "Payment",
         },
       });
@@ -327,12 +276,11 @@ describe("XRPLConnector", () => {
       expect(session.namespaces.xrpl.chains).toContain("xrpl:1");
     });
 
-    it("should switch to devnet for unknown chainId", () => {
+    it("should reject unknown chainId", async () => {
       const connector = new XRPLConnector();
       const session = { namespaces: { xrpl: { chains: ["xrpl:0"] } } } as any;
-      connector.switchChain(session, "xrpl:99");
-      expect(connector.getNetworkEndpoint()).toBe(
-        "wss://s.devnet.rippletest.net",
+      await expect(connector.switchChain(session, "xrpl:99")).rejects.toThrow(
+        "Unsupported XRPL CAIP-2 chain",
       );
     });
   });
@@ -349,14 +297,17 @@ describe("XRPLConnector", () => {
       const connector = new XRPLConnector();
       (connector as any).activeSession = {
         wallet: {
-          address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
+          address: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
           publicKey: "PUBKEY123",
         },
       };
-      const tx = connector.createPaymentTx("rReceiver", "1000000");
+      const tx = connector.createPaymentTx(
+        "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW",
+        "1000000",
+      );
       expect(tx.TransactionType).toBe("Payment");
-      expect(tx.Account).toBe("rG1Euv9U7M9dV5B7z9wJkZqAB");
-      expect(tx.Destination).toBe("rReceiver");
+      expect(tx.Account).toBe("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh");
+      expect(tx.Destination).toBe("rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW");
       expect(tx.Amount).toBe("1000000");
     });
 
@@ -364,11 +315,15 @@ describe("XRPLConnector", () => {
       const connector = new XRPLConnector();
       (connector as any).activeSession = {
         wallet: {
-          address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
+          address: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
           publicKey: "PUBKEY123",
         },
       };
-      const tx = connector.createPaymentTx("rReceiver", "1000000", 12345);
+      const tx = connector.createPaymentTx(
+        "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW",
+        "1000000",
+        12345,
+      );
       expect(tx.DestinationTag).toBe(12345);
     });
   });
@@ -385,16 +340,20 @@ describe("XRPLConnector", () => {
       const connector = new XRPLConnector();
       (connector as any).activeSession = {
         wallet: {
-          address: "rG1Euv9U7M9dV5B7z9wJkZqAB",
+          address: "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
           publicKey: "PUBKEY123",
         },
       };
-      const tx = connector.createTrustlineTx("USD", "rIssuer", "100");
+      const tx = connector.createTrustlineTx(
+        "USD",
+        "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW",
+        "100",
+      );
       expect(tx.TransactionType).toBe("TrustSet");
-      expect(tx.Account).toBe("rG1Euv9U7M9dV5B7z9wJkZqAB");
+      expect(tx.Account).toBe("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh");
       expect((tx as any).LimitAmount).toEqual({
         currency: "USD",
-        issuer: "rIssuer",
+        issuer: "rsA2LpzuawewSBQXkiju3YQTMzW13pAAdW",
         value: "100",
       });
     });
@@ -405,11 +364,11 @@ describe("XRPLConnector", () => {
       const connector = new XRPLConnector();
       const session = {
         namespaces: {
-          xrpl: { accounts: ["xrpl:rG1Euv9U7M9dV5B7z9wJkZqAB"] },
+          xrpl: { accounts: ["xrpl:0:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"] },
         },
       } as any;
       const accounts = await connector.getAccounts(session);
-      expect(accounts).toEqual(["xrpl:rG1Euv9U7M9dV5B7z9wJkZqAB"]);
+      expect(accounts).toEqual(["xrpl:0:rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh"]);
     });
 
     it("should return empty when no xrpl namespace", async () => {
@@ -469,14 +428,14 @@ describe("parseXRPAmount", () => {
 describe("isValidXRPAddress", () => {
   it("should validate XRP family addresses", () => {
     expect(
-      isValidXRPAddress("X7zsFUS8sFua6fp4VJSK5tVfcJ7tC2F7vCgTZuKJ7x9B4"),
+      isValidXRPAddress("X7d3eHCXzwBeWrZec1yT24iZerQjYLeTFXz1GU9RBnWr7gZ"),
     ).toBe(true);
     expect(
-      isValidXRPAddress("X00000000000000000000000000000000000000000"),
+      isValidXRPAddress("T7YChPFWifjCAXLEtg5N74c7fSAYsvPKxzQAET8tbZ8q3SC"),
     ).toBe(true);
     expect(
       isValidXRPAddress("XABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop"),
-    ).toBe(true);
+    ).toBe(false);
     expect(isValidXRPAddress("rXz123")).toBe(false);
     expect(isValidXRPAddress("")).toBe(false);
   });
@@ -488,9 +447,15 @@ describe("isValidXRPAddress", () => {
 
 describe("isValidXRPClassicAddress", () => {
   it("should validate classic XRP addresses", () => {
-    expect(isValidXRPClassicAddress("rG1Euv9U7M9dV5B7z9wJkZqAB")).toBe(true);
-    expect(isValidXRPClassicAddress("rHb9CJAWyB4rj91VRWn96Dk4GqGn")).toBe(true);
-    expect(isValidXRPClassicAddress("rG1Euv9U7M9dV5B7z9wJkZqABCDE")).toBe(true);
+    expect(isValidXRPClassicAddress("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh")).toBe(
+      true,
+    );
+    expect(isValidXRPClassicAddress("rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh")).toBe(
+      true,
+    );
+    expect(
+      isValidXRPClassicAddress("rPEPPER7kfTD9w2To4CQk6UCfuHM9c6GDY-495"),
+    ).toBe(true);
     expect(
       isValidXRPClassicAddress("X7zsFUS8sFua6fp4VJSK5tVfcJ7tC2F7vCgTZuKJ7x9B4"),
     ).toBe(false);

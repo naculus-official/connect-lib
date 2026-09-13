@@ -85,7 +85,14 @@ export function isSafeTransactionRequest(
   const r = obj as Record<string, unknown>;
   return (
     typeof r.to === "string" &&
+    /^0x[0-9a-fA-F]{40}$/.test(r.to) &&
     typeof r.value === "string" &&
-    typeof r.data === "string"
+    /^(?:0|[1-9][0-9]*|0x(?:0|[1-9a-fA-F][0-9a-fA-F]*))$/.test(r.value) &&
+    typeof r.data === "string" &&
+    /^0x[0-9a-fA-F]*$/.test(r.data) &&
+    r.data.length % 2 === 0 &&
+    (r.operation === undefined || r.operation === 0 || r.operation === 1) &&
+    (r.safeTxGas === undefined ||
+      (Number.isSafeInteger(r.safeTxGas) && (r.safeTxGas as number) >= 0))
   );
 }

@@ -70,13 +70,14 @@ describe("NaculusAppKitAdapter", () => {
     expect(accounts).toEqual([]);
   });
 
-  it("should get default chainId when not connected", async () => {
+  it("should fail closed when not connected", async () => {
     const adapter = new NaculusAppKitAdapter({
       projectId: TEST_PROJECT_ID,
       metadata: TEST_METADATA,
     });
-    const chainId = await adapter.getChainId();
-    expect(chainId).toBe(1);
+    await expect(adapter.getChainId()).rejects.toMatchObject({
+      code: "session_expired",
+    });
   });
 
   it("should return provider", () => {

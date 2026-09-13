@@ -1,6 +1,7 @@
 import type {
   BatchCall,
   ConnectorSupport,
+  SendCallsOptions,
   UniversalConnector,
   UniversalWalletSession,
   WalletCapabilities,
@@ -13,6 +14,7 @@ import {
   getPermissions,
   hasPermission,
   hexEncode,
+  normalizeEip5792Capabilities,
   requestPermissions,
   WalletError,
 } from "@naculus/connect-core";
@@ -46,6 +48,260 @@ interface StoredEventHandler {
   chainHandler: (...args: unknown[]) => void;
 }
 
+/** Normalize EIP-1193 chainChanged values to the CAIP-2 form used by sessions. */
+function normalizeEip155ChainId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+
+  try {
+    if (value.startsWith("eip155:")) {
+      const reference = value.slice("eip155:".length);
+      if (!/^\d+$/.test(reference)) return undefined;
+      const numeric = BigInt(reference);
+      return numeric > 0n ? `eip155:${numeric.toString(10)}` : undefined;
+    }
+    if (/^0x[0-9a-f]+$/i.test(value) || /^\d+$/.test(value)) {
+      const numeric = BigInt(value);
+      return numeric > 0n ? `eip155:${numeric.toString(10)}` : undefined;
+    }
+  } catch {
+    // An invalid wallet event must not corrupt the persisted session.
+  }
+
+  return undefined;
+}
+
+function rawEvmAddress(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  let address = value;
+  if (value.includes(":")) {
+    const parts = value.split(":");
+    if (
+      parts.length !== 3 ||
+      parts[0] !== "eip155" ||
+      !/^[1-9][0-9]*$/.test(parts[1] ?? "")
+    ) {
+      return undefined;
+    }
+    address = parts[2];
+  }
+  return address && /^0x[0-9a-fA-F]{40}$/.test(address) ? address : undefined;
+}
+
+function requireEvmAddress(value: unknown, field: string): string {
+  const address = rawEvmAddress(value);
+  if (!address) {
+    throw new WalletError(
+      "invalid_input",
+      `${field} must be a 20-byte EVM address.`,
+    );
+  }
+  return address;
+}
+
+/** Select the account explicitly approved for a requested EIP-155 chain. */
+function accountForChain(
+  accounts: string[],
+  chainId: string,
+): string | undefined {
+  const reference = chainId.startsWith("eip155:")
+    ? chainId.slice("eip155:".length)
+    : undefined;
+  const candidate = accounts.find((account) => {
+    if (typeof account !== "string") return false;
+    if (!account.includes(":")) return reference !== undefined;
+    const parts = account.split(":");
+    return (
+      parts.length === 3 && parts[0] === "eip155" && parts[1] === reference
+    );
+  });
+  return candidate ? requireEvmAddress(candidate, "account") : undefined;
+}
+
+const EVM_QUANTITY_FIELDS = [
+  "chainId",
+  "gas",
+  "gasLimit",
+  "gasPrice",
+  "maxFeePerGas",
+  "maxPriorityFeePerGas",
+  "nonce",
+  "value",
+] as const;
+
+function normalizeEvmTransaction(
+  transaction: Record<string, unknown>,
+  fallbackFrom: string,
+  expectedChainId?: string,
+): Record<string, unknown> {
+  if (
+    (transaction.to === undefined || transaction.to === null) &&
+    transaction.data === undefined
+  ) {
+    throw new WalletError(
+      "invalid_input",
+      "Transaction must include a 20-byte 'to' address or contract-creation data.",
+    );
+  }
+  const normalized = { ...transaction };
+  normalized.from =
+    transaction.from === undefined
+      ? requireEvmAddress(fallbackFrom, "from")
+      : requireEvmAddress(transaction.from, "from");
+  if (transaction.to !== undefined) {
+    if (transaction.to === null) delete normalized.to;
+    else normalized.to = requireEvmAddress(transaction.to, "to");
+  }
+  if (transaction.data !== undefined) {
+    if (
+      typeof transaction.data !== "string" ||
+      !/^0x(?:[0-9a-fA-F]{2})*$/.test(transaction.data)
+    ) {
+      throw new WalletError(
+        "invalid_input",
+        "data must be even-length hexadecimal.",
+      );
+    }
+  }
+
+  for (const field of EVM_QUANTITY_FIELDS) {
+    const value = normalized[field];
+    if (typeof value === "number" || typeof value === "bigint") {
+      if (
+        (typeof value === "number" &&
+          (!Number.isSafeInteger(value) || value < 0)) ||
+        (typeof value === "bigint" && value < 0n)
+      ) {
+        throw new WalletError(
+          "invalid_input",
+          `${field} must be a non-negative safe EIP-1474 quantity.`,
+        );
+      }
+      normalized[field] = `0x${BigInt(value).toString(16)}`;
+    } else if (typeof value === "string") {
+      try {
+        // Canonicalize both decimal input and EIP-1474 hex quantities. This
+        // also rejects malformed values such as `0xzz` instead of forwarding
+        // them to an injected provider.
+        normalized[field] = toHexValue(value);
+      } catch (error) {
+        throw new WalletError(
+          "invalid_input",
+          `${field} must be a canonical EIP-1474 quantity.`,
+          error,
+        );
+      }
+    }
+  }
+
+  if (expectedChainId && normalized.chainId !== undefined) {
+    const expected = toEip155HexChainId(expectedChainId);
+    if (normalized.chainId !== expected) {
+      throw new WalletError(
+        "chain_mismatch",
+        "Transaction chainId does not match the active injected-wallet chain.",
+      );
+    }
+  }
+
+  return normalized;
+}
+
+function toEip155HexChainId(chainId: string | undefined): string {
+  const reference = chainId?.startsWith("eip155:")
+    ? chainId.slice("eip155:".length)
+    : chainId;
+  if (!reference || !/^[1-9][0-9]*$/.test(reference)) {
+    throw new WalletError("invalid_input", `Invalid EVM chain ID: ${chainId}`);
+  }
+  return `0x${BigInt(reference).toString(16)}`;
+}
+
+function normalizeBatchCall(call: BatchCall): Record<string, unknown> {
+  if (call.to === undefined && call.data === undefined) {
+    throw new WalletError(
+      "invalid_input",
+      "Call must include a 20-byte 'to' address or contract-creation data.",
+    );
+  }
+  const normalized: Record<string, unknown> = {};
+  if (call.to !== undefined)
+    normalized.to = requireEvmAddress(call.to, "call.to");
+  if (call.value !== undefined) {
+    try {
+      normalized.value = toHexValue(call.value);
+    } catch (error) {
+      throw new WalletError(
+        "invalid_input",
+        "call.value must be an EIP-1474 quantity.",
+        error,
+      );
+    }
+  }
+  if (call.data !== undefined) {
+    if (
+      typeof call.data !== "string" ||
+      !/^0x(?:[0-9a-fA-F]{2})*$/.test(call.data)
+    ) {
+      throw new WalletError(
+        "invalid_input",
+        "call.data must be an even-length hexadecimal byte string.",
+      );
+    }
+    normalized.data = call.data;
+  }
+  return normalized;
+}
+
+function assertSessionTransactionFrom(
+  transaction: Record<string, unknown>,
+  accounts: string[],
+): void {
+  if (transaction.from === undefined) return;
+  const requested = rawEvmAddress(transaction.from);
+  const allowed = requested
+    ? accounts.some(
+        (account) =>
+          rawEvmAddress(account)?.toLowerCase() === requested.toLowerCase(),
+      )
+    : false;
+  if (!allowed) {
+    throw new WalletError(
+      "invalid_input",
+      "Transaction 'from' must be one of the connected EVM accounts.",
+    );
+  }
+}
+
+function extractCallBundleId(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (
+    result &&
+    typeof result === "object" &&
+    typeof (result as { id?: unknown }).id === "string"
+  ) {
+    return (result as { id: string }).id;
+  }
+  throw new WalletError(
+    "rpc_error",
+    "wallet_sendCalls returned no bundle identifier.",
+    result,
+  );
+}
+
+function isUnsupportedSendCallsError(error: unknown): boolean {
+  const code = (error as { code?: number } | undefined)?.code;
+  if (code === -32601 || code === -32004) return true;
+  const message =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(error).toLowerCase();
+  return (
+    message.includes("not supported") ||
+    message.includes("unsupported") ||
+    message.includes("method not found")
+  );
+}
+
 const SUPPORT: ConnectorSupport = {
   desktop: true,
   mobile: true,
@@ -66,6 +322,10 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   private announceHandler: ((...args: unknown[]) => void) | null = null;
   private activeSessions: Map<string, EIP6963Session> = new Map();
   private storedEventHandlers: Map<string, StoredEventHandler> = new Map();
+  private readonly accountsSubscribers = new Set<
+    (accounts: string[]) => void
+  >();
+  private readonly chainSubscribers = new Set<(chainId: string) => void>();
 
   startDiscovery(): void {
     if (typeof window === "undefined") return;
@@ -129,15 +389,17 @@ class EIP6963ConnectorImpl implements UniversalConnector {
           wallet = afterWait[0];
         } else if (
           typeof window !== "undefined" &&
-          (window as unknown as { ethereum?: { isMetaMask?: boolean } }).ethereum
+          (window as unknown as { ethereum?: { isMetaMask?: boolean } })
+            .ethereum
         ) {
           wallet = {
             id: "window-ethereum",
             name: "Browser Wallet",
             icon: "",
             rdns: "io.metamask",
-            provider: (window as unknown as { ethereum: Record<string, unknown> })
-              .ethereum as unknown as Eip6963EthereumProvider,
+            provider: (
+              window as unknown as { ethereum: Record<string, unknown> }
+            ).ethereum as unknown as Eip6963EthereumProvider,
           };
         } else {
           throw new WalletError(
@@ -145,8 +407,9 @@ class EIP6963ConnectorImpl implements UniversalConnector {
             "No wallet available. Install MetaMask or another EIP-6963 wallet.",
           );
         }
+      } else {
+        wallet = wallets[0];
       }
-      wallet = wallets[0];
     } else if (typeof input === "string") {
       wallet = this.getWalletByRDNS(input);
       if (!wallet) {
@@ -182,7 +445,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       if (accounts.length === 0) {
         accounts = (await wallet.provider.request({
           method: "eth_requestAccounts",
-          params: chainId ? [{ chainId }] : [],
+          params: [],
         })) as string[];
       }
     } else {
@@ -190,21 +453,65 @@ class EIP6963ConnectorImpl implements UniversalConnector {
         await requestPermissions(wallet.provider);
         accounts = (await wallet.provider.request({
           method: "eth_requestAccounts",
-          params: chainId ? [{ chainId }] : [],
+          params: [],
         })) as string[];
       } catch {
         accounts = (await wallet.provider.request({
           method: "eth_requestAccounts",
-          params: chainId ? [{ chainId }] : [],
+          params: [],
         })) as string[];
       }
     }
 
-    const eip155Accounts = accounts.map((acc) => `eip155:${acc}`);
-    const strippedChainId = chainId?.startsWith("eip155:")
-      ? chainId.split(":")[1]
-      : chainId;
-    const chains = strippedChainId ? [`eip155:${strippedChainId}`] : ["eip155:1"];
+    if (
+      !Array.isArray(accounts) ||
+      accounts.length === 0 ||
+      accounts.some((account) => !rawEvmAddress(account))
+    ) {
+      throw new WalletError(
+        "rpc_error",
+        "Wallet returned an invalid EIP-155 account list.",
+      );
+    }
+
+    const requestedChain = chainId
+      ? normalizeEip155ChainId(chainId)
+      : undefined;
+    if (chainId && !requestedChain) {
+      throw new WalletError(
+        "invalid_input",
+        `Invalid EVM chain ID: ${chainId}`,
+      );
+    }
+    let providerChain: string | undefined;
+    try {
+      const rawProviderChain = await wallet.provider.request({
+        method: "eth_chainId",
+        params: [],
+      });
+      providerChain = normalizeEip155ChainId(rawProviderChain);
+    } catch {
+      // The provider chain is authoritative. A missing response is handled
+      // below as an unavailable/invalid chain, never as mainnet.
+    }
+    if (requestedChain && providerChain && requestedChain !== providerChain) {
+      throw new WalletError(
+        "chain_unsupported",
+        `Requested ${requestedChain}, but the wallet is currently on ${providerChain}.`,
+      );
+    }
+    const activeChain = providerChain;
+    if (!activeChain) {
+      throw new WalletError(
+        "chain_unsupported",
+        "Wallet did not return a valid EIP-155 chain ID.",
+      );
+    }
+    const chainReference = activeChain.slice("eip155:".length);
+    const chains = [activeChain];
+    const eip155Accounts = accounts.map(
+      (acc) => `eip155:${chainReference}:${rawEvmAddress(acc)!}`,
+    );
     const methods = [
       "eth_requestAccounts",
       "eth_sendTransaction",
@@ -275,13 +582,29 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
+    const rawChain = await wallet.provider.request({
+      method: "eth_chainId",
+      params: [],
+    });
+    const liveChain = normalizeEip155ChainId(rawChain);
+    if (!liveChain) {
+      throw new WalletError(
+        "chain_unsupported",
+        "Wallet did not return a valid EIP-155 chain ID.",
+      );
+    }
+
     // Remove old event listeners if any, then setup fresh ones
     this.removeEventListeners(wallet);
 
     // Update session accounts from live provider
-    const eip155Accounts = accounts.map((acc: string) => `eip155:${acc}`);
     const ns = session.namespaces.eip155;
+    const chainReference = liveChain.slice("eip155:".length);
+    const eip155Accounts = accounts.map(
+      (acc: string) => `eip155:${chainReference}:${acc}`,
+    );
     if (ns) {
+      ns.chains = [liveChain];
       ns.accounts = eip155Accounts;
     }
 
@@ -290,7 +613,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     const eip6963Session: EIP6963Session = {
       wallet,
       accounts: eip155Accounts,
-      chains: ns?.chains ?? [],
+      chains: [liveChain],
       methods: ns?.methods ?? [],
       events: ns?.events ?? [],
     };
@@ -304,17 +627,57 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
   ): void {
     const accountsHandler = (...args: unknown[]) => {
-      const accounts = args[0] as string[];
+      const accounts = Array.isArray(args[0])
+        ? (args[0] as unknown[]).filter((account): account is string =>
+            Boolean(rawEvmAddress(account)),
+          )
+        : [];
       if (accounts.length === 0) {
         this.handleDisconnect(session);
+        // An empty list is the disconnect signal in the shared contract.
+        this.notifyAccountsChanged([]);
+        return;
       }
+
+      // EIP-1193 account changes are part of the active session contract. Keep
+      // both the public session and the connector's routing index in sync so
+      // subsequent signing/transaction calls target the wallet's new account.
+      const chainReference =
+        session.namespaces.eip155?.chains?.[0]?.split(":")[1];
+      if (!chainReference || !/^[1-9][0-9]*$/.test(chainReference)) {
+        return;
+      }
+      const caip10Accounts = accounts.map(
+        (account) => `eip155:${chainReference}:${account}`,
+      );
+      const namespace = session.namespaces.eip155;
+      if (namespace) namespace.accounts = caip10Accounts;
+      const active = this.activeSessions.get(wallet.id);
+      if (active) active.accounts = caip10Accounts;
+      if (active && namespace) active.chains = namespace.chains;
+      this.notifyAccountsChanged(caip10Accounts);
     };
 
     const chainHandler = (...args: unknown[]) => {
-      const chainId = args[0] as string;
-      const ns = session.namespaces["eip155"];
+      const chainId = normalizeEip155ChainId(args[0]);
+      if (!chainId) return;
+      const ns = session.namespaces.eip155;
       if (ns) {
         ns.chains = [chainId];
+        const chainReference = chainId.split(":")[1]!;
+        ns.accounts = ns.accounts
+          .map((account) => rawEvmAddress(account))
+          .filter((account): account is string => Boolean(account))
+          .map((account) => `eip155:${chainReference}:${account}`);
+        const active = this.activeSessions.get(wallet.id);
+        if (active) {
+          active.chains = [chainId];
+          active.accounts = ns.accounts;
+        }
+        // A chain change re-keys every CAIP-10 account, so subscribers need
+        // telling even though the underlying addresses did not change.
+        this.notifyAccountsChanged(ns.accounts);
+        this.notifyChainChanged(chainId);
       }
     };
 
@@ -326,6 +689,56 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       accountsHandler,
       chainHandler,
     });
+  }
+
+  /**
+   * UniversalConnector.onAccountsChanged.
+   *
+   * This connector already re-keyed the session's CAIP-10 accounts on both
+   * `accountsChanged` and `chainChanged`; it simply had no way to say so, so
+   * appkit reimplemented the same re-keying by reaching through
+   * `getDiscoveredWallets()` into the raw EIP-1193 provider. Subscribers now
+   * read the session the connector has already updated.
+   */
+  onAccountsChanged(
+    _session: UniversalWalletSession,
+    handler: (accounts: string[]) => void,
+  ): () => void {
+    this.accountsSubscribers.add(handler);
+    return () => {
+      this.accountsSubscribers.delete(handler);
+    };
+  }
+
+  /** UniversalConnector.onChainChanged. */
+  onChainChanged(
+    _session: UniversalWalletSession,
+    handler: (chainId: string) => void,
+  ): () => void {
+    this.chainSubscribers.add(handler);
+    return () => {
+      this.chainSubscribers.delete(handler);
+    };
+  }
+
+  private notifyChainChanged(chainId: string): void {
+    for (const subscriber of [...this.chainSubscribers]) {
+      try {
+        subscriber(chainId);
+      } catch {
+        // One bad subscriber must not stop the others from being told.
+      }
+    }
+  }
+
+  private notifyAccountsChanged(accounts: string[]): void {
+    for (const subscriber of [...this.accountsSubscribers]) {
+      try {
+        subscriber(accounts);
+      } catch {
+        // One bad subscriber must not stop the others from being told.
+      }
+    }
   }
 
   private setupPermissionsListener(wallet: DiscoveredWallet): void {
@@ -378,7 +791,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       this.activeSessions.delete(eip6963Session.wallet.id);
     }
 
-    if (session.id && session.id.startsWith("eip6963-")) {
+    if (session.id?.startsWith("eip6963-")) {
       const walletId = session.id.replace("eip6963-", "");
       this.activeSessions.delete(walletId);
       this.storedEventHandlers.delete(walletId);
@@ -415,16 +828,15 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     const accounts = session.namespaces.eip155?.accounts ?? [];
 
-    // Strip CAIP-10 prefix if present, fall back to session's first account
-    const targetAccount = rawAddress?.includes(":")
-      ? rawAddress.split(":").pop()!
-      : (rawAddress ?? accounts[0]?.split(":").pop());
-    if (!targetAccount) {
+    const requestedAccount = rawAddress ?? accounts[0];
+    if (!requestedAccount) {
       throw new WalletError(
-        "session_expired",
-        CONNECTOR_ERROR_MESSAGES.NO_ACCOUNT_SIGNING,
+        "invalid_input",
+        "Signing account must be a 20-byte EVM address.",
       );
     }
+    assertSessionTransactionFrom({ from: requestedAccount }, accounts);
+    const targetAccount = requireEvmAddress(requestedAccount, "address");
 
     const eip6963Session = this.findActiveSession(accounts);
 
@@ -456,16 +868,38 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     const inputObj = input as Record<string, unknown>;
     const transaction = inputObj.transaction as
-      | { serialized?: number[] }
+      | Record<string, unknown>
       | undefined;
-    if (!transaction?.serialized || !Array.isArray(transaction.serialized))
+    if (!transaction || typeof transaction !== "object")
       throw new WalletError(
         "method_not_allowed",
         CONNECTOR_ERROR_MESSAGES.INVALID_INPUT,
       );
+    if (Object.keys(transaction).length === 0) {
+      throw new WalletError(
+        "method_not_allowed",
+        "Transaction object must contain at least one field.",
+      );
+    }
+    if (Array.isArray(transaction.serialized)) {
+      throw new WalletError(
+        "method_unsupported",
+        "Injected wallets cannot safely decode serialized transactions. Pass a transaction object to signTransaction.",
+      );
+    }
+    if (transaction.to === undefined && transaction.data === undefined) {
+      throw new WalletError(
+        "invalid_input",
+        "Transaction must include a 20-byte 'to' address or contract-creation data.",
+      );
+    }
     const accounts = session.namespaces.eip155?.accounts ?? [];
+    assertSessionTransactionFrom(transaction, accounts);
 
-    const fromAccount = accounts[0]?.split(":").pop();
+    const fromAccount = accountForChain(
+      accounts,
+      session.namespaces.eip155?.chains?.[0] ?? "",
+    );
     if (!fromAccount) {
       throw new WalletError(
         "session_expired",
@@ -482,18 +916,14 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const txData = new Uint8Array(transaction.serialized).reduce(
-      (str, byte) => str + byte.toString(16).padStart(2, "0"),
-      "",
-    );
-
     const result = await eip6963Session.wallet.provider.request({
-      method: "eth_sendTransaction",
+      method: "eth_signTransaction",
       params: [
-        {
-          from: fromAccount,
-          data: `0x${txData}`,
-        },
+        normalizeEvmTransaction(
+          transaction,
+          fromAccount,
+          session.namespaces.eip155?.chains?.[0],
+        ),
       ],
     });
 
@@ -516,12 +946,22 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       transactionRaw && typeof transactionRaw === "object"
         ? (transactionRaw as Record<string, unknown>)
         : {};
+    if (transaction.to === undefined && transaction.data === undefined) {
+      throw new WalletError(
+        "invalid_input",
+        "Transaction must include a 20-byte 'to' address or contract-creation data.",
+      );
+    }
     const accounts = session.namespaces.eip155?.accounts ?? [];
+    assertSessionTransactionFrom(transaction, accounts);
 
     const fromAccount =
       typeof transaction.from === "string"
-        ? transaction.from
-        : accounts[0]?.split(":").pop();
+        ? requireEvmAddress(transaction.from, "from")
+        : accountForChain(
+            accounts,
+            session.namespaces.eip155?.chains?.[0] ?? "",
+          );
     if (!fromAccount) {
       throw new WalletError(
         "session_expired",
@@ -541,16 +981,11 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     const result = await eip6963Session.wallet.provider.request({
       method: "eth_sendTransaction",
       params: [
-        {
-          from: fromAccount,
-          to: typeof transaction.to === "string" ? transaction.to : undefined,
-          value:
-            typeof transaction.value === "string"
-              ? toHexValue(transaction.value)
-              : undefined,
-          data:
-            typeof transaction.data === "string" ? transaction.data : undefined,
-        },
+        normalizeEvmTransaction(
+          transaction,
+          fromAccount,
+          session.namespaces.eip155?.chains?.[0],
+        ),
       ],
     });
 
@@ -561,6 +996,13 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
     chainId: string,
   ): Promise<void> {
+    const normalizedChainId = normalizeEip155ChainId(chainId);
+    if (!normalizedChainId) {
+      throw new WalletError(
+        "invalid_input",
+        `Invalid EVM chain ID: ${chainId}`,
+      );
+    }
     const accounts = session.namespaces.eip155?.accounts ?? [];
     if (accounts.length === 0) {
       throw new WalletError(
@@ -580,9 +1022,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
 
     // Convert CAIP-10 chainId (e.g. "eip155:137") to hex format (e.g. "0x89")
     // as required by wallet_switchEthereumChain
-    const hexChainId = chainId.startsWith("eip155:")
-      ? `0x${parseInt(chainId.split(":")[1], 10).toString(16)}`
-      : chainId;
+    const hexChainId = `0x${BigInt(normalizedChainId.slice("eip155:".length)).toString(16)}`;
 
     try {
       await eip6963Session.wallet.provider.request({
@@ -617,24 +1057,58 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       }
     }
 
+    // Every reader in this connector treats `chains[0]` as the active chain —
+    // including `normalizeEvmTransaction`, whose chain_mismatch guard compares
+    // a caller-supplied chainId against it. Appending, and skipping the update
+    // entirely when the chain was already listed, left `chains[0]` pinned to
+    // whatever `connect()` returned first: switching to a chain already in the
+    // session moved the wallet but not the session, so a correctly-stamped
+    // transaction on the new chain was rejected as a mismatch. Promote instead.
     const currentChains = session.namespaces.eip155?.chains ?? [];
-    if (!currentChains.includes(chainId)) {
-      const newChains = [
-        ...currentChains.filter((c) => c.startsWith("eip155:")),
-        chainId,
-      ];
-      session.namespaces.eip155!.chains = newChains;
+    const newChains = [
+      normalizedChainId,
+      ...currentChains.filter(
+        (c) => c.startsWith("eip155:") && c !== normalizedChainId,
+      ),
+    ];
+
+    // Accounts are CAIP-10 values qualified with the active chain's reference
+    // (see the accountsChanged handler, which rebuilds them the same way), and
+    // accountForChain() matches on that reference. Promoting the chain without
+    // re-qualifying the accounts would leave the two out of step and make
+    // every from-less transaction fail with "no account for signing".
+    const reference = normalizedChainId.slice("eip155:".length);
+    const requalified = accounts
+      .map((account) => rawEvmAddress(account))
+      .filter((address): address is string => address !== undefined)
+      .map((address) => `eip155:${reference}:${address}`);
+
+    const namespace = session.namespaces.eip155;
+    if (namespace) {
+      namespace.chains = newChains;
+      if (requalified.length > 0) namespace.accounts = requalified;
     }
+    eip6963Session.chains = newChains;
+    if (requalified.length > 0) eip6963Session.accounts = requalified;
   }
 
   async sendCalls(
     session: UniversalWalletSession,
     calls: BatchCall[],
     chainId?: string,
+    options?: SendCallsOptions,
   ): Promise<string> {
-    if (calls == null) throw new WalletError("invalid_input", "Invalid input");
+    if (!Array.isArray(calls)) {
+      throw new WalletError("invalid_input", "Invalid input");
+    }
+    if (calls.length === 0) {
+      throw new WalletError("invalid_input", "At least one call is required.");
+    }
     const accounts = session.namespaces.eip155?.accounts ?? [];
-    const fromAccount = accounts[0]?.split(":").pop();
+    const fromAccount = accountForChain(
+      accounts,
+      session.namespaces.eip155?.chains?.[0] ?? "",
+    );
     if (!fromAccount) {
       throw new WalletError(
         "session_expired",
@@ -651,26 +1125,53 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
+    const activeChain = session.namespaces.eip155?.chains?.[0];
+    const requestedChain = chainId ?? activeChain;
+    if (!activeChain || !requestedChain) {
+      throw new WalletError(
+        "session_expired",
+        "Session does not contain a valid EIP-155 chain ID.",
+      );
+    }
+    const normalizedRequested = normalizeEip155ChainId(requestedChain);
+    if (!normalizedRequested || normalizedRequested !== activeChain) {
+      throw new WalletError(
+        "chain_mismatch",
+        "wallet_sendCalls chainId must match the active injected-wallet chain.",
+      );
+    }
+
     try {
-      const chainIdParam = chainId
-        ? { chainId: `0x${parseInt(chainId.split(":")[1], 10).toString(16)}` }
-        : {};
       const result = await eip6963Session.wallet.provider.request({
         method: "wallet_sendCalls",
         params: [
           {
+            version: "2.0.0",
             from: fromAccount,
-            calls: calls.map((c) => ({
-              to: c.to,
-              value: c.value,
-              data: c.data,
-            })),
-            ...chainIdParam,
+            chainId: toEip155HexChainId(normalizedRequested),
+            atomicRequired: options?.atomicRequired === true,
+            calls: calls.map(normalizeBatchCall),
+            ...(options?.paymasterService
+              ? {
+                  capabilities: {
+                    paymasterService: {
+                      url: options.paymasterService.url,
+                      context: options.paymasterService.context ?? {},
+                    },
+                  },
+                }
+              : {}),
           },
         ],
       });
-      return result as string;
-    } catch {
+      return extractCallBundleId(result);
+    } catch (error) {
+      // EIP-5792 fallback is safe only when wallet_sendCalls is unavailable.
+      // Never turn a user rejection or wallet error into real transactions.
+      if (!isUnsupportedSendCallsError(error)) throw error;
+      // Sending the calls one at a time is exactly the partial execution the
+      // caller ruled out, and it would be indistinguishable from success.
+      if (options?.atomicRequired || options?.paymasterService) throw error;
       const txHashes: string[] = [];
       for (const call of calls) {
         const hash = await eip6963Session.wallet.provider.request({
@@ -678,9 +1179,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
           params: [
             {
               from: fromAccount,
-              to: call.to,
-              value: call.value,
-              data: call.data,
+              ...normalizeBatchCall(call),
             },
           ],
         });
@@ -703,53 +1202,86 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const chains = session.namespaces.eip155?.chains ?? ["eip155:1"];
-    const capabilities: Record<string, WalletCapabilities> = {};
-
-    try {
-      const result = (await eip6963Session.wallet.provider.request({
-        method: "wallet_getCapabilities",
-        params: [],
-      })) as Record<string, Record<string, unknown>>;
-
-      for (const chain of chains) {
-        const caps = result[chain] ?? {};
-        capabilities[chain] = {
-          atomicBatch: caps.atomicBatch
-            ? { supported: true, maxBatchSize: 5 }
-            : { supported: false },
-          paymasterService: caps.paymasterService
-            ? { supported: true }
-            : undefined,
-        };
-      }
-    } catch {
-      for (const chain of chains) {
-        capabilities[chain] = {
-          atomicBatch: { supported: true, maxBatchSize: 5 },
-        };
-      }
+    const chains = session.namespaces.eip155?.chains;
+    if (!chains || chains.length === 0) {
+      throw new WalletError(
+        "session_expired",
+        "Session does not contain a valid EIP-155 chain ID.",
+      );
     }
+    const account = accountForChain(accounts, chains[0] ?? "");
+    const hexChains = chains.map((chain) => toEip155HexChainId(chain));
+    // EIP-5792 accepts the address and queried EIP-155 chain IDs. Empty params
+    // are not portable across injected wallets.
+    const result = await eip6963Session.wallet.provider.request({
+      method: "wallet_getCapabilities",
+      params: [account, hexChains],
+    });
 
-    return capabilities;
+    // Decoding lives in @naculus/connect-core. Inline, this branch read
+    // `Boolean(caps.atomicBatch)` — and `{ supported: false }` is truthy, so a
+    // wallet that had explicitly said it cannot batch atomically was recorded
+    // as able to. It also accepted only `status: "supported"`, dropping the
+    // "ready" state that EIP-5792 2.0.0 also defines as support.
+    //
+    // A failed query is no longer swallowed into `supported: false` either: a
+    // wallet that cannot answer has not answered no, and the caller needs that
+    // difference to decide whether to fall back.
+    return normalizeEip5792Capabilities(result);
+  }
+
+  /**
+   * EIP-5792 `wallet_showCallsStatus`.
+   *
+   * Asks the wallet to show the bundle to the user. Nothing comes back, and a
+   * refusal is cosmetic — the bundle is unaffected — so the error names that
+   * rather than reading like the calls failed.
+   */
+  async showCallsStatus(
+    session: UniversalWalletSession,
+    bundleHash: string,
+  ): Promise<void> {
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    const eip6963Session = this.findActiveSession(accounts);
+    if (!eip6963Session?.wallet.provider?.request) {
+      throw new WalletError(
+        "wallet_unavailable",
+        "No active injected wallet for this session.",
+      );
+    }
+    try {
+      await eip6963Session.wallet.provider.request({
+        method: "wallet_showCallsStatus",
+        params: [bundleHash],
+      });
+    } catch (error) {
+      if (isUnsupportedSendCallsError(error)) {
+        throw new WalletError(
+          "method_unsupported",
+          "This wallet cannot display call status. The bundle is unaffected.",
+          error,
+        );
+      }
+      throw error;
+    }
   }
 
   async getCallsStatus(
     session: UniversalWalletSession,
     bundleHash: string,
   ): Promise<import("@naculus/connect-core").CallsStatus> {
-    try {
-      const accounts = session.namespaces.eip155?.accounts ?? [];
-      const eip6963Session = this.findActiveSession(accounts);
-      if (!eip6963Session?.wallet.provider?.request)
-        throw new Error("no provider");
-      return (await eip6963Session.wallet.provider.request({
-        method: "wallet_getCallsStatus",
-        params: [bundleHash],
-      })) as import("@naculus/connect-core").CallsStatus;
-    } catch {
-      return { status: "PENDING" };
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    const eip6963Session = this.findActiveSession(accounts);
+    if (!eip6963Session?.wallet.provider?.request) {
+      throw new WalletError(
+        "session_expired",
+        CONNECTOR_ERROR_MESSAGES.SESSION_EXPIRED,
+      );
     }
+    return (await eip6963Session.wallet.provider.request({
+      method: "wallet_getCallsStatus",
+      params: [bundleHash],
+    })) as import("@naculus/connect-core").CallsStatus;
   }
 
   async request(request: {
@@ -770,15 +1302,24 @@ class EIP6963ConnectorImpl implements UniversalConnector {
 
   async getBalance(chainId?: string): Promise<string> {
     const activeWalletEntries = Array.from(this.activeSessions.values());
-    const session = chainId
-      ? activeWalletEntries.find((s) =>
-          s.chains.some((c) => c === chainId),
-        ) ?? activeWalletEntries[0]
+    const requestedChain = chainId
+      ? normalizeEip155ChainId(chainId)
+      : undefined;
+    if (chainId && !requestedChain) {
+      throw new WalletError(
+        "invalid_input",
+        `Invalid EVM chain ID: ${chainId}`,
+      );
+    }
+    const session = requestedChain
+      ? activeWalletEntries.find((s) => s.chains.includes(requestedChain))
       : activeWalletEntries[0];
     if (!session)
       throw new WalletError(
-        "session_expired",
-        CONNECTOR_ERROR_MESSAGES.SESSION_EXPIRED,
+        requestedChain ? "chain_unsupported" : "session_expired",
+        requestedChain
+          ? `No active wallet session for ${requestedChain}.`
+          : CONNECTOR_ERROR_MESSAGES.SESSION_EXPIRED,
       );
     const accounts = session.accounts;
     if (accounts.length === 0)
@@ -786,13 +1327,42 @@ class EIP6963ConnectorImpl implements UniversalConnector {
         "method_not_allowed",
         CONNECTOR_ERROR_MESSAGES.NO_ACCOUNTS,
       );
-    const address = accounts[0].split(":").pop()!;
+    const address = accountForChain(
+      accounts,
+      requestedChain ?? session.chains[0] ?? "",
+    );
+    if (!address) {
+      throw new WalletError(
+        "method_not_allowed",
+        CONNECTOR_ERROR_MESSAGES.NO_ACCOUNTS,
+      );
+    }
     const provider = session.wallet.provider;
     const balance = (await provider.request({
       method: "eth_getBalance",
       params: [address, "latest"],
     })) as string;
-    return balance;
+    if (typeof balance !== "string") {
+      throw new WalletError(
+        "rpc_error",
+        "Provider returned no balance result.",
+      );
+    }
+    if (!/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(balance)) {
+      throw new WalletError(
+        "rpc_error",
+        "Provider returned a non-canonical eth_getBalance quantity.",
+      );
+    }
+    try {
+      return toHexValue(balance);
+    } catch (error) {
+      throw new WalletError(
+        "rpc_error",
+        "Provider returned a non-canonical eth_getBalance quantity.",
+        error,
+      );
+    }
   }
 
   onUpdate(callback: (wallets: DiscoveredWallet[]) => void): () => void {

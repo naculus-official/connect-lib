@@ -33,7 +33,8 @@ describe("CoinbaseConnector", () => {
   let connector: InstanceType<typeof CoinbaseConnector>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    mockMakeWeb3Provider.mockReturnValue(mockProvider);
     connector = new CoinbaseConnector({
       appName: "Test DApp",
       appChainIds: [1, 137],
@@ -89,9 +90,7 @@ describe("CoinbaseConnector", () => {
     });
 
     it("should throw user_rejected when no accounts returned", async () => {
-      mockProvider.request
-        .mockResolvedValueOnce([]) // empty accounts
-        .mockResolvedValueOnce("0x1");
+      mockProvider.request.mockResolvedValueOnce([]); // empty accounts
 
       await expect(connector.connect()).rejects.toThrow("No accounts returned");
     });
@@ -209,7 +208,7 @@ describe("CoinbaseConnector", () => {
       await connector.connect();
 
       mockProvider.request.mockResolvedValueOnce([
-        "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef",
+        "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
       ]);
 
       const session = {
@@ -231,12 +230,38 @@ describe("CoinbaseConnector", () => {
       const accounts = await connector.getAccounts(session);
       expect(accounts.length).toBeGreaterThan(0);
     });
+
+    it("should fail closed when the provider returns malformed accounts", async () => {
+      mockProvider.request
+        .mockResolvedValueOnce(["0x1234567890abcdef1234567890abcdef12345678"])
+        .mockResolvedValueOnce("0x1");
+      await connector.connect();
+
+      mockProvider.request.mockResolvedValueOnce(["not-an-address"]);
+
+      await expect(connector.getAccounts({} as any)).rejects.toMatchObject({
+        code: "invalid_input",
+      });
+    });
+
+    it("should not fall back to stale session accounts when the provider fails", async () => {
+      mockProvider.request
+        .mockResolvedValueOnce(["0x1234567890abcdef1234567890abcdef12345678"])
+        .mockResolvedValueOnce("0x1");
+      await connector.connect();
+
+      mockProvider.request.mockRejectedValueOnce(new Error("provider offline"));
+
+      await expect(connector.getAccounts({} as any)).rejects.toMatchObject({
+        code: "wallet_unavailable",
+      });
+    });
   });
 
   describe("signMessage", () => {
     it("should sign with personal_sign for plain messages", async () => {
       mockProvider.request
-        .mockResolvedValueOnce(["0x1234"])
+        .mockResolvedValueOnce(["0x1234000000000000000000000000000000000000"])
         .mockResolvedValueOnce("0x1");
       await connector.connect();
 
@@ -249,7 +274,7 @@ describe("CoinbaseConnector", () => {
         namespaces: {
           eip155: {
             chains: ["eip155:1"],
-            accounts: ["eip155:1:0x1234"],
+            accounts: ["eip155:1:0x1234000000000000000000000000000000000000"],
             methods: [],
             events: [],
           },
@@ -261,13 +286,16 @@ describe("CoinbaseConnector", () => {
 
       const result = await connector.signMessage(session, {
         message: "Hello World",
-        address: "0x1234",
+        address: "0x1234000000000000000000000000000000000000",
       });
 
       expect(result).toBe("0xsignature");
       expect(mockProvider.request).toHaveBeenCalledWith({
         method: "personal_sign",
-        params: ["0x48656c6c6f20576f726c64", "0x1234"],
+        params: [
+          "0x48656c6c6f20576f726c64",
+          "0x1234000000000000000000000000000000000000",
+        ],
       });
     });
 
@@ -279,7 +307,7 @@ describe("CoinbaseConnector", () => {
   describe("sendTransaction", () => {
     it("should send a transaction via eth_sendTransaction", async () => {
       mockProvider.request
-        .mockResolvedValueOnce(["0x1234"])
+        .mockResolvedValueOnce(["0x1234000000000000000000000000000000000000"])
         .mockResolvedValueOnce("0x1");
       await connector.connect();
 
@@ -292,7 +320,7 @@ describe("CoinbaseConnector", () => {
         namespaces: {
           eip155: {
             chains: ["eip155:1"],
-            accounts: ["eip155:1:0x1234"],
+            accounts: ["eip155:1:0x1234000000000000000000000000000000000000"],
             methods: [],
             events: [],
           },
@@ -304,7 +332,7 @@ describe("CoinbaseConnector", () => {
 
       const result = await connector.sendTransaction(session, {
         transaction: {
-          to: "0xabcd",
+          to: "0x000000000000000000000000000000000000abcd",
           value: "0x100",
           data: "0x",
         },
@@ -313,7 +341,14 @@ describe("CoinbaseConnector", () => {
       expect(result).toBe("0xtxhash");
       expect(mockProvider.request).toHaveBeenCalledWith({
         method: "eth_sendTransaction",
-        params: [{ to: "0xabcd", value: "0x100", data: "0x" }],
+        params: [
+          {
+            from: "0x1234000000000000000000000000000000000000",
+            to: "0x000000000000000000000000000000000000abcd",
+            value: "0x100",
+            data: "0x",
+          },
+        ],
       });
     });
   });
@@ -321,7 +356,7 @@ describe("CoinbaseConnector", () => {
   describe("switchChain", () => {
     it("should switch chain via wallet_switchEthereumChain", async () => {
       mockProvider.request
-        .mockResolvedValueOnce(["0x1234"])
+        .mockResolvedValueOnce(["0x1234000000000000000000000000000000000000"])
         .mockResolvedValueOnce("0x1");
       await connector.connect();
 
@@ -375,9 +410,12 @@ describe("CoinbaseConnector", () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await expect(connector.switchChain(session, "solana:0")).rejects.toThrow(
-        "only supports EVM chains",
-      );
+      await expect(
+        connector.switchChain(
+          session,
+          "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        ),
+      ).rejects.toThrow("only supports EVM chains");
     });
   });
 
@@ -390,7 +428,7 @@ describe("CoinbaseConnector", () => {
   describe("request", () => {
     it("should make a raw provider request", async () => {
       mockProvider.request
-        .mockResolvedValueOnce(["0x1234"])
+        .mockResolvedValueOnce(["0x1234000000000000000000000000000000000000"])
         .mockResolvedValueOnce("0x1");
       await connector.connect();
 
@@ -410,7 +448,7 @@ describe("CoinbaseConnector", () => {
 
     it("should return false after connect (default walletlink)", async () => {
       mockProvider.request
-        .mockResolvedValueOnce(["0x1234"])
+        .mockResolvedValueOnce(["0x1234000000000000000000000000000000000000"])
         .mockResolvedValueOnce("0x1");
       await connector.connect();
       expect(connector.isExtensionMode()).toBe(false);
@@ -424,7 +462,7 @@ describe("CoinbaseConnector", () => {
 
     it("should return connection mode after connect", async () => {
       mockProvider.request
-        .mockResolvedValueOnce(["0x1234"])
+        .mockResolvedValueOnce(["0x1234000000000000000000000000000000000000"])
         .mockResolvedValueOnce("0x1");
       await connector.connect();
       expect(connector.getConnectionMode()).toBe("walletlink");

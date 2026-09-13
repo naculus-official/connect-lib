@@ -25,6 +25,7 @@ import {
   createEmptySession,
   detectPlatform,
   extractAccounts,
+  isValidAddress,
   WalletError,
 } from "@naculus/connect-core";
 import type { SafeInfoExtended } from "@safe-global/safe-apps-sdk";
@@ -35,6 +36,7 @@ import type {
   SafeTransactionRequest,
   SafeTransactionResponse,
 } from "./types";
+import { isSafeTransactionRequest } from "./types";
 
 /** Safe Connector is always desktop-only — it runs inside a Safe App iframe */
 const SUPPORT: ConnectorSupport = {
@@ -112,6 +114,16 @@ export class SafeConnector implements UniversalConnector {
 
       const chainId = `eip155:${safeInfo.chainId}`;
       const safeAddress = safeInfo.safeAddress as `0x${string}`;
+      if (
+        !Number.isSafeInteger(safeInfo.chainId) ||
+        safeInfo.chainId <= 0 ||
+        !isValidAddress(safeAddress, "eip155")
+      ) {
+        throw new WalletError(
+          "wallet_unavailable",
+          "Safe returned invalid chain or account data.",
+        );
+      }
 
       const session = createEmptySession({
         id: `safe-${safeAddress}-${Date.now()}`,
@@ -130,7 +142,7 @@ export class SafeConnector implements UniversalConnector {
             ],
             events: ["chainChanged", "accountsChanged"],
             capabilities: {
-              atomicBatch: { supported: true, maxBatchSize: 100 },
+              atomicBatch: { supported: true },
             },
           },
         },
@@ -237,9 +249,12 @@ export class SafeConnector implements UniversalConnector {
       throw new WalletError("wallet_unavailable", "Safe SDK not initialized.");
     }
 
-    const inputObj = input as Record<string, unknown>;
-    const tx = inputObj.transaction as SafeTransactionRequest | undefined;
-    if (!tx) {
+    const inputObj =
+      input && typeof input === "object"
+        ? (input as Record<string, unknown>)
+        : undefined;
+    const tx = inputObj?.transaction as SafeTransactionRequest | undefined;
+    if (!isSafeTransactionRequest(tx)) {
       throw new WalletError(
         "method_not_allowed",
         CONNECTOR_ERROR_MESSAGES.MISSING_TX,
@@ -305,11 +320,23 @@ export class SafeConnector implements UniversalConnector {
     }
 
     try {
+      if (!Array.isArray(calls) || calls.length === 0 || calls.length > 100) {
+        throw new WalletError(
+          "invalid_input",
+          "Safe batch requires 1 to 100 calls.",
+        );
+      }
       const safeTxs = calls.map((call) => ({
         to: call.to,
         value: call.value ?? "0",
         data: call.data ?? "0x",
       }));
+      if (!safeTxs.every((call) => isSafeTransactionRequest(call))) {
+        throw new WalletError(
+          "invalid_input",
+          "Safe batch contains an invalid transaction.",
+        );
+      }
 
       const response = await this.sdk.txs.send({ txs: safeTxs });
       return response.safeTxHash;
@@ -331,17 +358,19 @@ export class SafeConnector implements UniversalConnector {
   }
 
   async getCapabilities(
-    _session: UniversalWalletSession,
+    session: UniversalWalletSession,
   ): Promise<Record<string, WalletCapabilities>> {
     // Safe supports atomic batch natively.
     // The capabilities are static since Safe always supports this.
     const chainId = this.safeInfoInternal
       ? `eip155:${this.safeInfoInternal.chainId}`
-      : "eip155:1";
+      : session.namespaces.eip155?.chains?.[0];
+
+    if (!chainId) return {};
 
     return {
       [chainId]: {
-        atomicBatch: { supported: true, maxBatchSize: 100 },
+        atomicBatch: { supported: true },
       },
     };
   }
@@ -419,6 +448,12 @@ export class SafeConnector implements UniversalConnector {
       throw new WalletError(
         "invalid_input",
         "At least one transaction is required.",
+      );
+    }
+    if (!txs.every((tx) => isSafeTransactionRequest(tx))) {
+      throw new WalletError(
+        "invalid_input",
+        "Safe batch contains an invalid transaction.",
       );
     }
 

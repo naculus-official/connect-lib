@@ -510,7 +510,7 @@ describe("EVM Injected Financial Integration: Input Validation", () => {
     (connector as any).discoveredWallets.set(wallet.id, wallet);
     (connector as any).activeSessions.set(wallet.id, {
       wallet,
-      accounts: ["eip155:0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"],
+      accounts: ["eip155:1:0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"],
       chains: ["eip155:1"],
       methods: [
         "eth_requestAccounts",
@@ -527,7 +527,7 @@ describe("EVM Injected Financial Integration: Input Validation", () => {
       namespaces: {
         eip155: {
           chains: ["eip155:1"],
-          accounts: ["eip155:0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"],
+          accounts: ["eip155:1:0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B"],
           methods: [
             "eth_requestAccounts",
             "eth_sendTransaction",

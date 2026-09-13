@@ -1,6 +1,7 @@
 # @naculus/connect
 
-Convenience umbrella package — install one and get all `@naculus/*` packages.
+Convenience umbrella package — install one package, use the core API directly,
+and access every bundled connector through a collision-free namespace.
 
 ## Install
 
@@ -25,11 +26,31 @@ Equivalent to installing all of:
 ## Usage
 
 ```ts
-import { ConnectorManager } from "@naculus/connect-core";
-import { WalletConnectConnector } from "@naculus/connector-walletconnect";
+import { ConnectorManager, embedded, walletConnect } from "@naculus/connect";
+
+const manager = new ConnectorManager();
+const pocket = embedded.createPocketConnector({
+  chainId: "eip155:11155111",
+  rpcUrl: "https://ethereum-sepolia.publicnode.com",
+});
+const wc = walletConnect.createWalletConnectConnector({
+  projectId: "your-project-id",
+  metadata: {
+    name: "Example",
+    description: "Example dapp",
+    url: "https://example.com",
+    icons: [],
+  },
+});
 ```
 
-Or install only the packages you need.
+The root also exports the complete `@naculus/connect-core` API. Connector
+namespaces are `coinbase`, `embedded`, `evmInjected`, `passkeys`, `safe`,
+`solana`, `walletConnect`, and `xrpl`; `siwx` and `walletEngine` expose the
+authentication and key-engine APIs.
+
+You can still install individual packages when bundle size or dependency
+surface matters more than the single-package convenience.
 
 ## License
 

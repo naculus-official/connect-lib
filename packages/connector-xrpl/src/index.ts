@@ -16,6 +16,11 @@ import {
   detectPlatform,
   WalletError,
 } from "@naculus/connect-core";
+import {
+  isValidClassicAddress,
+  isValidXAddress,
+  xAddressToClassicAddress,
+} from "ripple-address-codec";
 
 export interface XRPLWalletInfo {
   address: string;
@@ -30,6 +35,254 @@ export interface XRPLTransaction {
   Sequence?: number;
   LastLedgerSequence?: number;
   [key: string]: unknown;
+}
+
+const XRPL_CHAIN_IDS = {
+  mainnet: "xrpl:0",
+  testnet: "xrpl:1",
+  devnet: "xrpl:2",
+} as const;
+
+type XRPLNetwork = keyof typeof XRPL_CHAIN_IDS;
+
+function chainIdForNetwork(network: XRPLNetwork): string {
+  return XRPL_CHAIN_IDS[network];
+}
+
+function networkForChainId(chainId: string): XRPLNetwork {
+  if (!/^xrpl:(?:0|1|2)$/.test(chainId)) {
+    throw new WalletError(
+      "method_not_allowed",
+      `Unsupported XRPL CAIP-2 chain: ${chainId}.`,
+    );
+  }
+  return chainId === "xrpl:0"
+    ? "mainnet"
+    : chainId === "xrpl:1"
+      ? "testnet"
+      : "devnet";
+}
+
+function isValidAccountAddress(address: string): boolean {
+  return isValidClassicAddress(address) || isValidXAddress(address);
+}
+
+function xAddressMatchesNetwork(
+  address: string,
+  network: XRPLNetwork,
+): boolean {
+  return (
+    !isValidXAddress(address) ||
+    xAddressToClassicAddress(address).test === (network !== "mainnet")
+  );
+}
+
+function normalizeTransactionAddress(
+  address: string,
+  field: string,
+): {
+  classicAddress: string;
+  destinationTag?: number;
+  isTestNetwork?: boolean;
+} {
+  const parts = address.split("-");
+  if (parts.length > 2) {
+    throw new WalletError("method_not_allowed", `Invalid ${field} address.`);
+  }
+  const [classic, tag] = parts;
+  if (tag !== undefined && !/^\d+$/.test(tag)) {
+    throw new WalletError(
+      "method_not_allowed",
+      `Invalid ${field} destination tag.`,
+    );
+  }
+  if (isValidClassicAddress(classic)) {
+    if (tag !== undefined) {
+      const parsedTag = Number(tag);
+      if (
+        !Number.isSafeInteger(parsedTag) ||
+        parsedTag < 0 ||
+        parsedTag > 0xffffffff
+      ) {
+        throw new WalletError(
+          "method_not_allowed",
+          `Invalid ${field} destination tag.`,
+        );
+      }
+      return { classicAddress: classic, destinationTag: parsedTag };
+    }
+    return { classicAddress: classic };
+  }
+  if (isValidXAddress(address)) {
+    const decoded = xAddressToClassicAddress(address);
+    return {
+      classicAddress: decoded.classicAddress,
+      ...(decoded.tag !== false ? { destinationTag: decoded.tag } : {}),
+      isTestNetwork: decoded.test,
+    };
+  }
+  throw new WalletError("method_not_allowed", `Invalid XRPL ${field} address.`);
+}
+
+/** Build a canonical CAIP-10 account for the active XRPL network. */
+function xrplAccountId(network: XRPLNetwork, address: string): string {
+  const classicAddress = normalizeTransactionAddress(
+    address,
+    "Account",
+  ).classicAddress;
+  return `${chainIdForNetwork(network)}:${classicAddress}`;
+}
+
+function assertDrops(value: unknown, field: string): void {
+  if (
+    typeof value !== "string" ||
+    !/^(?:0|[1-9][0-9]*)$/.test(value) ||
+    BigInt(value) > 100_000_000_000_000_000n
+  ) {
+    throw new WalletError(
+      "method_not_allowed",
+      `Invalid XRPL ${field} drops amount.`,
+    );
+  }
+}
+
+function assertIssuedCurrencyAmount(value: unknown, field: string): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new WalletError(
+      "method_not_allowed",
+      `Invalid XRPL ${field} amount.`,
+    );
+  }
+  const amount = value as Record<string, unknown>;
+  if (
+    typeof amount.currency !== "string" ||
+    !/^(?:[A-Z0-9]{3}|[A-F0-9]{40})$/.test(amount.currency) ||
+    typeof amount.issuer !== "string" ||
+    !isValidClassicAddress(amount.issuer) ||
+    typeof amount.value !== "string" ||
+    !/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(amount.value)
+  ) {
+    throw new WalletError(
+      "method_not_allowed",
+      `Invalid XRPL ${field} amount.`,
+    );
+  }
+}
+
+function assertXrplAmount(value: unknown, field: string): void {
+  if (typeof value === "string") {
+    assertDrops(value, field);
+  } else {
+    assertIssuedCurrencyAmount(value, field);
+  }
+}
+
+function validateTransaction(
+  value: unknown,
+  connectedAddress: string,
+  isTestNetwork: boolean,
+): XRPLTransaction {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new WalletError("method_not_allowed", "Invalid XRPL transaction.");
+  }
+  const transaction = value as Record<string, unknown>;
+  if (
+    typeof transaction.TransactionType !== "string" ||
+    !/^[A-Za-z][A-Za-z0-9]*$/.test(transaction.TransactionType)
+  ) {
+    throw new WalletError(
+      "method_not_allowed",
+      "Invalid XRPL transaction type.",
+    );
+  }
+  if (
+    typeof transaction.Account !== "string" ||
+    !isValidClassicAddress(transaction.Account)
+  ) {
+    throw new WalletError(
+      "method_not_allowed",
+      "XRPL transaction Account must be a valid classic address.",
+    );
+  }
+  if (transaction.Account !== connectedAddress) {
+    throw new WalletError(
+      "method_not_allowed",
+      "XRPL transaction Account does not match the connected wallet.",
+    );
+  }
+  if (transaction.Destination !== undefined) {
+    if (typeof transaction.Destination !== "string") {
+      throw new WalletError(
+        "method_not_allowed",
+        "Invalid XRPL transaction Destination.",
+      );
+    }
+    const destination = normalizeTransactionAddress(
+      transaction.Destination,
+      "Destination",
+    );
+    if (
+      destination.isTestNetwork !== undefined &&
+      destination.isTestNetwork !== isTestNetwork
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        "XRPL destination X-address network does not match the active network.",
+      );
+    }
+    transaction.Destination = destination.classicAddress;
+    if (destination.destinationTag !== undefined) {
+      if (
+        transaction.DestinationTag !== undefined &&
+        transaction.DestinationTag !== destination.destinationTag
+      ) {
+        throw new WalletError(
+          "method_not_allowed",
+          "XRPL DestinationTag conflicts with the X-address tag.",
+        );
+      }
+      if (transaction.DestinationTag === undefined) {
+        transaction.DestinationTag = destination.destinationTag;
+      }
+    }
+  }
+  if (transaction.Fee !== undefined) assertDrops(transaction.Fee, "Fee");
+  if (transaction.DeliverMax !== undefined) {
+    assertXrplAmount(transaction.DeliverMax, "DeliverMax");
+  }
+  for (const field of ["Sequence", "LastLedgerSequence", "DestinationTag"]) {
+    if (
+      transaction[field] !== undefined &&
+      (!Number.isSafeInteger(transaction[field]) ||
+        (transaction[field] as number) < 0)
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        `Invalid XRPL transaction ${field}.`,
+      );
+    }
+  }
+  if (transaction.Amount !== undefined) {
+    assertXrplAmount(transaction.Amount, "Amount");
+  }
+  if (transaction.LimitAmount !== undefined) {
+    const limit = transaction.LimitAmount;
+    if (!limit || typeof limit !== "object" || Array.isArray(limit)) {
+      throw new WalletError("method_not_allowed", "Invalid XRPL LimitAmount.");
+    }
+    const limitObj = limit as Record<string, unknown>;
+    if (
+      typeof limitObj.currency !== "string" ||
+      !/^(?:[A-Z0-9]{3}|[A-F0-9]{40})$/.test(limitObj.currency) ||
+      typeof limitObj.issuer !== "string" ||
+      !isValidClassicAddress(limitObj.issuer) ||
+      typeof limitObj.value !== "string" ||
+      !/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(limitObj.value)
+    ) {
+      throw new WalletError("method_not_allowed", "Invalid XRPL LimitAmount.");
+    }
+  }
+  return transaction as XRPLTransaction;
 }
 
 interface XRPLSession {
@@ -52,7 +305,7 @@ class XRPLConnectorImpl implements UniversalConnector {
   readonly namespaces = ["xrpl"];
   readonly supports = SUPPORT;
 
-  private network: "mainnet" | "testnet" | "devnet";
+  private network: XRPLNetwork;
   private activeSession: XRPLSession = { wallet: null, accounts: [] };
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private pendingResolve: ((value: unknown) => void) | null = null;
@@ -184,7 +437,8 @@ class XRPLConnectorImpl implements UniversalConnector {
         : undefined;
     const inputChain =
       typeof inputObj?.chainId === "string" ? inputObj.chainId : undefined;
-    const chainId = inputChain ?? "xrpl:1";
+    const chainId = inputChain ?? chainIdForNetwork(this.network);
+    this.network = networkForChainId(chainId);
 
     try {
       const responsePromise = this.setupMessageHandler(120000, (data) => {
@@ -195,10 +449,16 @@ class XRPLConnectorImpl implements UniversalConnector {
         const responseType =
           typeof response?.type === "string" ? response.type : undefined;
         const responseWallet = response?.wallet as XRPLWalletInfo | undefined;
-        if (responseType === "XAMAN_CONNECTED" && responseWallet) {
+        if (
+          responseType === "XAMAN_CONNECTED" &&
+          responseWallet &&
+          typeof responseWallet.address === "string" &&
+          isValidAccountAddress(responseWallet.address) &&
+          xAddressMatchesNetwork(responseWallet.address, this.network)
+        ) {
           this.activeSession = {
             wallet: responseWallet,
-            accounts: [`xrpl:${responseWallet.address}`],
+            accounts: [xrplAccountId(this.network, responseWallet.address)],
           };
         }
       });
@@ -223,8 +483,11 @@ class XRPLConnectorImpl implements UniversalConnector {
         namespaces: {
           xrpl: {
             chains: [chainId],
-            accounts: [`xrpl:${wallet.address}`],
-            methods: ["xrpl_sign", "xrpl_submit"],
+            accounts: [xrplAccountId(this.network, wallet.address)],
+            // Xaman currently exposes transaction signing, not a cryptographic
+            // arbitrary-message API. Do not advertise a fake `xrpl_sign`
+            // method; SIWx must use a real message-signing standard.
+            methods: ["xrpl_submit"],
             events: ["xrpl_account_changed"],
           },
         },
@@ -244,6 +507,16 @@ class XRPLConnectorImpl implements UniversalConnector {
     }
   }
 
+  // No onAccountsChanged / onChainChanged.
+  //
+  // Those are optional on UniversalConnector, and their absence here is a
+  // statement about XRPL wallets, not an unfinished item. This connector talks
+  // to Xaman over a deep link plus a one-shot `postMessage` handshake: the
+  // listener resolves a single XAMAN_CONNECTED reply and is then torn down in
+  // cleanup(). There is no persistent channel a wallet could push an account
+  // switch over, so a subscription here could never fire — and one that never
+  // fires is worse than none, because a consumer would take it as a guarantee
+  // that it will be told. Callers reconnect to observe a change instead.
   async disconnect(session: UniversalWalletSession): Promise<void> {
     this.activeSession = { wallet: null, accounts: [] };
     this.cleanup();
@@ -257,54 +530,10 @@ class XRPLConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
     input: unknown,
   ): Promise<unknown> {
-    if (!this.activeSession.wallet) {
-      throw new WalletError(
-        "session_expired",
-        "Session expired. Please reconnect your wallet.",
-      );
-    }
-
-    if (
-      !input ||
-      typeof input !== "object" ||
-      !("message" in input) ||
-      typeof (input as Record<string, unknown>).message !== "string"
-    ) {
-      throw new WalletError("method_not_allowed", "Missing message parameter.");
-    }
-    const message = (input as Record<string, unknown>).message as string;
-    const msgHex = Array.from(new TextEncoder().encode(message))
-      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-      .join("");
-
-    const XRPL_AMOUNT = "1";   // ponytail: minimum XRP drop
-    const XRPL_FEE = "12";     // ponytail: minimum XRP drop fee
-
-    const tx: XRPLTransaction = {
-      TransactionType: "Payment",
-      Account: this.activeSession.wallet.address,
-      Destination: this.activeSession.wallet.address,
-      Amount: XRPL_AMOUNT,
-      Fee: XRPL_FEE,
-      // XLS-0063 (XRPL SignIn) is stalled. This is a workaround using a
-      // self-directed Payment transaction with the message hex-encoded
-      // in the Memo field. The Amount/Fee values are the minimum viable
-      // XRP drops for transaction validity — no actual value is transferred.
-      Memos: [
-        {
-          Memo: {
-            MemoType: "646f6d61696e2d776562332d636f6e6e6563742d7369676e696e",
-            MemoData: msgHex,
-          },
-        },
-      ],
-    };
-
-    const signTxInput =
-      input && typeof input === "object"
-        ? (input as Record<string, unknown>)
-        : {};
-    return this.signTransaction(session, { ...signTxInput, transaction: tx });
+    throw new WalletError(
+      "method_unsupported",
+      "Xaman does not expose cryptographic arbitrary-message signing. Use signTransaction with an explicit XRPL transaction.",
+    );
   }
 
   async signTransaction(
@@ -323,8 +552,26 @@ class XRPLConnectorImpl implements UniversalConnector {
         "method_not_allowed",
         "Missing transaction parameter.",
       );
-    const transaction = (input as Record<string, unknown>)
-      .transaction as XRPLTransaction;
+    const walletAddress = this.activeSession.wallet.address;
+    const normalizedWallet = normalizeTransactionAddress(
+      walletAddress,
+      "Account",
+    );
+    if (
+      normalizedWallet.isTestNetwork !== undefined &&
+      normalizedWallet.isTestNetwork !== (this.network !== "mainnet")
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        "Connected XRPL X-address network does not match the active network.",
+      );
+    }
+    const connectedAddress = normalizedWallet.classicAddress;
+    const transaction = validateTransaction(
+      (input as Record<string, unknown>).transaction,
+      connectedAddress,
+      this.network !== "mainnet",
+    );
     const txjson = JSON.stringify(transaction);
 
     return new Promise((resolve, reject) => {
@@ -347,6 +594,12 @@ class XRPLConnectorImpl implements UniversalConnector {
       // then sign later — so no race. If that ever changes, merge handlers or use an
       // event-bus pattern.
       this.messageHandler = (event: MessageEvent) => {
+        const trustedOrigins = new Set([
+          window.location.origin,
+          "https://xumm.app",
+          "https://xaman.app",
+        ]);
+        if (!trustedOrigins.has(event.origin)) return;
         const data = event.data as { type?: string; txid?: string };
         if (data?.type === "XAMAN_SIGNED" && data?.txid) {
           this.cleanup();
@@ -377,21 +630,18 @@ class XRPLConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
     chainId: string,
   ): Promise<void> {
-    const chainNum = parseInt(chainId.split(":")[1] || "1", 10);
-
-    if (chainNum === 0) {
-      this.network = "mainnet";
-    } else if (chainNum === 1) {
-      this.network = "testnet";
-    } else {
-      this.network = "devnet";
-    }
+    this.network = networkForChainId(chainId);
 
     const chains = session.namespaces.xrpl?.chains ?? [];
     if (!chains.includes(chainId)) {
       session.namespaces.xrpl!.chains = [
-        ...chains.filter((c) => c.startsWith("xrpl:")),
+        ...chains.filter((c) => /^xrpl:(?:0|1|2)$/.test(c)),
         chainId,
+      ];
+    }
+    if (this.activeSession.wallet && session.namespaces.xrpl) {
+      session.namespaces.xrpl.accounts = [
+        xrplAccountId(this.network, this.activeSession.wallet.address),
       ];
     }
   }
@@ -424,15 +674,61 @@ class XRPLConnectorImpl implements UniversalConnector {
       );
     }
 
+    const normalizedAccount = normalizeTransactionAddress(
+      this.activeSession.wallet.address,
+      "Account",
+    );
+    if (
+      normalizedAccount.isTestNetwork !== undefined &&
+      normalizedAccount.isTestNetwork !== (this.network !== "mainnet")
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        "Connected XRPL X-address network does not match the active network.",
+      );
+    }
+    const account = normalizedAccount.classicAddress;
+    const normalizedDestination = normalizeTransactionAddress(
+      destination,
+      "Destination",
+    );
+    if (
+      normalizedDestination.isTestNetwork !== undefined &&
+      normalizedDestination.isTestNetwork !== (this.network !== "mainnet")
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        "XRPL destination X-address network does not match the active network.",
+      );
+    }
+    assertDrops(amount, "Amount");
     const tx: Partial<XRPLTransaction> = {
       TransactionType: "Payment",
-      Account: this.activeSession.wallet.address,
-      Destination: destination,
+      Account: account,
+      Destination: normalizedDestination.classicAddress,
       Amount: amount,
     };
 
-    if (destinationTag !== undefined) {
-      tx.DestinationTag = destinationTag;
+    const resolvedTag = destinationTag ?? normalizedDestination.destinationTag;
+    if (
+      destinationTag !== undefined &&
+      normalizedDestination.destinationTag !== undefined &&
+      destinationTag !== normalizedDestination.destinationTag
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        "DestinationTag conflicts with the X-address tag.",
+      );
+    }
+    if (resolvedTag !== undefined) {
+      if (
+        !Number.isSafeInteger(resolvedTag) ||
+        resolvedTag < 0 ||
+        resolvedTag > 0xffffffff
+      ) {
+        throw new WalletError("method_not_allowed", "Invalid DestinationTag.");
+      }
+      tx.DestinationTag = resolvedTag;
     }
 
     return tx as XRPLTransaction;
@@ -450,9 +746,31 @@ class XRPLConnectorImpl implements UniversalConnector {
       );
     }
 
+    if (
+      !xAddressMatchesNetwork(this.activeSession.wallet.address, this.network)
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        "Connected XRPL X-address network does not match the active network.",
+      );
+    }
+    const account = normalizeTransactionAddress(
+      this.activeSession.wallet.address,
+      "Account",
+    ).classicAddress;
+    if (
+      !/^(?:[A-Z0-9]{3}|[A-F0-9]{40})$/.test(currency) ||
+      !isValidClassicAddress(issuer) ||
+      !/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(limit)
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        "Invalid XRPL trustline fields.",
+      );
+    }
     const tx: Partial<XRPLTransaction> = {
       TransactionType: "TrustSet",
-      Account: this.activeSession.wallet.address,
+      Account: account,
       LimitAmount: {
         currency,
         issuer,
@@ -476,22 +794,37 @@ export function createXRPLConnector(
 }
 
 export function formatXRPAmount(amount: string | number): string {
-  const num = typeof amount === "string" ? parseFloat(amount) : amount;
-  return (num / 1000000).toFixed(6);
+  const drops = typeof amount === "number" ? String(amount) : amount;
+  assertDrops(drops, "amount");
+  const whole = drops.slice(0, -6) || "0";
+  const fraction = drops.slice(-6).padStart(6, "0");
+  return `${whole}.${fraction}`;
 }
 
 export function parseXRPAmount(amount: string): string {
-  const num = parseFloat(amount);
-  return Math.round(num * 1000000).toString();
+  if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/.test(amount)) {
+    throw new WalletError("method_not_allowed", "Invalid XRP amount.");
+  }
+  const [whole, fraction = ""] = amount.split(".");
+  const drops = `${whole}${fraction.padEnd(6, "0")}`.replace(/^0+(?=\d)/, "");
+  assertDrops(drops, "amount");
+  return drops;
 }
 
 export function isValidXRPAddress(address: string): boolean {
-  return /^X[0-9a-zA-Z]{40,50}$/.test(address);
+  return isValidXAddress(address);
 }
 
 export function isValidXRPClassicAddress(address: string): boolean {
-  if (!address.startsWith("r") || address.length < 25 || address.length > 34) {
-    return false;
-  }
-  return /^[r][0-9a-zA-Z]+$/.test(address);
+  const parts = address.split("-");
+  if (parts.length > 2) return false;
+  const [classic, tag] = parts;
+  if (!isValidClassicAddress(classic)) return false;
+  if (tag === undefined) return true;
+  const parsedTag = Number(tag);
+  return (
+    /^\d{1,10}$/.test(tag) &&
+    Number.isSafeInteger(parsedTag) &&
+    parsedTag <= 0xffffffff
+  );
 }

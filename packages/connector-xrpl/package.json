@@ -2,12 +2,14 @@
   "name": "@naculus/connector-xrpl",
   "version": "0.2.0",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "files": [
@@ -21,9 +23,12 @@
   },
   "dependencies": {
     "@naculus/connect-core": "workspace:*",
+    "ripple-address-codec": "^5.0.1",
     "xrpl": "^4.0.0"
   },
   "devDependencies": {
+    "@noble/curves": "^1.9.0",
+    "@noble/hashes": "^1.7.1",
     "@types/node": "^25.9.0",
     "tsup": "^8.3.6",
     "typescript": "^5.9.3",

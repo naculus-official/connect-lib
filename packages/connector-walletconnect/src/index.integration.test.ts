@@ -4,6 +4,7 @@
 import { createEmptySession, WalletError } from "@naculus/connect-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletConnectConnector } from "./index";
+import { buildRequiredNamespaces } from "./namespaces";
 
 const TEST_PROJECT_ID = "test-project-id";
 const TEST_METADATA = {
@@ -12,6 +13,7 @@ const TEST_METADATA = {
   url: "https://test.dapp.com",
   icons: ["https://test.dapp.com/icon.png"],
 };
+const REQUIRED_EVM = buildRequiredNamespaces().eip155;
 
 function createMockSignClient() {
   const mockSession = createWCSessionMock();
@@ -40,10 +42,10 @@ function createMockSession(overrides = {}) {
     walletType: "walletconnect",
     namespaces: {
       eip155: {
-        chains: ["eip155:1"],
+        chains: ["eip155:1", "eip155:137", "eip155:8453"],
         accounts: ["eip155:1:0x1234567890123456789012345678901234567890"],
-        methods: ["eth_requestAccounts", "personal_sign"],
-        events: ["accountsChanged", "chainChanged"],
+        methods: [...REQUIRED_EVM.methods],
+        events: [...REQUIRED_EVM.events],
       },
     },
     platform: "desktop-web",
@@ -58,10 +60,10 @@ function createWCSessionMock(overrides = {}) {
     topic: "mock-topic",
     namespaces: {
       eip155: {
-        chains: ["eip155:1"],
+        chains: ["eip155:1", "eip155:137", "eip155:8453"],
         accounts: ["eip155:1:0x1234567890123456789012345678901234567890"],
-        methods: ["eth_requestAccounts", "personal_sign"],
-        events: ["accountsChanged", "chainChanged"],
+        methods: [...REQUIRED_EVM.methods],
+        events: [...REQUIRED_EVM.events],
       },
     },
     peer: {
@@ -229,10 +231,10 @@ describe("WalletConnectConnector Integration Tests", () => {
         expect.objectContaining({
           request: expect.objectContaining({
             method: "personal_sign",
-            // [address, hexMessage] — some mobile wallets expect this order
+            // Ethereum personal_sign uses [message, address]
             params: [
-              "0x1234567890123456789012345678901234567890",
               "0x48656c6c6f2c20576f726c6421",
+              "0x1234567890123456789012345678901234567890",
             ],
           }),
         }),
@@ -259,8 +261,8 @@ describe("WalletConnectConnector Integration Tests", () => {
           request: expect.objectContaining({
             method: "personal_sign",
             params: [
-              "0x1234567890123456789012345678901234567890",
               expect.stringMatching(/^0x[0-9a-f]+$/),
+              "0x1234567890123456789012345678901234567890",
             ],
           }),
         }),
@@ -304,7 +306,7 @@ describe("WalletConnectConnector Integration Tests", () => {
       await expect(
         connector.signMessage(sessionWithoutTopic, {
           message: "Hello",
-          address: "0x1234",
+          address: "0x1234567890123456789012345678901234567890",
         }),
       ).rejects.toThrow("WalletConnect session missing topic.");
     });
@@ -371,7 +373,7 @@ describe("WalletConnectConnector Integration Tests", () => {
       try {
         await connector.signMessage(session, {
           message: "Hello",
-          address: "0x1234",
+          address: "0x1234567890123456789012345678901234567890",
         });
       } catch (e) {
         thrown = e;
@@ -422,9 +424,12 @@ describe("WalletConnectConnector Integration Tests", () => {
 
       const session = createMockSession();
 
-      await expect(connector.switchChain(session, "solana:1")).rejects.toThrow(
-        "WalletConnect switchChain only supports EVM chains",
-      );
+      await expect(
+        connector.switchChain(
+          session,
+          "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        ),
+      ).rejects.toThrow("WalletConnect switchChain only supports EVM chains");
     });
   });
 

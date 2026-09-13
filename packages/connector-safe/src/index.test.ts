@@ -83,7 +83,9 @@ vi.mock("@safe-global/safe-apps-sdk", () => {
 // ── Helper ──────────────────────────────────────────────────────
 
 /** Create a SafeConnector with mock availability enabled for testing */
-function createTestConnector(config?: ConstructorParameters<typeof SafeConnector>[0]) {
+function createTestConnector(
+  config?: ConstructorParameters<typeof SafeConnector>[0],
+) {
   return new SafeConnector(config, true);
 }
 
@@ -430,7 +432,7 @@ describe("SafeConnector → getCapabilities", () => {
     const chainKey = Object.keys(caps)[0];
     expect(chainKey).toContain("eip155:");
     expect(caps[chainKey].atomicBatch?.supported).toBe(true);
-    expect(caps[chainKey].atomicBatch?.maxBatchSize).toBe(100);
+    expect(caps[chainKey].atomicBatch?.maxBatchSize).toBeUndefined();
   });
 });
 

@@ -3,18 +3,20 @@ import { CoinbaseWalletSDK } from "@coinbase/wallet-sdk";
 import type {
   BatchCall,
   ConnectorSupport,
+  SendCallsOptions,
   UniversalConnector,
   UniversalWalletSession,
   WalletCapabilities,
 } from "@naculus/connect-core";
 import {
   CONNECTOR_ERROR_MESSAGES,
+  caip2ToHexChain,
   createEmptySession,
   DEFAULT_RPC_URLS,
   detectPlatform,
-  EIP155_MAINNET,
   extractAccounts,
   hexEncode,
+  normalizeEip5792Capabilities,
   WalletError,
 } from "@naculus/connect-core";
 import { CoinbaseProviderAdapter } from "./provider";
@@ -23,6 +25,202 @@ import type {
   CoinbaseConnectorConfig,
   CoinbaseSession,
 } from "./types";
+
+function requireEvmAddress(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
+    throw new WalletError(
+      "invalid_input",
+      `${field} must be a 20-byte EVM address.`,
+    );
+  }
+  return value;
+}
+
+function normalizeHexData(value: unknown, field: string): string {
+  if (value === undefined) return "0x";
+  if (typeof value !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/.test(value)) {
+    throw new WalletError(
+      "invalid_input",
+      `${field} must be even-length hexadecimal.`,
+    );
+  }
+  return value;
+}
+
+function normalizeQuantity(value: unknown, field: string): string {
+  if (typeof value === "number" || typeof value === "bigint") {
+    if (
+      (typeof value === "number" &&
+        (!Number.isSafeInteger(value) || value < 0)) ||
+      (typeof value === "bigint" && value < 0n)
+    ) {
+      throw new WalletError(
+        "invalid_input",
+        `${field} must be a non-negative safe EIP-1474 quantity.`,
+      );
+    }
+    return `0x${BigInt(value).toString(16)}`;
+  }
+  if (typeof value !== "string") {
+    throw new WalletError(
+      "invalid_input",
+      `${field} must be an EIP-1474 quantity.`,
+    );
+  }
+  if (/^0x[0-9a-fA-F]+$/.test(value) || /^\d+$/.test(value)) {
+    const quantity = BigInt(value);
+    return `0x${quantity.toString(16)}`;
+  }
+  throw new WalletError(
+    "invalid_input",
+    `${field} must be an EIP-1474 quantity.`,
+  );
+}
+
+function normalizeEvmTransaction(
+  transaction: Record<string, unknown>,
+  fallbackFrom?: string,
+  expectedChainId?: string,
+): Record<string, unknown> {
+  if (
+    (transaction.to === undefined || transaction.to === null) &&
+    transaction.data === undefined
+  ) {
+    throw new WalletError(
+      "invalid_input",
+      "Transaction must include a 20-byte 'to' address or contract-creation data.",
+    );
+  }
+  const normalized = { ...transaction };
+  normalized.from =
+    transaction.from === undefined
+      ? fallbackFrom
+        ? requireEvmAddress(fallbackFrom, "from")
+        : undefined
+      : requireEvmAddress(transaction.from, "from");
+  if (normalized.from === undefined) delete normalized.from;
+  if (transaction.to !== undefined && transaction.to !== null) {
+    normalized.to = requireEvmAddress(transaction.to, "to");
+  } else if (transaction.to === null) {
+    delete normalized.to;
+  }
+  if (transaction.data !== undefined)
+    normalized.data = normalizeHexData(transaction.data, "data");
+  for (const field of [
+    "chainId",
+    "gas",
+    "gasLimit",
+    "gasPrice",
+    "maxFeePerGas",
+    "maxPriorityFeePerGas",
+    "nonce",
+    "value",
+  ]) {
+    if (normalized[field] !== undefined)
+      normalized[field] = normalizeQuantity(normalized[field], field);
+  }
+  if (expectedChainId && normalized.chainId !== undefined) {
+    if (!/^eip155:[1-9][0-9]*$/.test(expectedChainId)) {
+      throw new WalletError(
+        "chain_unsupported",
+        `Invalid session EVM chain ID: ${expectedChainId}.`,
+      );
+    }
+    const expected = normalizeQuantity(
+      expectedChainId.slice("eip155:".length),
+      "chainId",
+    );
+    if (normalized.chainId !== expected) {
+      throw new WalletError(
+        "invalid_input",
+        "Transaction chainId does not match the connected Coinbase chain.",
+      );
+    }
+  }
+  if (
+    normalized.maxFeePerGas !== undefined &&
+    normalized.maxPriorityFeePerGas !== undefined &&
+    BigInt(normalized.maxPriorityFeePerGas as string) >
+      BigInt(normalized.maxFeePerGas as string)
+  ) {
+    throw new WalletError(
+      "invalid_input",
+      "maxPriorityFeePerGas cannot exceed maxFeePerGas.",
+    );
+  }
+  return normalized;
+}
+
+function requireEvmAccount(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new WalletError("invalid_input", `${field} must be an EVM account.`);
+  }
+  if (!value.includes(":")) return requireEvmAddress(value, field);
+  const parts = value.split(":");
+  if (
+    parts.length !== 3 ||
+    parts[0] !== "eip155" ||
+    !/^[1-9][0-9]*$/.test(parts[1] ?? "")
+  ) {
+    throw new WalletError(
+      "invalid_input",
+      `${field} must use a canonical eip155 CAIP-10 account.`,
+    );
+  }
+  return requireEvmAddress(parts[2], field);
+}
+
+/** Select the account explicitly approved for a requested EIP-155 chain. */
+function accountForChain(
+  accounts: string[],
+  chainId: string,
+): string | undefined {
+  const reference = chainId.startsWith("eip155:")
+    ? chainId.slice("eip155:".length)
+    : undefined;
+  const candidate = accounts.find((account) => {
+    if (typeof account !== "string") return false;
+    if (!account.includes(":")) return reference !== undefined;
+    const parts = account.split(":");
+    return (
+      parts.length === 3 && parts[0] === "eip155" && parts[1] === reference
+    );
+  });
+  return candidate ? requireEvmAccount(candidate, "account") : undefined;
+}
+
+function assertSessionTransactionFrom(
+  transaction: Record<string, unknown>,
+  accounts: string[],
+): void {
+  if (transaction.from === undefined) return;
+  const requested = requireEvmAccount(transaction.from, "from").toLowerCase();
+  const allowed = accounts.some((account) => {
+    try {
+      return requireEvmAccount(account, "account").toLowerCase() === requested;
+    } catch {
+      return false;
+    }
+  });
+  if (!allowed) {
+    throw new WalletError(
+      "invalid_input",
+      "Transaction 'from' must be one of the connected Coinbase accounts.",
+    );
+  }
+}
+
+function isUnsupportedSendCallsError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  if (code === -32601 || code === -32004 || code === 4200) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("method not found") ||
+    normalized.includes("not supported") ||
+    normalized.includes("unsupported")
+  );
+}
 
 /**
  * Coinbase Wallet connector for connect SDK.
@@ -83,6 +281,10 @@ export class CoinbaseConnector implements UniversalConnector {
   private providerAdapter?: CoinbaseProviderAdapter;
   private lastSession?: UniversalWalletSession;
   private sessionExpiryHandler?: () => void;
+  private readonly accountsSubscribers = new Set<
+    (accounts: string[]) => void
+  >();
+  private readonly chainSubscribers = new Set<(chainId: string) => void>();
 
   /** Connected mode determined during connect */
   private connectionMode?: CoinbaseConnectionMode;
@@ -134,6 +336,11 @@ export class CoinbaseConnector implements UniversalConnector {
 
     const provider = sdk.makeWeb3Provider(preference);
 
+    // Replacing the adapter without cleaning it up first discarded its record
+    // of what was attached while leaving the handlers on the provider. Every
+    // connect() then added another set that nothing could ever detach, so one
+    // wallet event was reported once per connect that had happened.
+    this.providerAdapter?.cleanup();
     this.providerAdapter = new CoinbaseProviderAdapter(provider);
 
     return provider;
@@ -165,7 +372,11 @@ export class CoinbaseConnector implements UniversalConnector {
         method: "eth_requestAccounts",
       })) as `0x${string}`[];
 
-      if (!accounts || accounts.length === 0) {
+      if (
+        !Array.isArray(accounts) ||
+        accounts.length === 0 ||
+        accounts.some((account) => !/^0x[0-9a-fA-F]{40}$/.test(account))
+      ) {
         throw new WalletError(
           "user_rejected",
           "No accounts returned from Coinbase Wallet.",
@@ -176,7 +387,22 @@ export class CoinbaseConnector implements UniversalConnector {
         method: "eth_chainId",
       })) as string;
 
-      const chainIdNum = Number.parseInt(chainIdHex, 16);
+      if (
+        typeof chainIdHex !== "string" ||
+        !/^0x[0-9a-fA-F]+$/.test(chainIdHex)
+      ) {
+        throw new WalletError(
+          "rpc_error",
+          "Coinbase Wallet returned an invalid chain ID.",
+        );
+      }
+      const chainIdNum = Number(BigInt(chainIdHex));
+      if (!Number.isSafeInteger(chainIdNum) || chainIdNum <= 0) {
+        throw new WalletError(
+          "rpc_error",
+          "Coinbase Wallet returned an unsupported chain ID.",
+        );
+      }
 
       // Detect connection mode
       this.connectionMode = this.detectConnectionMode(provider);
@@ -218,6 +444,7 @@ export class CoinbaseConnector implements UniversalConnector {
       return walletSession;
     } catch (error) {
       this.cleanup();
+      if (error instanceof WalletError) throw error;
       const message =
         error instanceof Error
           ? error.message
@@ -268,17 +495,32 @@ export class CoinbaseConnector implements UniversalConnector {
    */
   async getAccounts(session: UniversalWalletSession): Promise<string[]> {
     if (this.providerAdapter) {
+      let accounts: unknown;
       try {
         const provider = this.providerAdapter.getProvider();
-        const accounts = (await provider.request({
+        accounts = await provider.request({
           method: "eth_accounts",
-        })) as `0x${string}`[];
-        if (accounts && accounts.length > 0) {
-          return accounts;
-        }
-      } catch {
-        // Fall back to session data
+        });
+      } catch (error) {
+        // Never return stale session accounts when the live provider cannot be
+        // queried: doing so could make callers sign for an account that is no
+        // longer connected in the wallet.
+        throw new WalletError(
+          "wallet_unavailable",
+          "Failed to query Coinbase Wallet accounts.",
+          error,
+        );
       }
+
+      if (!Array.isArray(accounts)) {
+        throw new WalletError(
+          "wallet_unavailable",
+          "Coinbase Wallet returned an invalid account list.",
+          accounts,
+        );
+      }
+
+      return accounts.map((account) => requireEvmAddress(account, "account"));
     }
 
     return extractAccounts(session.namespaces);
@@ -309,12 +551,14 @@ export class CoinbaseConnector implements UniversalConnector {
         CONNECTOR_ERROR_MESSAGES.MISSING_MESSAGE,
       );
 
-    const address = rawAddress.includes(":")
-      ? rawAddress.split(":").pop()!
-      : rawAddress;
+    assertSessionTransactionFrom(
+      { from: rawAddress },
+      session.namespaces.eip155?.accounts ?? [],
+    );
+    const address = requireEvmAccount(rawAddress, "address");
 
     // Determine signing method based on message content
-    const isStructured = message.startsWith("{");
+    const isStructured = message.trimStart().startsWith("{");
     const tryMethods = isStructured
       ? ["eth_signTypedData_v4"]
       : ["personal_sign", "eth_sign"];
@@ -400,11 +644,24 @@ export class CoinbaseConnector implements UniversalConnector {
         "method_not_allowed",
         CONNECTOR_ERROR_MESSAGES.MISSING_TX,
       );
+    assertSessionTransactionFrom(
+      transaction,
+      session.namespaces.eip155?.accounts ?? [],
+    );
 
     try {
       return await provider.request({
         method: "eth_signTransaction",
-        params: [transaction],
+        params: [
+          normalizeEvmTransaction(
+            transaction,
+            accountForChain(
+              session.namespaces.eip155?.accounts ?? [],
+              this.getDefaultChainId(session),
+            ),
+            this.getDefaultChainId(session),
+          ),
+        ],
       });
     } catch (error) {
       if (error instanceof WalletError) throw error;
@@ -439,11 +696,24 @@ export class CoinbaseConnector implements UniversalConnector {
         "method_not_allowed",
         CONNECTOR_ERROR_MESSAGES.MISSING_TX,
       );
+    assertSessionTransactionFrom(
+      transaction,
+      session.namespaces.eip155?.accounts ?? [],
+    );
 
     try {
       return await provider.request({
         method: "eth_sendTransaction",
-        params: [transaction],
+        params: [
+          normalizeEvmTransaction(
+            transaction,
+            accountForChain(
+              session.namespaces.eip155?.accounts ?? [],
+              this.getDefaultChainId(session),
+            ),
+            this.getDefaultChainId(session),
+          ),
+        ],
       });
     } catch (error) {
       if (error instanceof WalletError) throw error;
@@ -459,7 +729,7 @@ export class CoinbaseConnector implements UniversalConnector {
     chainId: string,
   ): Promise<void> {
     const provider = this.requireProvider();
-    if (!chainId.startsWith("eip155:")) {
+    if (!/^eip155:[1-9][0-9]*$/.test(chainId)) {
       throw new WalletError(
         "chain_unsupported",
         "Coinbase connector only supports EVM chains.",
@@ -467,13 +737,32 @@ export class CoinbaseConnector implements UniversalConnector {
     }
 
     const numericChainId = chainId.split(":")[1];
-    const hexChainId = `0x${Number(numericChainId).toString(16)}`;
+    let hexChainId: string;
+    try {
+      const numeric = BigInt(numericChainId);
+      if (numeric <= 0n) throw new Error("chain ID must be positive");
+      hexChainId = `0x${numeric.toString(16)}`;
+    } catch {
+      throw new WalletError(
+        "chain_unsupported",
+        `Invalid EVM chain ID: ${chainId}.`,
+      );
+    }
 
     try {
       await provider.request({
         method: "wallet_switchEthereumChain",
         params: [{ chainId: hexChainId }],
       });
+      const normalizedChainId = `eip155:${BigInt(numericChainId).toString(10)}`;
+      const namespace = session.namespaces.eip155;
+      if (namespace) {
+        namespace.chains = [normalizedChainId];
+        namespace.accounts = namespace.accounts.map((account) => {
+          const address = requireEvmAccount(account, "account");
+          return `${normalizedChainId}:${address}`;
+        });
+      }
     } catch (error) {
       const errMsg = error instanceof Error ? error.message.toLowerCase() : "";
       // Wallet might not have the chain — try wallet_addEthereumChain
@@ -500,36 +789,95 @@ export class CoinbaseConnector implements UniversalConnector {
     session: UniversalWalletSession,
     calls: BatchCall[],
     chainId?: string,
+    options?: SendCallsOptions,
   ): Promise<string> {
     const provider = this.requireProvider();
+    if (!Array.isArray(calls) || calls.length === 0) {
+      throw new WalletError("invalid_input", "At least one call is required.");
+    }
     const resolvedChainId = chainId ?? this.getDefaultChainId(session);
+    if (!/^eip155:[1-9][0-9]*$/.test(resolvedChainId)) {
+      throw new WalletError(
+        "chain_unsupported",
+        "Coinbase wallet_sendCalls only supports EVM chains.",
+      );
+    }
+    if (!session.namespaces.eip155?.chains.includes(resolvedChainId)) {
+      throw new WalletError(
+        "chain_unsupported",
+        `Chain ${resolvedChainId} is not approved for this Coinbase session.`,
+      );
+    }
+    const chainHex = `0x${BigInt(resolvedChainId.slice("eip155:".length)).toString(16)}`;
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    const fromAccount = accountForChain(accounts, resolvedChainId);
+    if (!fromAccount) {
+      throw new WalletError(
+        "session_expired",
+        CONNECTOR_ERROR_MESSAGES.NO_ACCOUNT_TX,
+      );
+    }
 
     try {
-      return (await provider.request({
+      const result = await provider.request({
         method: "wallet_sendCalls",
-        params: [{ calls, chainId: resolvedChainId }],
-      })) as string;
-    } catch {
-      // Fallback: send each call individually
-      const accounts = session.namespaces.eip155?.accounts ?? [];
-      const fromAccount = accounts[0]?.split(":").pop();
-      if (!fromAccount) {
-        throw new WalletError(
-          "session_expired",
-          CONNECTOR_ERROR_MESSAGES.NO_ACCOUNT_TX,
-        );
+        params: [
+          {
+            version: "2.0.0",
+            from: requireEvmAddress(fromAccount, "from"),
+            chainId: chainHex,
+            atomicRequired: options?.atomicRequired === true,
+            ...(options?.paymasterService
+              ? {
+                  capabilities: {
+                    paymasterService: {
+                      url: options.paymasterService.url,
+                      context: options.paymasterService.context ?? {},
+                    },
+                  },
+                }
+              : {}),
+            calls: calls.map((call) => {
+              const tx = normalizeEvmTransaction(
+                call as unknown as Record<string, unknown>,
+              );
+              return {
+                to: tx.to,
+                value: tx.value,
+                data: tx.data,
+              };
+            }),
+          },
+        ],
+      });
+      if (typeof result === "string") return result;
+      if (
+        result &&
+        typeof result === "object" &&
+        typeof (result as { id?: unknown }).id === "string"
+      ) {
+        return (result as { id: string }).id;
       }
-
+      throw new WalletError(
+        "rpc_error",
+        "wallet_sendCalls returned no bundle identifier.",
+      );
+    } catch (error) {
+      if (!isUnsupportedSendCallsError(error)) throw error;
+      // Sending the calls one at a time is exactly the partial execution the
+      // caller ruled out, and it would be indistinguishable from success.
+      if (options?.atomicRequired || options?.paymasterService) throw error;
+      // Fallback: send each call individually
       const txHashes: string[] = [];
       for (const call of calls) {
         const hash = (await provider.request({
           method: "eth_sendTransaction",
           params: [
             {
-              from: fromAccount,
-              to: call.to,
-              value: call.value,
-              data: call.data,
+              from: requireEvmAddress(fromAccount, "from"),
+              ...normalizeEvmTransaction(
+                call as unknown as Record<string, unknown>,
+              ),
             },
           ],
         })) as string;
@@ -541,30 +889,127 @@ export class CoinbaseConnector implements UniversalConnector {
   }
 
   /**
-   * Get wallet capabilities for the connected session.
+   * EIP-5792 `wallet_showCallsStatus`.
+   *
+   * Display request only; a refusal is cosmetic and leaves the bundle alone.
+   */
+  async showCallsStatus(
+    _session: UniversalWalletSession,
+    bundleHash: string,
+  ): Promise<void> {
+    const provider = this.requireProvider();
+    try {
+      await provider.request({
+        method: "wallet_showCallsStatus",
+        params: [bundleHash],
+      });
+    } catch (error) {
+      if (isUnsupportedSendCallsError(error)) {
+        throw new WalletError(
+          "method_unsupported",
+          "This wallet cannot display call status. The bundle is unaffected.",
+          error,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * EIP-5792 `wallet_getCapabilities` for the connected session.
+   *
+   * Asks the provider. This previously only read a non-standard `capabilities`
+   * key off the session namespace and reported `supported: false` for every
+   * chain when it was absent — which is every session, since nothing populates
+   * that key for Coinbase. Coinbase Smart Wallet is one of the reference
+   * EIP-5792 implementations, so the invented "no" was wrong for exactly the
+   * wallet this connector exists to serve.
+   *
+   * A failed query propagates rather than becoming a negative answer, so
+   * `getAccountCapabilities` can report `discovered: false`.
    */
   async getCapabilities(
     session: UniversalWalletSession,
   ): Promise<Record<string, WalletCapabilities>> {
-    const capabilities: Record<string, WalletCapabilities> = {};
-
-    for (const ns of Object.values(session.namespaces)) {
-      const nsCaps = (ns.capabilities ?? {}) as Record<string, unknown>;
-      const atomicBatchSupported = Boolean(nsCaps.atomicBatch);
-
-      for (const chain of ns.chains) {
-        capabilities[chain] = {
-          atomicBatch: atomicBatchSupported
-            ? { supported: true, maxBatchSize: 5 }
-            : { supported: false },
-          paymasterService: nsCaps.paymasterService
-            ? { supported: true }
-            : undefined,
-        };
-      }
+    const provider = this.requireProvider();
+    const chains = session.namespaces.eip155?.chains ?? [];
+    if (chains.length === 0) {
+      throw new WalletError(
+        "chain_unsupported",
+        "wallet_getCapabilities applies to EVM chains; this session has none.",
+      );
+    }
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    const account = accountForChain(accounts, chains[0]);
+    if (!account) {
+      throw new WalletError(
+        "session_expired",
+        CONNECTOR_ERROR_MESSAGES.NO_ACCOUNT_TX,
+      );
     }
 
-    return capabilities;
+    const hexChains: string[] = [];
+    for (const chain of chains) {
+      const hex = caip2ToHexChain(chain);
+      if (hex) hexChains.push(hex);
+    }
+
+    const result = await provider.request({
+      method: "wallet_getCapabilities",
+      // The address and the chains being asked about. Omitting the second
+      // argument is not portable across wallets.
+      params: [requireEvmAddress(account, "account"), hexChains],
+    });
+
+    return normalizeEip5792Capabilities(result);
+  }
+
+  /**
+   * UniversalConnector.onAccountsChanged.
+   *
+   * This connector already re-keyed the session on both provider events; it
+   * had no way to say so, so nothing downstream ever learned about an
+   * in-wallet switch.
+   */
+  onAccountsChanged(
+    _session: UniversalWalletSession,
+    handler: (accounts: string[]) => void,
+  ): () => void {
+    this.accountsSubscribers.add(handler);
+    return () => {
+      this.accountsSubscribers.delete(handler);
+    };
+  }
+
+  /** UniversalConnector.onChainChanged. */
+  onChainChanged(
+    _session: UniversalWalletSession,
+    handler: (chainId: string) => void,
+  ): () => void {
+    this.chainSubscribers.add(handler);
+    return () => {
+      this.chainSubscribers.delete(handler);
+    };
+  }
+
+  private notifyAccountsChanged(accounts: string[]): void {
+    for (const subscriber of [...this.accountsSubscribers]) {
+      try {
+        subscriber(accounts);
+      } catch {
+        // One bad subscriber must not stop the others from being told.
+      }
+    }
+  }
+
+  private notifyChainChanged(chainId: string): void {
+    for (const subscriber of [...this.chainSubscribers]) {
+      try {
+        subscriber(chainId);
+      } catch {
+        // One bad subscriber must not stop the others from being told.
+      }
+    }
   }
 
   /**
@@ -593,12 +1038,21 @@ export class CoinbaseConnector implements UniversalConnector {
       );
 
     const cId = chainId ?? this.getDefaultChainId(session);
+    if (!/^eip155:[1-9][0-9]*$/.test(cId)) {
+      throw new WalletError(
+        "chain_unsupported",
+        `Invalid EVM chain ID: ${cId}`,
+      );
+    }
     const rpcUrl = this.config.overrideRpcUrl?.[cId] ?? DEFAULT_RPC_URLS[cId];
     if (!rpcUrl)
       throw new WalletError("chain_unsupported", "No RPC URL for chain " + cId);
 
-    const allAccounts = extractAccounts(session.namespaces);
-    const address = allAccounts[0]?.split(":").pop();
+    const address = accountForChain(
+      session.namespaces.eip155?.accounts ??
+        extractAccounts(session.namespaces),
+      cId,
+    );
     if (!address)
       throw new WalletError(
         "method_not_allowed",
@@ -615,8 +1069,23 @@ export class CoinbaseConnector implements UniversalConnector {
         params: [address, "latest"],
       }),
     });
+    if (!response.ok) {
+      throw new WalletError(
+        "rpc_error",
+        `RPC returned HTTP ${response.status} while reading the balance.`,
+      );
+    }
     const data = await response.json();
-    return data.result;
+    if (typeof data.result !== "string") {
+      throw new WalletError("rpc_error", "RPC returned no balance result.");
+    }
+    if (!/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(data.result)) {
+      throw new WalletError(
+        "rpc_error",
+        "RPC returned a non-canonical eth_getBalance quantity.",
+      );
+    }
+    return normalizeQuantity(data.result, "balance");
   }
 
   // ── Coinbase-specific methods ──
@@ -704,27 +1173,55 @@ export class CoinbaseConnector implements UniversalConnector {
       this.providerAdapter = new CoinbaseProviderAdapter(provider);
     }
 
+    // This runs on every connect(). The adapter dedupes by handler identity,
+    // but the handlers below are fresh closures each time, so nothing was ever
+    // deduped: a second connect left two live handlers per event and reported
+    // one wallet change twice. Detach first.
+    this.providerAdapter.removeAllListeners();
+
     this.providerAdapter.on("accountsChanged", (accounts: unknown) => {
-      const accs = accounts as string[];
-      if (accs.length === 0) {
+      if (!Array.isArray(accounts)) {
+        this.sessionExpiryHandler?.();
+        return;
+      }
+      if (accounts.length === 0) {
         // All accounts disconnected
         this.sessionExpiryHandler?.();
+        // An empty list is the disconnect signal in the shared contract.
+        this.notifyAccountsChanged([]);
       } else if (this.lastSession) {
-        // Update accounts in the session
-        const chainId = this.getDefaultChainId(this.lastSession);
-        this.lastSession.namespaces.eip155 = {
-          ...this.lastSession.namespaces.eip155,
-          accounts: accs.map((a) => `${chainId}:${a}`),
-        };
-        this.lastSession.updatedAt = new Date().toISOString();
+        try {
+          const accs = accounts.map((account) =>
+            requireEvmAddress(account, "account"),
+          );
+          // Update accounts in the session only after every provider value is
+          // validated, so one malformed event cannot partially corrupt state.
+          const chainId = this.getDefaultChainId(this.lastSession);
+          this.lastSession.namespaces.eip155 = {
+            ...this.lastSession.namespaces.eip155,
+            accounts: accs.map((a) => `${chainId}:${a}`),
+          };
+          this.lastSession.updatedAt = new Date().toISOString();
+          this.notifyAccountsChanged(
+            this.lastSession.namespaces.eip155?.accounts ?? [],
+          );
+        } catch {
+          this.sessionExpiryHandler?.();
+        }
       }
     });
 
     this.providerAdapter.on("chainChanged", (chainId: unknown) => {
       if (this.lastSession) {
         const hexChainId = chainId as string;
-        const chainIdNum = Number.parseInt(hexChainId, 16);
-        const caip2ChainId = `eip155:${chainIdNum}`;
+        if (!/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(hexChainId)) return;
+        const chainIdValue = BigInt(hexChainId);
+        if (
+          chainIdValue <= 0n ||
+          chainIdValue > BigInt(Number.MAX_SAFE_INTEGER)
+        )
+          return;
+        const caip2ChainId = `eip155:${chainIdValue.toString(10)}`;
 
         // Update the session namespaces with the new chain
         const existingAccounts =
@@ -742,6 +1239,12 @@ export class CoinbaseConnector implements UniversalConnector {
         };
 
         this.lastSession.updatedAt = new Date().toISOString();
+        this.notifyChainChanged(caip2ChainId);
+        // A chain change re-keys every CAIP-10 account, so accounts
+        // subscribers need telling even though the addresses did not change.
+        this.notifyAccountsChanged(
+          this.lastSession.namespaces.eip155?.accounts ?? [],
+        );
       }
     });
 
@@ -768,12 +1271,15 @@ export class CoinbaseConnector implements UniversalConnector {
    * Get the default chain ID from the session.
    */
   private getDefaultChainId(session: UniversalWalletSession): string {
-    const evmNamespace = session.namespaces["eip155"];
+    const evmNamespace = session.namespaces.eip155;
     if (evmNamespace && evmNamespace.chains.length > 0) {
       return evmNamespace.chains[0];
     }
 
-    return EIP155_MAINNET;
+    throw new WalletError(
+      "chain_unsupported",
+      "Session does not contain a supported EIP-155 chain.",
+    );
   }
 }
 

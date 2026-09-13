@@ -41,7 +41,7 @@ function createMockDiscoveredWallet(
 function createMockEIP6963Session(wallet: DiscoveredWallet) {
   return {
     wallet,
-    accounts: ["eip155:0x1234567890abcdef1234567890abcdef12345678"],
+    accounts: ["eip155:1:0x1234567890abcdef1234567890abcdef12345678"],
     chains: ["eip155:1"],
     methods: [
       "eth_requestAccounts",
@@ -61,7 +61,7 @@ function createSession(overrides = {}): UniversalWalletSession {
     namespaces: {
       eip155: {
         chains: ["eip155:1"],
-        accounts: ["eip155:0x1234567890abcdef1234567890abcdef12345678"],
+        accounts: ["eip155:1:0x1234567890abcdef1234567890abcdef12345678"],
         methods: [
           "eth_requestAccounts",
           "eth_sendTransaction",
@@ -141,17 +141,86 @@ describe("EIP6963Connector", () => {
 
   describe("connect", () => {
     it("should connect with first discovered wallet when no input", async () => {
-      provider.request.mockResolvedValue([
-        "0x1234567890abcdef1234567890abcdef12345678",
-      ]);
+      provider.request.mockImplementation(async ({ method }) =>
+        method === "eth_chainId"
+          ? "0x1"
+          : ["0x1234567890abcdef1234567890abcdef12345678"],
+      );
       const session = await connector.connect();
       expect(session.walletType).toBe("eip6963");
       expect(session.namespaces.eip155).toBeDefined();
     });
 
+    it("uses a wallet announced while discovery is waiting", async () => {
+      const delayedConnector = new EIP6963Connector();
+      const delayedProvider = createMockProvider({
+        request: vi
+          .fn()
+          .mockImplementation(async ({ method }) =>
+            method === "eth_chainId"
+              ? "0x1"
+              : ["0x1234567890abcdef1234567890abcdef12345678"],
+          ),
+      });
+      const delayedWallet = createMockDiscoveredWallet(delayedProvider);
+      setTimeout(() => {
+        (delayedConnector as any).discoveredWallets.set(
+          delayedWallet.id,
+          delayedWallet,
+        );
+      }, 10);
+
+      const session = await delayedConnector.connect();
+      expect(session.walletId).toBe(delayedWallet.id);
+      delayedConnector.clear();
+    });
+
     it("should throw when no wallet discovered", async () => {
       const c = new EIP6963Connector();
       await expect(c.connect()).rejects.toThrow("No wallet available");
+    });
+
+    it("keeps the session account in sync after accountsChanged", async () => {
+      provider.request.mockImplementation(async ({ method }) =>
+        method === "eth_chainId"
+          ? "0x1"
+          : ["0x1234567890abcdef1234567890abcdef12345678"],
+      );
+      const session = await connector.connect(wallet);
+      const accountsHandler = provider.on.mock.calls.find(
+        ([event]) => event === "accountsChanged",
+      )?.[1] as ((accounts: string[]) => void) | undefined;
+
+      accountsHandler?.(["0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"]);
+
+      expect(session.namespaces.eip155?.accounts).toEqual([
+        "eip155:1:0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      ]);
+      expect((connector as any).activeSessions.get(wallet.id).accounts).toEqual(
+        ["eip155:1:0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"],
+      );
+    });
+
+    it("normalizes chainChanged and rebinds CAIP-10 accounts", async () => {
+      provider.request.mockImplementation(async ({ method }) =>
+        method === "eth_chainId"
+          ? "0x1"
+          : ["0x1234567890abcdef1234567890abcdef12345678"],
+      );
+      const session = await connector.connect(wallet);
+      const chainHandler = provider.on.mock.calls.find(
+        ([event]) => event === "chainChanged",
+      )?.[1] as ((chainId: string) => void) | undefined;
+
+      chainHandler?.("0x89");
+
+      expect(session.namespaces.eip155?.chains).toEqual(["eip155:137"]);
+      expect(session.namespaces.eip155?.accounts).toEqual([
+        "eip155:137:0x1234567890abcdef1234567890abcdef12345678",
+      ]);
+      expect((connector as any).activeSessions.get(wallet.id).chains).toEqual([
+        "eip155:137",
+      ]);
     });
   });
 
@@ -185,18 +254,16 @@ describe("EIP6963Connector", () => {
       expect(result).toBe("0xsig");
     });
 
-    it("should use provided address over session account", async () => {
+    it("should reject a provided address outside the session account", async () => {
       provider.request.mockResolvedValue("0xsig");
       const session = createSession();
-      await connector.signMessage(session, {
-        message: "hello",
-        address: "eip155:0xdeadbeef",
-      });
-      expect(provider.request).toHaveBeenCalledWith(
-        expect.objectContaining({
-          params: [expect.any(String), "0xdeadbeef"],
+      await expect(
+        connector.signMessage(session, {
+          message: "hello",
+          address: "eip155:1:0xdeadbeef00000000000000000000000000000000",
         }),
-      );
+      ).rejects.toThrow("connected EVM accounts");
+      expect(provider.request).not.toHaveBeenCalled();
     });
   });
 
@@ -213,22 +280,14 @@ describe("EIP6963Connector", () => {
       ).rejects.toThrow();
     });
 
-    it("should sign transaction with serialized bytes", async () => {
-      provider.request.mockResolvedValue("0xtxhash");
+    it("rejects serialized bytes instead of broadcasting them", async () => {
       const session = createSession();
-      const result = await connector.signTransaction(session, {
-        transaction: { serialized: [0x01, 0x02, 0x03] },
-      });
-      expect(provider.request).toHaveBeenCalledWith({
-        method: "eth_sendTransaction",
-        params: [
-          {
-            from: "0x1234567890abcdef1234567890abcdef12345678",
-            data: "0x010203",
-          },
-        ],
-      });
-      expect(result).toBe("0xtxhash");
+      await expect(
+        connector.signTransaction(session, {
+          transaction: { serialized: [0x01, 0x02, 0x03] },
+        }),
+      ).rejects.toThrow("cannot safely decode");
+      expect(provider.request).not.toHaveBeenCalled();
     });
   });
 
@@ -243,9 +302,9 @@ describe("EIP6963Connector", () => {
       const session = createSession();
       const result = await connector.sendTransaction(session, {
         transaction: {
-          to: "0xdead",
+          to: "0x000000000000000000000000000000000000dead",
           value: "1000000",
-          data: "0xabc",
+          data: "0xabcd",
         },
       });
       expect(provider.request).toHaveBeenCalledWith({
@@ -253,13 +312,52 @@ describe("EIP6963Connector", () => {
         params: [
           {
             from: "0x1234567890abcdef1234567890abcdef12345678",
-            to: "0xdead",
+            to: "0x000000000000000000000000000000000000dead",
             value: "0xf4240",
-            data: "0xabc",
+            data: "0xabcd",
           },
         ],
       });
       expect(result).toBe("0xtxhash");
+    });
+
+    it("rejects malformed EIP-1474 quantities before provider access", async () => {
+      const session = createSession();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: {
+            to: "0x000000000000000000000000000000000000dead",
+            value: "0xnot-hex",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(provider.request).not.toHaveBeenCalled();
+    });
+
+    it("rejects a transaction from an account outside the session", async () => {
+      const session = createSession();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: {
+            from: "0x0000000000000000000000000000000000000001",
+            to: "0x000000000000000000000000000000000000dead",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_input" });
+      expect(provider.request).not.toHaveBeenCalled();
+    });
+
+    it("rejects a transaction chain that differs from the active chain", async () => {
+      const session = createSession();
+      await expect(
+        connector.sendTransaction(session, {
+          transaction: {
+            chainId: "0x89",
+            to: "0x000000000000000000000000000000000000dead",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "chain_mismatch" });
+      expect(provider.request).not.toHaveBeenCalled();
     });
   });
 
@@ -268,22 +366,66 @@ describe("EIP6963Connector", () => {
       provider.request.mockResolvedValue("0xbatch");
       const session = createSession();
       const result = await connector.sendCalls(session, [
-        { to: "0xaddr1", value: "0x1", data: "0x" },
-        { to: "0xaddr2", value: "0x2", data: "0x" },
+        {
+          to: "0x0000000000000000000000000000000000000001",
+          value: "0x1",
+          data: "0x",
+        },
+        {
+          to: "0x0000000000000000000000000000000000000002",
+          value: "0x2",
+          data: "0x",
+        },
       ]);
       expect(provider.request).toHaveBeenCalledWith({
         method: "wallet_sendCalls",
         params: [
           {
+            version: "2.0.0",
             from: "0x1234567890abcdef1234567890abcdef12345678",
+            chainId: "0x1",
+            atomicRequired: false,
             calls: [
-              { to: "0xaddr1", value: "0x1", data: "0x" },
-              { to: "0xaddr2", value: "0x2", data: "0x" },
+              {
+                to: "0x0000000000000000000000000000000000000001",
+                value: "0x1",
+                data: "0x",
+              },
+              {
+                to: "0x0000000000000000000000000000000000000002",
+                value: "0x2",
+                data: "0x",
+              },
             ],
           },
         ],
       });
       expect(result).toBe("0xbatch");
+    });
+
+    it("allows contract-creation calls without a to address", async () => {
+      provider.request.mockResolvedValue("0xbatch");
+      const result = await connector.sendCalls(createSession(), [
+        { data: "0x6000600055", value: "0x0" },
+      ]);
+
+      expect(result).toBe("0xbatch");
+      expect(provider.request).toHaveBeenCalledWith({
+        method: "wallet_sendCalls",
+        params: [
+          expect.objectContaining({
+            calls: [{ data: "0x6000600055", value: "0x0" }],
+          }),
+        ],
+      });
+    });
+
+    it("extracts the EIP-5792 bundle id from an object result", async () => {
+      provider.request.mockResolvedValue({ id: "0xbundle" });
+      const result = await connector.sendCalls(createSession(), [
+        { to: "0x0000000000000000000000000000000000000001", value: "1" },
+      ]);
+      expect(result).toBe("0xbundle");
     });
 
     it("should fallback to individual eth_sendTransaction", async () => {
@@ -294,28 +436,212 @@ describe("EIP6963Connector", () => {
 
       const session = createSession();
       const result = await connector.sendCalls(session, [
-        { to: "0xaddr1", value: "0x1", data: "0x" },
-        { to: "0xaddr2", value: "0x2", data: "0x" },
+        {
+          to: "0x0000000000000000000000000000000000000001",
+          value: "0x1",
+          data: "0x",
+        },
+        {
+          to: "0x0000000000000000000000000000000000000002",
+          value: "0x2",
+          data: "0x",
+        },
       ]);
       expect(result).toBe("0xtx1,0xtx2");
+    });
+
+    /**
+     * EIP-5792 atomicRequired.
+     *
+     * Choosing the batch path is a decision that the calls must land together.
+     * Two things used to undo it silently: the request always carried
+     * atomicRequired: false, which tells the wallet it may split the batch, and
+     * a wallet without wallet_sendCalls got the calls sent one at a time. Both
+     * turn "all or nothing" into "an approve landed and the swap did not",
+     * with a return value that looks like success.
+     */
+    it("tells the wallet atomicity is required when the caller requires it", async () => {
+      provider.request.mockResolvedValue({ id: "0xbundle" });
+      await connector.sendCalls(
+        createSession(),
+        [
+          { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
+          { to: "0x0000000000000000000000000000000000000002", value: "0x2" },
+        ],
+        undefined,
+        { atomicRequired: true },
+      );
+      const sent = provider.request.mock.calls.at(-1)?.[0];
+      expect(sent.params[0].atomicRequired).toBe(true);
+    });
+
+    it("forwards the executable paymaster service to the wallet", async () => {
+      provider.request.mockResolvedValue({ id: "0xbundle" });
+      await connector.sendCalls(
+        createSession(),
+        [
+          { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
+        ],
+        undefined,
+        {
+          paymasterService: {
+            url: "https://paymaster.example",
+            context: { policy: "daily-limit" },
+          },
+        },
+      );
+      const sent = provider.request.mock.calls.at(-1)?.[0];
+      expect(sent.params[0].capabilities).toEqual({
+        paymasterService: {
+          url: "https://paymaster.example",
+          context: { policy: "daily-limit" },
+        },
+      });
+    });
+
+    it("does not fall back to user-paid transactions after sponsored sendCalls is unavailable", async () => {
+      provider.request.mockRejectedValueOnce(new Error("method not supported"));
+      await expect(
+        connector.sendCalls(
+          createSession(),
+          [
+            { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
+          ],
+          undefined,
+          { paymasterService: { url: "https://paymaster.example" } },
+        ),
+      ).rejects.toThrow(/not supported/);
+      expect(provider.request).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves atomicity to the wallet when the caller did not require it", async () => {
+      // EIP-5792 defaults atomicRequired to false; not requiring it is a valid
+      // choice, so the flag must not be forced on.
+      provider.request.mockResolvedValue({ id: "0xbundle" });
+      await connector.sendCalls(createSession(), [
+        { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
+      ]);
+      const sent = provider.request.mock.calls.at(-1)?.[0];
+      expect(sent.params[0].atomicRequired).toBe(false);
+    });
+
+    it("refuses to degrade to individual transactions when atomicity is required", async () => {
+      // The fallback is the exact partial execution atomicRequired rules out.
+      provider.request.mockRejectedValueOnce(new Error("method not supported"));
+      await expect(
+        connector.sendCalls(
+          createSession(),
+          [
+            { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
+            { to: "0x0000000000000000000000000000000000000002", value: "0x2" },
+          ],
+          undefined,
+          { atomicRequired: true },
+        ),
+      ).rejects.toThrow(/not supported/);
+      // One attempt, then a refusal — no transactions were sent.
+      expect(provider.request).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not fall back to transactions after a user rejection", async () => {
+      provider.request.mockRejectedValueOnce(
+        Object.assign(new Error("User rejected"), { code: 4001 }),
+      );
+      const session = createSession();
+
+      await expect(
+        connector.sendCalls(session, [
+          { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
+        ]),
+      ).rejects.toMatchObject({ code: 4001 });
+      expect(provider.request).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("getCapabilities", () => {
     it("should return capabilities from wallet_getCapabilities", async () => {
       provider.request.mockResolvedValue({
-        "eip155:1": { atomicBatch: true },
+        "0x1": { atomic: { status: "supported" } },
       });
       const session = createSession();
       const caps = await connector.getCapabilities(session);
+      expect(provider.request).toHaveBeenCalledWith({
+        method: "wallet_getCapabilities",
+        params: ["0x1234567890abcdef1234567890abcdef12345678", ["0x1"]],
+      });
+      expect(caps["eip155:1"]!.atomicBatch!.supported).toBe(true);
+      expect(caps["eip155:1"]!.atomicBatch!.maxBatchSize).toBeUndefined();
+    });
+
+    it("counts the ready state as support, per EIP-5792 2.0.0", async () => {
+      // "ready" means the wallet can execute atomically once the user approves
+      // an upgrade. Only "unsupported" is a no.
+      provider.request.mockResolvedValue({
+        "0x1": { atomic: { status: "ready" } },
+      });
+      const caps = await connector.getCapabilities(createSession());
       expect(caps["eip155:1"]!.atomicBatch!.supported).toBe(true);
     });
 
-    it("should return defaults when wallet_getCapabilities fails", async () => {
+    it("does not read an explicit no as a yes", async () => {
+      // This branch used to test `Boolean(caps.atomicBatch)`, and
+      // `{ supported: false }` is truthy — a wallet saying it cannot batch was
+      // recorded as able to, then handed an atomic batch it could not honour.
+      provider.request.mockResolvedValue({
+        "0x1": { atomicBatch: { supported: false } },
+      });
+      const caps = await connector.getCapabilities(createSession());
+      expect(caps["eip155:1"]!.atomicBatch!.supported).toBe(false);
+    });
+
+    it("propagates a failed query instead of reporting no support", async () => {
+      // A wallet that cannot answer has not answered no. Swallowing the error
+      // into supported: false makes "never asked" indistinguishable from
+      // "asked and declined"; the caller needs that difference to decide
+      // whether falling back is safe. getAccountCapabilities turns this into
+      // discovered: false.
       provider.request.mockRejectedValue(new Error("not supported"));
-      const session = createSession();
-      const caps = await connector.getCapabilities(session);
-      expect(caps["eip155:1"]!.atomicBatch!.supported).toBe(true);
+      await expect(connector.getCapabilities(createSession())).rejects.toThrow(
+        /not supported/,
+      );
+    });
+
+    it("omits a chain the wallet did not report on", async () => {
+      provider.request.mockResolvedValue({
+        "0x89": { atomic: { status: "supported" } },
+      });
+      const caps = await connector.getCapabilities(createSession());
+      expect(caps["eip155:1"]).toBeUndefined();
+      expect(caps["eip155:137"]!.atomicBatch!.supported).toBe(true);
+    });
+  });
+
+  describe("getCallsStatus", () => {
+    it("returns the wallet's EIP-5792 status response", async () => {
+      const status = {
+        version: "2.0.0",
+        id: "0xbundle",
+        chainId: "0x1",
+        status: 200,
+        atomic: true,
+      } as const;
+      provider.request.mockResolvedValue(status);
+
+      await expect(
+        connector.getCallsStatus(createSession(), status.id),
+      ).resolves.toEqual(status);
+      expect(provider.request).toHaveBeenCalledWith({
+        method: "wallet_getCallsStatus",
+        params: [status.id],
+      });
+    });
+
+    it("propagates a provider error instead of fabricating pending status", async () => {
+      provider.request.mockRejectedValue(new Error("bundle not found"));
+
+      await expect(
+        connector.getCallsStatus(createSession(), "0xbundle"),
+      ).rejects.toThrow("bundle not found");
     });
   });
 
@@ -334,6 +660,13 @@ describe("EIP6963Connector", () => {
     it("should throw when no active session", async () => {
       const c = new EIP6963Connector();
       await expect((c as any).getBalance()).rejects.toThrow("Session expired");
+    });
+
+    it("should reject a non-canonical provider balance", async () => {
+      provider.request.mockResolvedValue("123");
+      await expect((connector as any).getBalance()).rejects.toThrow(
+        "non-canonical eth_getBalance quantity",
+      );
     });
   });
 
@@ -361,9 +694,11 @@ describe("EIP6963Connector", () => {
     });
 
     it("should reconnect with discovered wallet", async () => {
-      provider.request.mockResolvedValue([
-        "0x1234567890abcdef1234567890abcdef12345678",
-      ]);
+      provider.request.mockImplementation(async ({ method }) =>
+        method === "eth_chainId"
+          ? "0x1"
+          : ["0x1234567890abcdef1234567890abcdef12345678"],
+      );
       const session = createSession();
       const result = await connector.reconnect(session);
       expect(result.walletId).toBe("test-wallet");
@@ -383,7 +718,7 @@ describe("EIP6963Connector", () => {
       const session = createSession();
       const accounts = await connector.getAccounts(session);
       expect(accounts).toEqual([
-        "eip155:0x1234567890abcdef1234567890abcdef12345678",
+        "eip155:1:0x1234567890abcdef1234567890abcdef12345678",
       ]);
     });
   });

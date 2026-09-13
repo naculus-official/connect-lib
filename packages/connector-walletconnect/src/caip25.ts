@@ -15,10 +15,16 @@ export interface CAIP25ValidationResult {
   warnings: string[];
 }
 
-const CAIP2_REGEX = /^[-a-z0-9]{1,32}:[-a-zA-Z0-9]{1,64}$/;
+// CAIP-2: namespace is 3–8 lowercase ASCII characters; references are
+// 1–32 case-sensitive ASCII characters from [-_a-zA-Z0-9].
+const CAIP2_REGEX = /^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/;
 
 export function isValidCAIP2(chainId: string): boolean {
-  return CAIP2_REGEX.test(chainId);
+  if (!CAIP2_REGEX.test(chainId)) return false;
+  // EIP-155 chain references are decimal positive integers; accepting zero or
+  // leading zeroes would create a different identifier from the public EVM
+  // chain ID and can route signing to the wrong network.
+  return !chainId.startsWith("eip155:") || /^eip155:[1-9][0-9]*$/.test(chainId);
 }
 
 export function validateCAIP25Namespace(
@@ -38,6 +44,10 @@ export function validateCAIP25Namespace(
         errors.push(
           `Namespace "${namespace}": invalid CAIP-2 chain "${chainId}"`,
         );
+      } else if (chainId.slice(0, chainId.indexOf(":")) !== namespace) {
+        errors.push(
+          `Namespace "${namespace}": chain "${chainId}" belongs to a different namespace`,
+        );
       }
     }
   }
@@ -46,7 +56,7 @@ export function validateCAIP25Namespace(
     errors.push(`Namespace "${namespace}": methods are required`);
   }
 
-  if (!proposal.events) {
+  if (!Array.isArray(proposal.events)) {
     errors.push(`Namespace "${namespace}": events array is required`);
   }
 

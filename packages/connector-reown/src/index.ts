@@ -1,5 +1,5 @@
 import type { UniversalWalletSession } from "@naculus/connect-core";
-import { extractAccounts, WalletError } from "@naculus/connect-core";
+import { WalletError } from "@naculus/connect-core";
 import {
   type WalletConnectConfig,
   WalletConnectConnector,
@@ -11,6 +11,66 @@ export type {
   WalletConnectConnector,
   WalletConnectMetadata,
 } from "@naculus/connector-walletconnect";
+
+function normalizeNumericChainId(chainId: number): number {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new WalletError(
+      "chain_unsupported",
+      `Invalid EIP-155 chain ID: ${chainId}`,
+    );
+  }
+  return chainId;
+}
+
+function parseEip155ChainId(chainId: string): number {
+  if (!/^eip155:[1-9][0-9]*$/.test(chainId)) {
+    throw new WalletError(
+      "chain_unsupported",
+      `Invalid EIP-155 chain ID: ${chainId}`,
+    );
+  }
+  return normalizeNumericChainId(
+    Number(BigInt(chainId.slice("eip155:".length))),
+  );
+}
+
+function extractEvmAddress(account: string): string {
+  const parts = account.split(":");
+  const address = parts.length === 3 ? parts[2] : undefined;
+  if (
+    parts[0] !== "eip155" ||
+    !address ||
+    !/^0x[a-fA-F0-9]{40}$/.test(address)
+  ) {
+    throw new WalletError(
+      "wallet_unavailable",
+      `Invalid EIP-155 account: ${account}`,
+    );
+  }
+  return address;
+}
+
+/** Return only accounts authorized for the requested EIP-155 chain. */
+function extractEvmAccountsForChain(
+  accounts: string[],
+  chainId: string,
+): string[] {
+  const reference = chainId.slice("eip155:".length);
+  return [
+    ...new Set(
+      accounts
+        .filter((account) => {
+          const parts = account.split(":");
+          return (
+            parts.length === 3 &&
+            parts[0] === "eip155" &&
+            parts[1] === reference
+          );
+        })
+        .map(extractEvmAddress),
+    ),
+  ];
+}
 
 /**
  * Reown AppKit-compatible adapter for @naculus/connector-walletconnect.
@@ -85,19 +145,22 @@ export class NaculusAppKitAdapter {
     const session = await this.connector.connect(input);
     this.currentSession = session;
 
-    const accounts = extractAccounts(session.namespaces).map(
-      (a: string) => a.split(":").pop()!,
-    );
-
-    // Determine chain ID from session
-    const evmChains = session.namespaces.eip155?.chains;
-    if (evmChains && evmChains.length > 0) {
-      this.currentChainId = evmChains[0];
-    } else {
-      this.currentChainId = "eip155:1";
+    const evmNamespace = session.namespaces.eip155;
+    if (!evmNamespace?.chains[0]) {
+      throw new WalletError(
+        "chain_unsupported",
+        "Reown adapter requires an EIP-155 namespace.",
+      );
     }
+    // Determine chain ID from session
+    const evmChains = evmNamespace.chains;
+    this.currentChainId = evmChains[0];
 
-    const chainId = Number(this.currentChainId.split(":")[1]);
+    const chainId = parseEip155ChainId(this.currentChainId);
+    const accounts = extractEvmAccountsForChain(
+      evmNamespace.accounts,
+      this.currentChainId,
+    );
 
     return {
       provider: this.createProvider(),
@@ -128,12 +191,19 @@ export class NaculusAppKitAdapter {
     const restored = await this.connector.reconnect(session);
     this.currentSession = restored;
 
-    const accounts = extractAccounts(restored.namespaces).map(
-      (a: string) => a.split(":").pop()!,
+    const evmNamespace = restored.namespaces.eip155;
+    if (!evmNamespace?.chains[0]) {
+      throw new WalletError(
+        "chain_unsupported",
+        "Reown adapter requires an EIP-155 namespace.",
+      );
+    }
+    const chainId = parseEip155ChainId(evmNamespace.chains[0]);
+    this.currentChainId = evmNamespace.chains[0];
+    const accounts = extractEvmAccountsForChain(
+      evmNamespace.accounts,
+      this.currentChainId,
     );
-
-    const evmChains = restored.namespaces.eip155?.chains;
-    const chainId = evmChains ? Number(evmChains[0].split(":")[1]) : 1;
 
     return {
       provider: this.createProvider(),
@@ -147,10 +217,12 @@ export class NaculusAppKitAdapter {
    */
   async getAccounts(): Promise<string[]> {
     if (!this.currentSession) return [];
-    const accounts = extractAccounts(this.currentSession.namespaces).map(
-      (a: string) => a.split(":").pop()!,
+    const namespace = this.currentSession.namespaces.eip155;
+    if (!namespace?.chains[0]) return [];
+    return extractEvmAccountsForChain(
+      namespace.accounts,
+      this.currentChainId ?? namespace.chains[0],
     );
-    return [...new Set(accounts)];
   }
 
   /**
@@ -158,16 +230,19 @@ export class NaculusAppKitAdapter {
    */
   async getChainId(): Promise<number> {
     if (this.currentChainId) {
-      return Number(this.currentChainId.split(":")[1]);
+      return parseEip155ChainId(this.currentChainId);
     }
 
     if (this.currentSession?.namespaces.eip155?.chains[0]) {
-      return Number(
-        this.currentSession.namespaces.eip155.chains[0].split(":")[1],
+      return parseEip155ChainId(
+        this.currentSession.namespaces.eip155.chains[0],
       );
     }
 
-    return 1;
+    throw new WalletError(
+      "session_expired",
+      "No active WalletConnect session.",
+    );
   }
 
   /**
@@ -181,17 +256,22 @@ export class NaculusAppKitAdapter {
    * Switch to a different chain.
    */
   async switchChain(chainId: number): Promise<void> {
+    chainId = normalizeNumericChainId(chainId);
+    if (!this.currentSession) {
+      throw new WalletError(
+        "session_expired",
+        "No active WalletConnect session.",
+      );
+    }
     const caip2Chain = `eip155:${chainId}`;
 
-    if (this.currentSession) {
-      try {
-        await this.connector.switchChain(this.currentSession, caip2Chain);
-      } catch (error) {
-        throw new WalletError(
-          "chain_switch_rejected",
-          `Failed to switch to chain ${chainId}: ${error}`,
-        );
-      }
+    try {
+      await this.connector.switchChain(this.currentSession, caip2Chain);
+    } catch (error) {
+      throw new WalletError(
+        "chain_switch_rejected",
+        `Failed to switch to chain ${chainId}: ${error}`,
+      );
     }
 
     this.currentChainId = caip2Chain;
@@ -212,7 +292,10 @@ export class NaculusAppKitAdapter {
     const result = await this.connector.signMessage(this.currentSession, {
       message,
       address,
-      chainId: chainId ? `eip155:${chainId}` : undefined,
+      chainId:
+        chainId !== undefined
+          ? `eip155:${normalizeNumericChainId(chainId)}`
+          : undefined,
     });
 
     return String(result);
@@ -231,7 +314,10 @@ export class NaculusAppKitAdapter {
 
     const result = await this.connector.sendTransaction(this.currentSession, {
       transaction,
-      chainId: chainId ? `eip155:${chainId}` : undefined,
+      chainId:
+        chainId !== undefined
+          ? `eip155:${normalizeNumericChainId(chainId)}`
+          : undefined,
     });
 
     return String(result);
@@ -252,7 +338,10 @@ export class NaculusAppKitAdapter {
     const result = await this.connector.signTypedData(this.currentSession, {
       typedData,
       address,
-      chainId: chainId ? `eip155:${chainId}` : undefined,
+      chainId:
+        chainId !== undefined
+          ? `eip155:${normalizeNumericChainId(chainId)}`
+          : undefined,
     });
 
     return String(result);

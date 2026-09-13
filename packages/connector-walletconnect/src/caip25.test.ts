@@ -10,7 +10,7 @@ describe("isValidCAIP2", () => {
   it("should accept valid CAIP-2 chain IDs", () => {
     expect(isValidCAIP2("eip155:1")).toBe(true);
     expect(isValidCAIP2("eip155:11155111")).toBe(true);
-    expect(isValidCAIP2("solana:0")).toBe(true);
+    expect(isValidCAIP2("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")).toBe(true);
     expect(isValidCAIP2("xrpl:0")).toBe(true);
     expect(isValidCAIP2("cosmos:cosmoshub-4")).toBe(true);
   });
@@ -20,6 +20,8 @@ describe("isValidCAIP2", () => {
     expect(isValidCAIP2("no-colon")).toBe(false);
     expect(isValidCAIP2(":empty")).toBe(false);
     expect(isValidCAIP2("eip155:")).toBe(false);
+    expect(isValidCAIP2("eip155:0")).toBe(false);
+    expect(isValidCAIP2("eip155:01")).toBe(false);
     expect(isValidCAIP2("eip 155:1")).toBe(false);
   });
 });
@@ -55,7 +57,7 @@ describe("validateCAIP25Namespace", () => {
     const errors = validateCAIP25Namespace(
       "solana",
       {
-        chains: ["solana:0"],
+        chains: ["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"],
         methods: [],
         events: ["accountChanged"],
       },
@@ -171,7 +173,7 @@ describe("validateCAIP25Proposal", () => {
           events: ["accountsChanged"],
         },
         solana: {
-          chains: ["solana:0"],
+          chains: ["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"],
           methods: ["solana_signMessage"],
           events: ["accountChanged"],
         },
