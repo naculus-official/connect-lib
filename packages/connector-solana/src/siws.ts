@@ -1,4 +1,5 @@
 import { createSiwxMessage, parseSiwxMessage } from "@naculus/siwx";
+import { SOLANA_CHAINS } from "./types";
 
 export interface SolanaSiwsInput {
   domain: string;
@@ -27,7 +28,12 @@ export interface SolanaSiwsMessage {
 }
 
 export function createSolanaSiwsMessage(input: SolanaSiwsInput): string {
-  const chainId = input.chainId ?? "1";
+  const chainId = input.chainId ?? SOLANA_CHAINS.mainnet;
+  if (!/^solana:[1-9A-HJ-NP-Za-km-z]{32}$/.test(chainId)) {
+    throw new Error(
+      "Invalid Solana CAIP-2 chain ID. Use a genesis-hash chain such as solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp.",
+    );
+  }
   const version = input.version ? parseInt(input.version, 10) : 1;
 
   return createSiwxMessage({

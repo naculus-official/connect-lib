@@ -30,18 +30,46 @@ export function createProviderFromWalletStandard(
   wallet: WalletStandardWallet,
 ): SolanaProvider {
   const f = wallet.features as Record<string, any>;
-  const connectFeature = f["standard:connect"];
+  const requireFeature = <T>(name: string): T => {
+    const feature = f[name] as T | undefined;
+    if (!feature) {
+      throw new Error(
+        `Wallet Standard wallet is missing required feature: ${name}`,
+      );
+    }
+    return feature;
+  };
+  const connectFeature = requireFeature<{
+    connect: (opts?: unknown) => Promise<unknown>;
+  }>("standard:connect");
   const disconnectFeature = f["standard:disconnect"];
-  const signMessageFeature = f["solana:signMessage"];
-  const signTxFeature = f["solana:signTransaction"];
+  const signMessageFeature = requireFeature<{
+    signMessage: (message: Uint8Array) => Promise<any>;
+  }>("solana:signMessage");
+  const signTxFeature = requireFeature<{
+    signTransaction: (tx: Uint8Array) => Promise<any>;
+  }>("solana:signTransaction");
   const signAllTxFeature = f["solana:signAllTransactions"];
   const signSendTxFeature = f["solana:signAndSendTransaction"];
-  const eventsFeature = f["standard:events"];
+  const eventsFeature = f["standard:events"] as
+    | { on?: (event: string, handler: (...args: unknown[]) => void) => unknown }
+    | undefined;
+  /** Unsubscribe callbacks returned by `standard:events`, keyed by handler. */
+  const unsubscribes = new Map<(...args: unknown[]) => void, (() => void)[]>();
 
   return {
     async connect(opts) {
       const result = await connectFeature.connect(opts);
-      const account = result.accounts?.[0] ?? result;
+      const candidate =
+        result && typeof result === "object" && "accounts" in result
+          ? (result as { accounts?: readonly unknown[] }).accounts?.[0]
+          : result;
+      if (!isWalletStandardAccount(candidate)) {
+        throw new Error(
+          "Wallet Standard connect returned no valid Solana account",
+        );
+      }
+      const account = candidate;
       return {
         publicKey: {
           toString() {
@@ -65,17 +93,56 @@ export function createProviderFromWalletStandard(
       return result.signedTransaction ?? result;
     },
     async signAllTransactions(txs) {
+      if (!signAllTxFeature)
+        throw new Error("Wallet does not support solana:signAllTransactions");
       const result = await signAllTxFeature.signAllTransactions(txs);
       return result.signedTransactions ?? result;
     },
     async signAndSendTransaction(tx) {
+      if (!signSendTxFeature)
+        throw new Error(
+          "Wallet does not support solana:signAndSendTransaction",
+        );
       const result = await signSendTxFeature.signAndSendTransaction(tx);
       return { signature: result.signature };
     },
     on(event, handler) {
-      eventsFeature?.on(event, handler);
+      // `standard:events` returns an unsubscribe function. Discarding it left
+      // the adapter with no way to detach, so a reconnect stacked another
+      // handler on the same wallet and every account change was reported once
+      // per connect that had ever happened.
+      const off = eventsFeature?.on?.(event, handler);
+      if (typeof off === "function") {
+        let existing = unsubscribes.get(handler);
+        if (!existing) {
+          existing = [];
+          unsubscribes.set(handler, existing);
+        }
+        existing.push(off as () => void);
+      }
+    },
+    off(_event, handler) {
+      for (const off of unsubscribes.get(handler) ?? []) {
+        try {
+          off();
+        } catch {
+          // A wallet that throws on unsubscribe must not block teardown.
+        }
+      }
+      unsubscribes.delete(handler);
     },
   };
+}
+
+function isWalletStandardAccount(
+  value: unknown,
+): value is { address: string; publicKey: Uint8Array } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { address?: unknown }).address === "string" &&
+    (value as { publicKey?: unknown }).publicKey instanceof Uint8Array
+  );
 }
 
 export function isPhantomInstalled(): boolean {

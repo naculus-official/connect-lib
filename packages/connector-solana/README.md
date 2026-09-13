@@ -2,11 +2,14 @@
 
 Solana wallet connector for the Naculus Connect ecosystem.
 
-Detects and connects to Solana browser wallets such as **Phantom**, **Solflare**, and generic Solana providers via `window.solana`. Implements the `UniversalConnector` interface from `@naculus/connect-core`.
+Discovers Solana wallets through the **Wallet Standard** registry — the path Solana's own frontend documentation points new projects at — and falls back to legacy `window.solana` / `window.solflare` detection only when no Wallet Standard wallet registers. Implements the `UniversalConnector` interface from `@naculus/connect-core`.
 
 ## Features
 
-- 🔍 **Wallet Discovery** — Auto-detects Phantom, Solflare, and generic Solana wallet extensions
+- 🔍 **Wallet Standard discovery** — Dispatches `wallet-standard:register-wallet` and adapts any
+  wallet that registers (Phantom, Solflare, Backpack, …) without a per-wallet adapter
+- 🪫 **Legacy fallback** — `window.solana` / `window.solflare` detection is kept for older
+  extensions and logs a warning recommending Wallet Standard
 - 🔗 **Connect & Disconnect** — Connect to any discovered Solana wallet
 - ✍️ **Sign Messages** — Sign arbitrary messages via `solana_signMessage`
 - 📝 **Sign Transactions** — Sign transactions via `solana_signTransaction`

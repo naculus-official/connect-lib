@@ -30,6 +30,7 @@
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
+    "@noble/curves": "^1.9.0",
     "typescript": "^5.7.0",
     "tsup": "^8.0.0",
     "vitest": "^3.0.0"

@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+const SOLANA_TESTNET = "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
+
 function b58(s: string): Uint8Array {
   const { base58 } = require("@scure/base") as any;
   return base58.decode(s);
@@ -158,6 +161,16 @@ describe("Solana Financial Integration: Error Handling", () => {
   let connector: import("./index").SolanaConnector;
 
   beforeEach(async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: vi
+          .fn()
+          .mockResolvedValue({ result: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" }),
+      }),
+    );
     mockProvider = {
       connect: vi.fn().mockResolvedValue({
         publicKey: {
@@ -181,7 +194,7 @@ describe("Solana Financial Integration: Error Handling", () => {
 
     const { SolanaConnector } = await import("./index");
     connector = new SolanaConnector();
-    connector.configure({ defaultChain: "solana:0" });
+    connector.configure({ defaultChain: SOLANA_MAINNET });
     connector.startDiscovery();
   });
 
@@ -191,7 +204,9 @@ describe("Solana Financial Integration: Error Handling", () => {
     const session = {
       namespaces: {
         solana: {
-          accounts: ["solana:0:7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtPb"],
+          accounts: [
+            `${SOLANA_MAINNET}:7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtPb`,
+          ],
         },
       },
     } as any;
@@ -283,32 +298,38 @@ describe("Solana Financial Integration: switchChain", () => {
     vi.stubGlobal("navigator", { userAgent: "node" });
     const { SolanaConnector } = await import("./index");
     connector = new SolanaConnector();
-    connector.configure({ defaultChain: "solana:0" });
+    connector.configure({ defaultChain: SOLANA_MAINNET });
     connector.startDiscovery();
   });
 
-  it("switches to mainnet (solana:8E9rvC)", async () => {
+  it("switches to mainnet (canonical Solana CAIP-2)", async () => {
     const session = {
-      namespaces: { solana: { chains: ["solana:0"], accounts: [] } },
+      namespaces: { solana: { chains: [SOLANA_MAINNET], accounts: [] } },
     } as any;
-    await connector.switchChain(session, "solana:8E9rvC");
-    expect(session.namespaces.solana.chains).toEqual(["solana:8E9rvC"]);
+    await connector.switchChain(session, SOLANA_MAINNET);
+    expect(session.namespaces.solana.chains).toEqual([SOLANA_MAINNET]);
   });
 
-  it("switches to testnet (solana:2)", async () => {
+  it("rejects an unknown default chain instead of silently using mainnet", () => {
+    expect(() =>
+      connector.configure({ defaultChain: "solana:unknown" }),
+    ).toThrow("canonical genesis-hash CAIP-2 chain");
+  });
+
+  it("switches to testnet (canonical Solana CAIP-2)", async () => {
     const session = {
-      namespaces: { solana: { chains: ["solana:0"], accounts: [] } },
+      namespaces: { solana: { chains: [SOLANA_MAINNET], accounts: [] } },
     } as any;
-    await connector.switchChain(session, "solana:2");
-    expect(session.namespaces.solana.chains).toEqual(["solana:2"]);
+    await connector.switchChain(session, SOLANA_TESTNET);
+    expect(session.namespaces.solana.chains).toEqual([SOLANA_TESTNET]);
   });
 
   it("throws on unsupported chain (non-solana: namespace)", async () => {
     const session = {
-      namespaces: { solana: { chains: ["solana:0"], accounts: [] } },
+      namespaces: { solana: { chains: [SOLANA_MAINNET], accounts: [] } },
     } as any;
     await expect(connector.switchChain(session, "eip155:1")).rejects.toThrow(
-      "Unsupported chain",
+      "Unsupported Solana chain",
     );
   });
 
@@ -316,8 +337,8 @@ describe("Solana Financial Integration: switchChain", () => {
     const session = {
       namespaces: { eip155: { chains: ["eip155:1"], accounts: [] } },
     } as any;
-    await expect(connector.switchChain(session, "solana:0")).rejects.toThrow(
-      "Session has no solana namespace",
-    );
+    await expect(
+      connector.switchChain(session, SOLANA_MAINNET),
+    ).rejects.toThrow("Session has no solana namespace");
   });
 });

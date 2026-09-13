@@ -1,3 +1,9 @@
+import type { UniversalWalletSession } from "@naculus/connect-core";
+import {
+  SOLANA_DEVNET,
+  SOLANA_MAINNET,
+  SOLANA_TESTNET,
+} from "@naculus/connect-core";
 export interface SolanaPublicKey {
   toBytes(): Uint8Array;
   toString(): string;
@@ -58,12 +64,26 @@ export interface WalletStandardWallet {
 export interface SolanaConnectorSession {
   wallet: DiscoveredSolanaWallet;
   publicKey: string;
+  /**
+   * The session handed to the caller.
+   *
+   * Held so an in-wallet account switch can update `namespaces.solana.accounts`.
+   * Without it the connector had no way to reach the accounts it published, and
+   * the account recorded at connect time was the only one it ever reported.
+   */
+  session: UniversalWalletSession;
 }
 
+/**
+ * Re-exported from core so the CAIP-2 references have one definition.
+ * They were copy-pasted here, into utils.ts and into connector-walletconnect,
+ * which is how a wrong Solana genesis value survived in one copy while the
+ * others were right.
+ */
 export const SOLANA_CHAINS = {
-  mainnet: "solana:0",
-  devnet: "solana:1",
-  testnet: "solana:2",
+  mainnet: SOLANA_MAINNET,
+  devnet: SOLANA_DEVNET,
+  testnet: SOLANA_TESTNET,
 } as const;
 
 export type SolanaChain = (typeof SOLANA_CHAINS)[keyof typeof SOLANA_CHAINS];
