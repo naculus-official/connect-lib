@@ -92,27 +92,24 @@ describe("PasskeysConnector", () => {
     expect(connector.getAddress()).toBeNull();
   });
 
-  it("does not connect when navigator.credentials is missing", async () => {
+  it("does not connect before a smart-account implementation exists", async () => {
     const connector = createPasskeysConnector();
-    await expect(connector.connect()).rejects.toThrow("WebAuthn not available");
+    await expect(connector.connect()).rejects.toThrow("ERC-4337");
   });
 
-  it("creates a passkey and derives an address", async () => {
+  it("creates a passkey without deriving an EVM address", async () => {
     (navigator as any).credentials = {
       create: vi.fn().mockResolvedValue(createMockPublicKeyCredential()),
       get: vi.fn(),
     };
 
     const connector = createPasskeysConnector();
-    const session = await connector.connect();
+    const credential = await connector.createPasskey();
 
-    expect(session.walletType).toBe("passkeys");
-    expect(session.walletId).toBe("passkeys");
-    expect(session.namespaces.eip155).toBeDefined();
-    expect(session.namespaces.eip155.accounts.length).toBe(1);
-    expect(session.namespaces.eip155.accounts[0]).toContain("eip155:1:0x");
+    expect(credential.publicKey).toBeTruthy();
+    expect("address" in credential).toBe(false);
     expect(connector.hasCredential()).toBe(true);
-    expect(connector.getAddress()).toMatch(/^0x[0-9a-f]{40}$/);
+    expect(connector.getAddress()).toBeNull();
   });
 
   it("reuses existing passkey credential on reconnect", async () => {
@@ -122,7 +119,7 @@ describe("PasskeysConnector", () => {
     };
 
     const connector = createPasskeysConnector();
-    const session1 = await connector.connect();
+    await connector.createPasskey();
     const address1 = connector.getAddress();
 
     // Simulate a new connector instance with same storage
@@ -131,9 +128,7 @@ describe("PasskeysConnector", () => {
 
     // Should reload from localStorage
     expect(address2).toBe(address1);
-
-    const session2 = await connector2.reconnect(session1);
-    expect(session2.walletId).toBe("passkeys");
+    expect(address2).toBeNull();
   });
 
   it("disconnects clears saved credential", async () => {
@@ -143,56 +138,40 @@ describe("PasskeysConnector", () => {
     };
 
     const connector = createPasskeysConnector();
-    const session = await connector.connect();
+    await connector.createPasskey();
     expect(connector.hasCredential()).toBe(true);
 
-    await connector.disconnect(session);
+    await connector.disconnect({} as any);
     expect(connector.hasCredential()).toBe(false);
     expect(connector.getAddress()).toBeNull();
   });
 
-  it("signs a message via WebAuthn authentication", async () => {
-    (navigator as any).credentials = {
-      create: vi.fn().mockResolvedValue(createMockPublicKeyCredential()),
-      get: vi.fn().mockResolvedValue(createMockAssertion()),
-    };
-
+  it("does not advertise or fake EIP-191 message signing", async () => {
     const connector = createPasskeysConnector();
-    const session = await connector.connect();
 
-    const sig = await connector.signMessage(session, {
-      message: "Hello Passkeys!",
-    });
-    expect(sig).toBeDefined();
-    expect(sig).toContain("0x");
+    await expect(
+      connector.signMessage({} as any, { message: "Hello Passkeys!" }),
+    ).rejects.toThrow("not EIP-191");
   });
 
   it("signMessage throws when no message provided", async () => {
-    (navigator as any).credentials = {
-      create: vi.fn().mockResolvedValue(createMockPublicKeyCredential()),
-      get: vi.fn(),
-    };
-
     const connector = createPasskeysConnector();
-    const session = await connector.connect();
 
-    await expect(connector.signMessage(session, {})).rejects.toThrow(
-      "Message is required",
+    await expect(connector.signMessage({} as any, {})).rejects.toThrow(
+      "not EIP-191",
     );
   });
 
   it("throws for unsupported methods", async () => {
     const connector = createPasskeysConnector();
-    const session = await connector.connect().catch(() => null);
-    if (!session) return;
 
-    await expect(connector.signTransaction(session, {})).rejects.toThrow(
+    await expect(connector.signTransaction({} as any, {})).rejects.toThrow(
       "not supported",
     );
-    await expect(connector.sendTransaction(session, {})).rejects.toThrow(
+    await expect(connector.sendTransaction({} as any, {})).rejects.toThrow(
       "not supported",
     );
-    await expect(connector.sendCalls(session, [])).rejects.toThrow(
+    await expect(connector.sendCalls({} as any, [])).rejects.toThrow(
       "not supported",
     );
   });

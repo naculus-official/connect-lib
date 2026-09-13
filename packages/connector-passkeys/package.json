@@ -2,12 +2,14 @@
   "name": "@naculus/connector-passkeys",
   "version": "0.2.0",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "files": [
@@ -18,7 +20,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@naculus/connect-core": "workspace:*"
+    "@naculus/connect-core": "workspace:*",
+    "@noble/curves": "^1.9.0",
+    "@noble/hashes": "^1.7.1"
   },
   "devDependencies": {
     "tsup": "^8.3.6",
