@@ -15,7 +15,6 @@
 
 export type SimulationProviderName =
   | "eth_call"
-  | "blowfish"
   | "tenderly"
   | "auto";
 
@@ -53,8 +52,17 @@ export interface BalanceChange {
   tokenAddress: `0x${string}`;
   /** Token symbol (e.g. "USDC", "ETH") */
   tokenSymbol: string;
-  /** Number of decimals for display */
-  tokenDecimals: number;
+  /**
+   * Number of decimals for display, or `undefined` when the simulation source
+   * did not report them.
+   *
+   * Deliberately not defaulted to 18. This field feeds the pre-signature
+   * preview: assuming 18 for a 6-decimal token renders 1000 USDC as
+   * 0.000000001, i.e. it understates an outflow by 10^12 in exactly the UI a
+   * user relies on to catch a drain. A caller that cannot resolve decimals
+   * must show the raw amount and say so, not render a confident wrong number.
+   */
+  tokenDecimals: number | undefined;
   /** Raw change amount in smallest unit (stringified bigint) */
   amount: string;
   /** Direction of the balance change */
@@ -148,8 +156,6 @@ export interface TransactionDescriptor {
 // ── Configuration Types ───────────────────────────────────────────
 
 export interface SimulationConfig {
-  /** Blowfish API key (optional; enables Blowfish provider) */
-  blowfishApiKey?: string;
   /** Default provider to use (default: "auto") */
   defaultProvider?: SimulationProviderName;
   /** Whether simulation is enabled globally (default: true) */

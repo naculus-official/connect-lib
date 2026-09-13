@@ -3,7 +3,7 @@
  *
  * Dispatches simulation requests to the appropriate provider based on
  * configuration and chain support. Handles:
- * - Provider selection (auto / eth_call / blowfish)
+ * - Provider selection (auto / eth_call)
  * - Graceful fallback when a provider is unavailable
  * - Convenience methods like simulateERC20Transfer
  *
@@ -18,7 +18,6 @@
 import { DEFAULT_RPC_URLS } from "../rpc";
 import { ERC20TokenHelper } from "../token/ERC20TokenHelper";
 import type { TokenConfig } from "../token/types";
-import { BlowfishProvider } from "./providers/BlowfishProvider";
 import { EthCallProvider } from "./providers/EthCallProvider";
 import type { SimulationProvider } from "./providers/types";
 import type {
@@ -47,21 +46,16 @@ export class SimulationManager {
     new Map();
   private _defaultProvider: SimulationProviderName;
   private _enabled: boolean;
-  private blowfishApiKey?: string;
 
   constructor(config?: SimulationConfig) {
     this._enabled = config?.enabled ?? true;
     this._defaultProvider = config?.defaultProvider ?? "auto";
-    this.blowfishApiKey = config?.blowfishApiKey;
 
     // Always register eth_call provider
     this.providers.set("eth_call", new EthCallProvider(config?.rpcUrl));
-
-    // Register Blowfish if API key is provided
-    if (this.blowfishApiKey) {
-      this.providers.set("blowfish", new BlowfishProvider(this.blowfishApiKey));
-    }
   }
+
+
 
   // ── Public API ──────────────────────────────────────────────────
 
@@ -69,7 +63,7 @@ export class SimulationManager {
    * Main simulation entry point.
    *
    * Routes to the best available provider based on config and chain support.
-   * Falls back to eth_call if Blowfish is unavailable for the chain.
+   * Falls back to eth_call when no other provider supports the chain.
    *
    * @param tx - Transaction to simulate
    * @param from - Sender address
@@ -124,6 +118,7 @@ export class SimulationManager {
 
     // Try primary provider
     const result = await provider.simulate(tx, from, {
+      chainId,
       origin: options?.origin,
       rpcUrl,
     });
@@ -247,13 +242,7 @@ export class SimulationManager {
     this.providers.set(name, provider);
   }
 
-  /**
-   * Add or update a Blowfish API key at runtime.
-   */
-  setBlowfishApiKey(apiKey: string): void {
-    this.blowfishApiKey = apiKey;
-    this.providers.set("blowfish", new BlowfishProvider(apiKey));
-  }
+
 
   /**
    * Remove a registered provider.
@@ -268,9 +257,8 @@ export class SimulationManager {
    * Select the best provider for the given chain.
    *
    * Selection rules:
-   * - "auto": Try blowfish first (if registered + chain supported),
+   * - "auto": Use the best registered provider for the chain,
    *           fall back to eth_call
-   * - "blowfish": Use blowfish if available
    * - "eth_call": Always available on EVM
    */
   private _selectProvider(chainId: number): SimulationProvider | undefined {
@@ -278,14 +266,12 @@ export class SimulationManager {
       return this.providers.get("eth_call");
     }
 
-    if (this._defaultProvider === "blowfish") {
-      return this.providers.get("blowfish");
-    }
-
-    // "auto" mode: prefer Blowfish, fall back to eth_call
-    const blowfish = this.providers.get("blowfish");
-    if (blowfish && blowfish.isAvailable(chainId)) {
-      return blowfish;
+    // "auto": use a registered provider that supports this chain, otherwise
+    // eth_call. Consumers can registerProvider() their own; the only built-in
+    // one is eth_call, which needs no third-party account and no per-request
+    // fee.
+    for (const [name, provider] of this.providers) {
+      if (name !== "eth_call" && provider.isAvailable(chainId)) return provider;
     }
 
     return this.providers.get("eth_call");

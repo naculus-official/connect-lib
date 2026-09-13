@@ -126,28 +126,28 @@ describe("SimulationManager", () => {
     it("registers and uses custom providers", async () => {
       const manager = new SimulationManager({ enabled: true });
       const mockProvider: SimulationProvider = {
-        name: "blowfish",
+        name: "tenderly",
         supportedChains: [],
         simulate: vi.fn().mockResolvedValue({
           status: "success",
           balanceChanges: [],
           approvalChanges: [],
           riskAssessment: { level: "safe", score: 0, warnings: [] },
-          provider: "blowfish",
+          provider: "tenderly",
           summary: "Custom simulation",
           changesDetected: true,
         } as SimulationResult),
         isAvailable: vi.fn().mockReturnValue(true),
       };
 
-      manager.registerProvider("blowfish", mockProvider);
+      manager.registerProvider("tenderly", mockProvider);
       const result = await manager.simulate(
         { to: "0x1234", data: "0xabcd", value: "0x0" },
         "0xuser",
         { chainId: 1 },
       );
 
-      expect(result.provider).toBe("blowfish");
+      expect(result.provider).toBe("tenderly");
       expect(result.summary).toBe("Custom simulation");
     });
 
@@ -166,12 +166,7 @@ describe("SimulationManager", () => {
       expect(result.summary).toContain("No simulation provider");
     });
 
-    it("sets Blowfish API key at runtime", () => {
-      const manager = new SimulationManager();
-      manager.setBlowfishApiKey("test-key-123");
-      // After setting, the blowfish provider should be available
-      expect(true).toBe(true); // No error thrown
-    });
+
 
     it("checks availability for a chain", () => {
       const manager = new SimulationManager({ enabled: true });

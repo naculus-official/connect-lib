@@ -1,7 +1,7 @@
 /**
  * SimulationProvider — Abstract interface for simulation backends.
  *
- * All simulation providers (eth_call, Blowfish, Tenderly) implement
+ * All simulation providers implement
  * this interface so they can be swapped transparently by SimulationManager.
  *
  * @see /docs/features/transaction-simulation.md §6.4
@@ -25,13 +25,18 @@ export interface SimulationProvider {
    *
    * @param tx - The transaction to simulate
    * @param from - The sender address
-   * @param options - Optional.origin (dApp URL for phishing detection)
-   *                  and optional.rpcUrl (override for eth_call provider)
+   * @param options.chainId - The chain the transaction targets. A provider
+   *   backed by a per-chain API needs it, and it must not be inferred from
+   *   the dApp origin: the origin identifies the site, not the network, and a
+   *   dApp serving several chains from one URL would be mis-simulated.
+   * @param options.origin - dApp URL, for phishing detection
+   * @param options.rpcUrl - override for the eth_call provider
    */
   simulate(
     tx: TransactionDescriptor,
     from: `0x${string}`,
     options?: {
+      chainId?: number;
       origin?: string;
       rpcUrl?: string;
     },

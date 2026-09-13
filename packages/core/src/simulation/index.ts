@@ -7,7 +7,6 @@
  * @see /docs/features/transaction-simulation.md
  */
 
-export { BlowfishProvider } from "./providers/BlowfishProvider";
 export { EthCallProvider } from "./providers/EthCallProvider";
 export type { SimulationProvider } from "./providers/types";
 export {

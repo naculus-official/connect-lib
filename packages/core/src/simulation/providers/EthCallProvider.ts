@@ -27,7 +27,7 @@ const NATIVE_ASSET = {
 };
 
 const ETH_NATIVE_CHAINS = [1, 5, 11155111, 10, 42161, 421614, 8453, 84532];
-const MATIC_NATIVE_CHAINS = [137, 80002];
+const POLYGON_NATIVE_CHAINS = [137, 80002];
 const BNB_NATIVE_CHAINS = [56, 97];
 
 // ── Helper: Parse revert reason from error data ───────────────────
@@ -91,7 +91,9 @@ function parseRevertReason(errorData: string): string | undefined {
  */
 function getNativeSymbol(chainId: number): string {
   if (ETH_NATIVE_CHAINS.includes(chainId)) return "ETH";
-  if (MATIC_NATIVE_CHAINS.includes(chainId)) return "MATIC";
+  if (POLYGON_NATIVE_CHAINS.includes(chainId)) {
+    return chainId === 137 ? "POL" : "MATIC";
+  }
   if (BNB_NATIVE_CHAINS.includes(chainId)) return "BNB";
   return "ETH";
 }
