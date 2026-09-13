@@ -62,4 +62,20 @@ export interface Signer {
     typedData: string,
     privateKey: `0x${string}`,
   ): Promise<SignResult>;
+  /**
+   * Sign a 32-byte digest as an EIP-191 message.
+   *
+   * Distinct from `signMessage`, which prefixes the UTF-8 text it is given.
+   * Handing it a hash as a hex string signs the 66 characters "0x1234…", not
+   * the 32 bytes they denote, and the two produce different signatures.
+   *
+   * This is the primitive ERC-4337 needs: SimpleAccount validates a
+   * UserOperation by applying `toEthSignedMessageHash` to the userOpHash and
+   * recovering the owner, so the signature has to cover
+   * keccak256("\x19Ethereum Signed Message:\n32" ‖ hash).
+   */
+  signHash?(
+    hash: `0x${string}`,
+    privateKey: `0x${string}`,
+  ): Promise<SignResult>;
 }

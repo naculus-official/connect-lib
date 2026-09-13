@@ -64,11 +64,29 @@ export function cloneForBumping(
 
 /**
  * Get the chain ID as a number from a transaction request or CAIP-2 string.
+ * EVM chain IDs are unbounded in the protocol; this number-based API rejects
+ * values that cannot be represented exactly rather than silently rounding.
  */
 export function resolveChainId(
   tx: TransactionRequest,
   caipChainId: string,
 ): number {
-  if (tx.chainId !== undefined) return tx.chainId;
-  return parseInt(caipChainId.replace("eip155:", ""), 10);
+  if (tx.chainId !== undefined) {
+    if (!Number.isSafeInteger(tx.chainId) || tx.chainId <= 0) {
+      throw new Error(
+        "EVM transaction chain ID must be a positive safe integer",
+      );
+    }
+    return tx.chainId;
+  }
+  if (!/^eip155:(0|[1-9][0-9]*)$/.test(caipChainId)) {
+    throw new Error(`Invalid EIP-155 CAIP-2 chain ID: ${caipChainId}`);
+  }
+  const value = BigInt(caipChainId.slice("eip155:".length));
+  if (value <= 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(
+      `EVM chain ID exceeds the safe numeric range: ${caipChainId}`,
+    );
+  }
+  return Number(value);
 }

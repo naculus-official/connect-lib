@@ -14,8 +14,44 @@ type WorkerMessage = {
 };
 
 function createWorkerBlob(): Worker {
-  const url = new URL("./crypto-worker.js", import.meta.url);
-  return new Worker(url, { type: "module", name: "naculus-crypto-worker" });
+  if (typeof Worker === "undefined") {
+    throw new WalletError(
+      "worker_error",
+      "Web Workers are unavailable in this runtime.",
+    );
+  }
+  try {
+    // The literal `new Worker(new URL("./x.js", import.meta.url), { type })`
+    // shape must stay inline at the construction site. Vite/Rollup/webpack
+    // only rewrite the path and emit the worker asset when they can see this
+    // exact form; hoisting the URL into a helper defeats the static analysis,
+    // the asset is never emitted, and the worker 404s out of .vite/deps.
+    //
+    // Deliberately no document.baseURI fallback: this worker receives the
+    // wallet password and the decrypted private key, so its source must never
+    // be resolved against a location the host page controls. If the URL cannot
+    // be derived from the module itself, fail closed.
+    return new Worker(new URL("./crypto-worker.js", import.meta.url), {
+      type: "module",
+      name: "naculus-crypto-worker",
+    });
+  } catch (err) {
+    throw new WalletError(
+      "worker_error",
+      "Crypto worker could not be constructed. Isolated signing requires the " +
+        "ESM entry (`import`) so the bundler emits dist/crypto-worker.js; the " +
+        "CJS (`require`) entry cannot resolve it. " +
+        `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+function expectedWorkerAsset(): string {
+  try {
+    return new URL("./crypto-worker.js", import.meta.url).href;
+  } catch {
+    return "./crypto-worker.js";
+  }
 }
 
 export class IsolatedSigner implements Signer {
@@ -30,7 +66,7 @@ export class IsolatedSigner implements Signer {
   /**
    * Build a worker with every failure channel wired up.
    *
-   * Centralised because the two entry points had drifted: `init` registered
+   * Centralized because the two entry points had drifted: `init` registered
    * `onerror` and `initWithKey` did not, so a worker that failed to load left
    * `initWithKey` waiting out the full 30s timeout with nothing to diagnose.
    */
@@ -45,7 +81,7 @@ export class IsolatedSigner implements Signer {
         new WalletError(
           "worker_error",
           `Crypto worker failed to load (${e.message || "no detail"}). ` +
-            `Expected asset at ${new URL("./crypto-worker.js", import.meta.url).href}`,
+            `Expected asset at ${expectedWorkerAsset()}`,
         ),
       );
     };
@@ -54,7 +90,7 @@ export class IsolatedSigner implements Signer {
       this.failAll(
         new WalletError(
           "worker_error",
-          "Crypto worker sent a message that could not be deserialised",
+          "Crypto worker sent a message that could not be deserialized",
         ),
       );
     };
@@ -80,10 +116,10 @@ export class IsolatedSigner implements Signer {
   ): Promise<SignResult> {
     if (!this.worker)
       throw new WalletError("not_initialized", "Signer not initialized");
-    return this.send("signMessage", {
-      message: req.message,
-      chainId: req.chainId ?? "eip155:1",
-    });
+    // personal_sign hashes the message itself; do not invent a chain context
+    // when callers did not provide one (chain IDs belong to transactions and
+    // typed-data domains, not to the EIP-191 message digest).
+    return this.send("signMessage", { message: req.message });
   }
 
   async signTransaction(

@@ -1,10 +1,10 @@
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils";
+import { encodeRlpList, hexToBytes, toRlpBytes, toRlpQuantity } from "./rlp";
 
 interface SignMessageRequest {
   message: string;
-  chainId?: string;
 }
 
 interface TransactionRequest {
@@ -17,6 +17,7 @@ interface TransactionRequest {
   gas?: string;
   data?: string;
   chainId?: number;
+  type?: "legacy" | "eip1559";
 }
 
 interface EncryptedPayload {
@@ -27,44 +28,24 @@ interface EncryptedPayload {
 
 let privKey: Uint8Array | null = null;
 
-function hexToBytes(h: string): Uint8Array {
-  const raw = h.startsWith("0x") ? h.slice(2) : h;
-  const b = new Uint8Array(raw.length / 2);
-  for (let i = 0; i < raw.length; i += 2)
-    b[i / 2] = parseInt(raw.slice(i, i + 2), 16);
-  return b;
+function validatePrivateKey(key: Uint8Array): Uint8Array {
+  if (key.length !== 32 || !secp256k1.utils.isValidPrivateKey(key)) {
+    throw new Error("invalid EVM private key");
+  }
+  return key;
 }
 
-function toRlpBytes(hex: string): Uint8Array {
-  const b = hexToBytes(hex);
-  if (b.length === 1 && b[0] < 0x80) return b;
-  if (b.length < 56) return concatBytes(new Uint8Array([0x80 + b.length]), b);
-  const lenHex = b.length.toString(16);
-  const lenBytes = hexToBytes(lenHex.length % 2 ? "0" + lenHex : lenHex);
-  return concatBytes(
-    new Uint8Array([0x80 + 55 + lenBytes.length]),
-    lenBytes,
-    b,
-  );
-}
+// RLP quantities are big-endian integers with leading zeros stripped. Inputs
+// arrive zero-padded from two directions: JSON-RPC callers may omit a leading
+// zero nibble, and secp256k1 r/s are fixed 32-byte values whose top nibble is
+// zero often enough to matter (~18% of signatures carry one). Normalize here
+// rather than rejecting; caller-supplied fields are separately held to
+// canonical form by assertQuantity() in signTransaction().
 
-function encodeRlpList(items: Uint8Array[]): Uint8Array {
-  const encoded = concatBytes(...items);
-  if (encoded.length < 56)
-    return concatBytes(new Uint8Array([0xc0 + encoded.length]), encoded);
-  const tHex = encoded.length.toString(16);
-  const tBytes = hexToBytes(tHex.length % 2 ? "0" + tHex : tHex);
-  return concatBytes(
-    new Uint8Array([0xc0 + 55 + tBytes.length]),
-    tBytes,
-    encoded,
-  );
-}
-
-function signPersonalMessage(
-  msg: string,
-  chainId: string,
-): { signature: string; recovery?: number } {
+function signPersonalMessage(msg: string): {
+  signature: string;
+  recovery?: number;
+} {
   if (!privKey) throw new Error("no_key");
 
   const mb = new TextEncoder().encode(msg);
@@ -86,21 +67,66 @@ function signPersonalMessage(
 
 function signTransaction(tx: TransactionRequest): { signature: string } {
   if (!privKey) throw new Error("no_key");
-  if (!tx.to) throw new Error("Missing 'to' address");
+  if (!tx.to || !/^0x[0-9a-fA-F]{40}$/.test(tx.to))
+    throw new Error("'to' must be a 20-byte EVM address");
 
-  const txChainId = BigInt(tx.chainId ?? 1);
-  const isEIP1559 =
+  if (tx.chainId === undefined || !Number.isSafeInteger(tx.chainId)) {
+    throw new Error("chainId must be a positive safe integer");
+  }
+  const txChainId = BigInt(tx.chainId);
+  if (txChainId <= 0n) throw new Error("chainId must be a positive integer");
+
+  const assertQuantity = (value: string | undefined): void => {
+    if (
+      value !== undefined &&
+      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)
+    ) {
+      throw new Error("transaction quantities must be canonical hex values");
+    }
+  };
+  assertQuantity(tx.nonce);
+  assertQuantity(tx.gasPrice);
+  assertQuantity(tx.gas);
+  assertQuantity(tx.value);
+  assertQuantity(tx.maxFeePerGas);
+  assertQuantity(tx.maxPriorityFeePerGas);
+  const maxFeePerGas =
+    tx.maxFeePerGas === undefined ? 0n : BigInt(tx.maxFeePerGas);
+  const maxPriorityFeePerGas =
+    tx.maxPriorityFeePerGas === undefined
+      ? 0n
+      : BigInt(tx.maxPriorityFeePerGas);
+  if (maxPriorityFeePerGas > maxFeePerGas) {
+    throw new Error("maxPriorityFeePerGas cannot exceed maxFeePerGas");
+  }
+  const hasEIP1559Fees =
     tx.maxFeePerGas !== undefined || tx.maxPriorityFeePerGas !== undefined;
+  if (tx.type === "legacy" && hasEIP1559Fees) {
+    throw new Error("legacy transactions cannot include EIP-1559 fee fields");
+  }
+  if (tx.type === "eip1559" && !hasEIP1559Fees) {
+    throw new Error(
+      "EIP-1559 transactions require maxFeePerGas or maxPriorityFeePerGas",
+    );
+  }
+  if (hasEIP1559Fees && tx.gasPrice !== undefined) {
+    throw new Error("EIP-1559 transactions cannot include gasPrice");
+  }
+  if (tx.data !== undefined && !/^0x(?:[0-9a-fA-F]{2})*$/.test(tx.data)) {
+    throw new Error("transaction data must be an even-length hex byte string");
+  }
+  const isEIP1559 =
+    tx.type === "eip1559" || (tx.type === undefined && hasEIP1559Fees);
 
   if (isEIP1559) {
     const items = [
-      toRlpBytes("0x" + txChainId.toString(16)),
-      toRlpBytes(tx.nonce ?? "0x0"),
-      toRlpBytes(tx.maxPriorityFeePerGas ?? "0x0"),
-      toRlpBytes(tx.maxFeePerGas ?? "0x0"),
-      toRlpBytes(tx.gas ?? "0x5208"),
+      toRlpQuantity("0x" + txChainId.toString(16)),
+      toRlpQuantity(tx.nonce ?? "0x0"),
+      toRlpQuantity(tx.maxPriorityFeePerGas ?? "0x0"),
+      toRlpQuantity(tx.maxFeePerGas ?? "0x0"),
+      toRlpQuantity(tx.gas ?? "0x5208"),
       toRlpBytes(tx.to),
-      toRlpBytes(tx.value ?? "0x0"),
+      toRlpQuantity(tx.value ?? "0x0"),
       toRlpBytes(tx.data ?? "0x"),
       new Uint8Array([0xc0]),
     ];
@@ -110,28 +136,28 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
     const sig = secp256k1.sign(hash, privKey);
     const compact = sig.toCompactRawBytes();
     const itemsSigned = [
-      toRlpBytes("0x" + txChainId.toString(16)),
-      toRlpBytes(tx.nonce ?? "0x0"),
-      toRlpBytes(tx.maxPriorityFeePerGas ?? "0x0"),
-      toRlpBytes(tx.maxFeePerGas ?? "0x0"),
-      toRlpBytes(tx.gas ?? "0x5208"),
+      toRlpQuantity("0x" + txChainId.toString(16)),
+      toRlpQuantity(tx.nonce ?? "0x0"),
+      toRlpQuantity(tx.maxPriorityFeePerGas ?? "0x0"),
+      toRlpQuantity(tx.maxFeePerGas ?? "0x0"),
+      toRlpQuantity(tx.gas ?? "0x5208"),
       toRlpBytes(tx.to),
-      toRlpBytes(tx.value ?? "0x0"),
+      toRlpQuantity(tx.value ?? "0x0"),
       toRlpBytes(tx.data ?? "0x"),
       new Uint8Array([0xc0]),
-      toRlpBytes("0x" + (sig.recovery ?? 0).toString(16)),
-      toRlpBytes("0x" + bytesToHex(compact.slice(0, 32))),
-      toRlpBytes("0x" + bytesToHex(compact.slice(32, 64))),
+      toRlpQuantity("0x" + (sig.recovery ?? 0).toString(16)),
+      toRlpQuantity("0x" + bytesToHex(compact.slice(0, 32))),
+      toRlpQuantity("0x" + bytesToHex(compact.slice(32, 64))),
     ];
     const signedEncoded = encodeRlpList(itemsSigned);
     const signedPayload = concatBytes(new Uint8Array([0x02]), signedEncoded);
     return { signature: "0x" + bytesToHex(signedPayload) };
   }
 
-  const nonce = toRlpBytes(tx.nonce ?? "0x0");
-  const gasPrice = toRlpBytes(tx.gasPrice ?? "0x0");
-  const gas = toRlpBytes(tx.gas ?? "0x5208");
-  const value = toRlpBytes(tx.value ?? "0x0");
+  const nonce = toRlpQuantity(tx.nonce ?? "0x0");
+  const gasPrice = toRlpQuantity(tx.gasPrice ?? "0x0");
+  const gas = toRlpQuantity(tx.gas ?? "0x5208");
+  const value = toRlpQuantity(tx.value ?? "0x0");
   const toBytes = toRlpBytes(tx.to);
   const dataBytes = toRlpBytes(tx.data ?? "0x");
   const chainIdHex = "0x" + txChainId.toString(16);
@@ -143,8 +169,7 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
     toBytes,
     value,
     dataBytes,
-    toRlpBytes(chainIdHex),
-    toRlpBytes("0x"),
+    toRlpQuantity(chainIdHex),
     toRlpBytes("0x"),
     toRlpBytes("0x"),
   ];
@@ -152,7 +177,8 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
   const hash = keccak_256(encoded);
   const sig = secp256k1.sign(hash, privKey);
   const compact = sig.toBytes("compact");
-  const vAdj = compact[64] + 35 + Number(txChainId) * 2;
+  // Compact signatures are 64 bytes; recovery is not stored at compact[64].
+  const vAdj = BigInt(sig.recovery ?? 0) + 35n + txChainId * 2n;
 
   const signedTxList = [
     nonce,
@@ -161,9 +187,9 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
     toBytes,
     value,
     dataBytes,
-    toRlpBytes("0x" + vAdj.toString(16)),
-    toRlpBytes("0x" + bytesToHex(compact.slice(0, 32))),
-    toRlpBytes("0x" + bytesToHex(compact.slice(32, 64))),
+    toRlpQuantity("0x" + vAdj.toString(16)),
+    toRlpQuantity("0x" + bytesToHex(compact.slice(0, 32))),
+    toRlpQuantity("0x" + bytesToHex(compact.slice(32, 64))),
   ];
   const signedEncoded = encodeRlpList(signedTxList);
   return { signature: "0x" + bytesToHex(signedEncoded) };
@@ -220,11 +246,14 @@ async function decryptWallet(
     ct as any,
   );
   const data = JSON.parse(new TextDecoder().decode(decrypted));
-  const rawPk = data.privateKey.replace(/^0x/, "");
-  const pk = new Uint8Array(32);
-  for (let i = 0; i < 32; i++)
-    pk[i] = parseInt(rawPk.slice(i * 2, i * 2 + 2), 16);
-  return pk;
+  if (
+    !data ||
+    typeof data.privateKey !== "string" ||
+    !/^0x[0-9a-fA-F]{64}$/.test(data.privateKey)
+  ) {
+    throw new Error("invalid EVM private key");
+  }
+  return validatePrivateKey(hexToBytes(data.privateKey));
 }
 
 self.onmessage = async (e: MessageEvent) => {
@@ -252,7 +281,9 @@ self.onmessage = async (e: MessageEvent) => {
         break;
       }
       case "initWithKey": {
-        privKey = hexToBytes(payload.privateKey.replace(/^0x/, ""));
+        privKey = validatePrivateKey(
+          hexToBytes(payload.privateKey.replace(/^0x/, "")),
+        );
         reply({ type: "ready" });
         break;
       }
@@ -261,10 +292,7 @@ self.onmessage = async (e: MessageEvent) => {
           reply({ type: "error", error: "no_key" });
           break;
         }
-        const result = signPersonalMessage(
-          payload.message,
-          payload.chainId ?? "eip155:1",
-        );
+        const result = signPersonalMessage(payload.message);
         reply({ type: "signed", ...result });
         break;
       }
