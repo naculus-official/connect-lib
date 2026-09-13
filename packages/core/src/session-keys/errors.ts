@@ -17,7 +17,8 @@ export type SessionKeyErrorCode =
   | "session_key_required_fields_missing"
   | "session_key_max_tx_count_exceeded"
   | "session_key_value_limit_exceeded"
-  | "session_key_gas_limit_exceeded";
+  | "session_key_gas_limit_exceeded"
+  | "session_key_invalid_input";
 
 export const SESSION_KEY_ERROR_MESSAGES: Record<SessionKeyErrorCode, string> = {
   session_key_not_found:
@@ -45,6 +46,7 @@ export const SESSION_KEY_ERROR_MESSAGES: Record<SessionKeyErrorCode, string> = {
     "Transaction value exceeds the session key's remaining allowance.",
   session_key_gas_limit_exceeded:
     "Gas limit exceeds the session key's allowance.",
+  session_key_invalid_input: "Session key signing input is invalid.",
 };
 
 /**

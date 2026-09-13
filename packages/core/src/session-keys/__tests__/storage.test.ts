@@ -4,13 +4,62 @@ import { MemoryStorageAdapter } from "../../storage";
 
 // Use minimal PBKDF2 iterations for fast tests (default is 600_000)
 const TEST_ITERATIONS = 10;
+// Explicit opt-in required by the enforced PBKDF2 floor in ../storage.
+const WEAK_KDF = { unsafeAllowWeakKdf: true };
+
+describe("PBKDF2 work factor floor", () => {
+  const password = "test-encryption-password-123";
+  const privateKey =
+    "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as const;
+
+  it("rejects a work factor below the OWASP floor", () => {
+    expect(() =>
+      encryptPrivateKey(privateKey, password, undefined, 10),
+    ).toThrow(/at least 600000/);
+  });
+
+  it("still requires the opt-in when the caller is a hair under the floor", () => {
+    expect(() =>
+      encryptPrivateKey(privateKey, password, undefined, 599_999),
+    ).toThrow(/at least 600000/);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, 600_000.5, -1, 0])(
+    "rejects a non-integer or out-of-range work factor (%s)",
+    (bad) => {
+      // NaN is the interesting one: `NaN < MIN` is false, so a bare comparison
+      // would have let it through to the KDF.
+      expect(() =>
+        encryptPrivateKey(privateKey, password, undefined, bad as number),
+      ).toThrow(/at least 600000/);
+    },
+  );
+
+  it("accepts a weak factor only behind the explicit unsafe opt-in", () => {
+    expect(() =>
+      encryptPrivateKey(privateKey, password, undefined, 10, undefined, WEAK_KDF),
+    ).not.toThrow();
+  });
+
+  it("leaves decryption unrestricted so weak legacy records stay migratable", () => {
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      10,
+      undefined,
+      WEAK_KDF,
+    );
+    expect(decryptPrivateKey(encrypted, password, 10)).toBe(privateKey);
+  });
+});
 
 describe("encryptPrivateKey / decryptPrivateKey", () => {
   const password = "test-encryption-password-123";
   const privateKey = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as const;
 
   it("should encrypt and decrypt a private key correctly", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS);
+    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
     expect(encrypted.encryptedPrivateKey).toBeTruthy();
     expect(encrypted.iv).toBeTruthy();
     expect(encrypted.salt).toBeTruthy();
@@ -21,39 +70,39 @@ describe("encryptPrivateKey / decryptPrivateKey", () => {
   });
 
   it("should produce different ciphertexts for the same key (different IV)", () => {
-    const e1 = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS);
-    const e2 = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS);
+    const e1 = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
+    const e2 = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
     expect(e1.iv).not.toBe(e2.iv);
     expect(e1.encryptedPrivateKey).not.toBe(e2.encryptedPrivateKey);
   });
 
   it("should throw on wrong password", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS);
+    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
     expect(() => decryptPrivateKey(encrypted, "wrong-password", TEST_ITERATIONS)).toThrow();
   });
 
   it("should handle different key sizes", () => {
     const shortKey = "0xdeadbeef" as `0x${string}`;
-    const encrypted = encryptPrivateKey(shortKey, password, undefined, TEST_ITERATIONS);
+    const encrypted = encryptPrivateKey(shortKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
     const decrypted = decryptPrivateKey(encrypted, password, TEST_ITERATIONS);
     expect(decrypted).toBe(shortKey);
   });
 
   it("should accept a fixed salt for deterministic encryption", () => {
     const salt = new Uint8Array(16).fill(42);
-    const e1 = encryptPrivateKey(privateKey, password, salt, TEST_ITERATIONS);
-    const e2 = encryptPrivateKey(privateKey, password, salt, TEST_ITERATIONS);
+    const e1 = encryptPrivateKey(privateKey, password, salt, TEST_ITERATIONS, undefined, WEAK_KDF);
+    const e2 = encryptPrivateKey(privateKey, password, salt, TEST_ITERATIONS, undefined, WEAK_KDF);
     expect(e1.salt).toBe(e2.salt);
   });
 
   it("should fail when salt is tampered with", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS);
+    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
     const tampered = { ...encrypted, salt: "deadbeef" + encrypted.salt.slice(8) };
     expect(() => decryptPrivateKey(tampered, password, TEST_ITERATIONS)).toThrow();
   });
 
   it("should fail when iv is tampered with", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS);
+    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
     const tampered = { ...encrypted, iv: "deadbeef" + encrypted.iv.slice(8) };
     expect(() => decryptPrivateKey(tampered, password, TEST_ITERATIONS)).toThrow();
   });
@@ -119,6 +168,18 @@ describe("SessionKeyStorage", () => {
     expect(keys2[0].useCount).toBe(2);
   });
 
+  it("should serialize concurrent usage updates", async () => {
+    const storage = new SessionKeyStorage(new MemoryStorageAdapter());
+    await storage.save(createTestKey("concurrent"));
+
+    await Promise.all(
+      Array.from({ length: 10 }, () => storage.incrementUsage("concurrent")),
+    );
+
+    const keys = await storage.loadAll();
+    expect(keys[0].useCount).toBe(10);
+  });
+
   it("should clear all keys", async () => {
     const storage = new SessionKeyStorage(new MemoryStorageAdapter());
     await storage.save(createTestKey("k1"));
@@ -160,7 +221,7 @@ function createTestKey(id: string, status: "active" | "revoked" | "expired" = "a
       maxTotalValue: BigInt("100000000000000000"),
     },
     authorization: {
-      signerAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18" as `0x${string}`,
+      signerAddress: "0x742D35CC6634C0532925a3B844Bc9E7595F2bD18" as `0x${string}`,
       type: "offchain" as const,
     },
     status,

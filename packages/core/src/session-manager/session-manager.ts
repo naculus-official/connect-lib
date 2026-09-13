@@ -42,13 +42,38 @@ const DEFAULT_CHAIN_METADATA: Record<
   { name: string; symbol: string; decimals: number }
 > = {
   "eip155:1": { name: "Ether", symbol: "ETH", decimals: 18 },
-  "eip155:137": { name: "MATIC", symbol: "MATIC", decimals: 18 },
+  "eip155:137": { name: "POL", symbol: "POL", decimals: 18 },
   "eip155:10": { name: "Ether", symbol: "ETH", decimals: 18 },
   "eip155:42161": { name: "Ether", symbol: "ETH", decimals: 18 },
   "eip155:8453": { name: "Ether", symbol: "ETH", decimals: 18 },
   "eip155:11155111": { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
-  "solana:0": { name: "SOL", symbol: "SOL", decimals: 9 },
-  "solana:1": { name: "SOL", symbol: "SOL", decimals: 9 },
+  "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": {
+    name: "SOL",
+    symbol: "SOL",
+    decimals: 9,
+  },
+  "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": {
+    name: "SOL",
+    symbol: "SOL",
+    decimals: 9,
+  },
+  "xrpl:0": { name: "XRP", symbol: "XRP", decimals: 6 },
+};
+
+/**
+ * Native-currency precision per CAIP-2 namespace, used when a chain is not in
+ * the table above.
+ *
+ * Precision is a property of the namespace, not of the individual chain, so it
+ * is knowable even for an unlisted chain — unlike the ticker, which is not.
+ * Defaulting every namespace to 18 silently misreports XRP by 10^12 and SOL by
+ * 10^9. Values: wei (eip155), lamports (solana, cf. the SOL entries above),
+ * drops (xrpl, cf. formatXRPAmount/parseXRPAmount in @naculus/connector-xrpl).
+ */
+const NAMESPACE_NATIVE_DECIMALS: Record<string, number> = {
+  eip155: 18,
+  solana: 9,
+  xrpl: 6,
 };
 
 const DEFAULT_EXPLORERS: Record<string, string> = {
@@ -83,11 +108,64 @@ export class SessionManager extends SessionEventEmitter {
       defaultRpcUrls: config?.defaultRpcUrls,
       defaultCurrencies: config?.defaultCurrencies,
       defaultExplorers: config?.defaultExplorers,
+      encryptionKey: config?.encryptionKey,
     };
-    this.persistence = createSessionPersistence();
+    this.persistence = createSessionPersistence(
+      undefined,
+      undefined,
+      this.config.encryptionKey,
+    );
   }
 
   // ── Core API ────────────────────────────────────────────────────────
+
+  /** Register or replace a connector used by an attached session. */
+  registerConnector(connector: UniversalConnector, priority = 0): void {
+    this.connectorManager.register(connector.id, connector, priority);
+  }
+
+  /**
+   * Adopt a session that was already connected by a UI/client layer.
+   * This avoids prompting the wallet twice while still giving the session
+   * manager ownership of persistence, chain sessions, and lifecycle events.
+   */
+  async attach(
+    session: UniversalWalletSession,
+    chainId?: string,
+  ): Promise<ActiveSessionBundle> {
+    const activeChainId =
+      chainId ??
+      Object.values(session.namespaces)
+        .flatMap((namespace) => namespace.chains)
+        .at(0);
+    if (!activeChainId) {
+      throw createSessionError(
+        "chain_unsupported",
+        "Session contains no chain.",
+      );
+    }
+    validateChainId(activeChainId);
+
+    const connectorId = session.connectorId ?? session.walletType;
+    this.connectorManager.adopt(session);
+
+    const bundle = this.buildBundle(session, activeChainId, connectorId);
+    const bundleId = this.getBundleId(session);
+    if (
+      !this.bundles.has(bundleId) &&
+      this.bundles.size >= this.config.maxActiveSessions
+    ) {
+      const oldest = Array.from(this.bundles.entries()).reduce((a, b) =>
+        a[1].lastActiveAt < b[1].lastActiveAt ? a : b,
+      );
+      this.bundles.delete(oldest[0]);
+    }
+    this.bundles.set(bundleId, bundle);
+    this.activeBundleId = bundleId;
+    await this.persistBundle(bundle);
+    this.emit("sessionConnected", { bundle });
+    return bundle;
+  }
 
   /**
    * Connect to a wallet on a specific chain.
@@ -109,18 +187,8 @@ export class SessionManager extends SessionEventEmitter {
       this.bundles.delete(oldest[0]);
     }
 
-    // Let connectorManager auto-select or specify the connector
-    const session = await this.connectorManager.connect(input as any);
-    const bundle = this.buildBundle(session, chainId, walletType);
-
-    const bundleId = this.getBundleId(session);
-    this.bundles.set(bundleId, bundle);
-    this.activeBundleId = bundleId;
-
-    await this.persistBundle(bundle);
-
-    this.emit("sessionConnected", { bundle });
-    return bundle;
+    const session = await this.connectorManager.connect(walletType, input);
+    return this.attach(session, chainId);
   }
 
   /**
@@ -152,17 +220,21 @@ export class SessionManager extends SessionEventEmitter {
       await connector.switchChain(bundle.walletSession, chainId);
     } catch (error: any) {
       // Map user rejection
-      if (error?.code === 4001 || error?.message?.includes("rejected")) {
-        throw createSessionError("chain_switch_rejected");
+      if (
+        error?.code === 4001 ||
+        error?.code === "user_rejected" ||
+        error?.code === "chain_switch_rejected"
+      ) {
+        throw createSessionError("chain_switch_rejected", error);
       }
-      throw createSessionError("chain_unsupported");
+      throw createSessionError("chain_unsupported", error);
     }
 
     // Ensure the chain session exists (create if first time)
     if (!bundle.chainSessions.has(chainId)) {
       const chainSession = this.createChainSession(
         chainId,
-        bundle.walletSession.walletType,
+        bundle.walletSession.connectorId ?? bundle.walletSession.walletType,
       );
       bundle.chainSessions.set(chainId, chainSession);
       this.emit("chainSessionAdded", { bundle, chainSession });
@@ -194,6 +266,34 @@ export class SessionManager extends SessionEventEmitter {
   }
 
   /**
+   * Synchronize an active bundle after a wallet emits an external
+   * EIP-1193 chainChanged event. The wallet has already switched, so this
+   * updates local state without issuing a second wallet_switch request.
+   */
+  async syncExternalChain(chainId: string): Promise<void> {
+    validateChainId(chainId);
+
+    const bundle = this.getActiveBundle();
+    if (!bundle || bundle.activeChainId === chainId) return;
+
+    const previousChainId = bundle.activeChainId;
+    if (!bundle.chainSessions.has(chainId)) {
+      const chainSession = this.createChainSession(
+        chainId,
+        bundle.walletSession.connectorId ?? bundle.walletSession.walletType,
+      );
+      bundle.chainSessions.set(chainId, chainSession);
+      this.emit("chainSessionAdded", { bundle, chainSession });
+    }
+
+    bundle.activeChainId = chainId;
+    bundle.lastActiveAt = new Date().toISOString();
+    this.updateSessionNamespace(bundle.walletSession, chainId);
+    this.emit("chainChanged", { bundle, previousChainId, newChainId: chainId });
+    await this.persistBundle(bundle);
+  }
+
+  /**
    * Disconnect the active session.
    * Cleans up all chain sessions and clears storage.
    */
@@ -208,7 +308,8 @@ export class SessionManager extends SessionEventEmitter {
       logger.warn("session-manager", "Disconnect error:", error);
     }
 
-    const connectorId = bundle.walletSession.walletType;
+    const connectorId =
+      bundle.walletSession.connectorId ?? bundle.walletSession.walletType;
     const topic = bundle.walletSession.topic;
     const bundleId = this.activeBundleId;
 
@@ -393,6 +494,14 @@ export class SessionManager extends SessionEventEmitter {
     }
 
     const bundleId = this.getBundleId(bundle.walletSession);
+    // Restoration can happen before the UI has registered every connector.
+    // Adopt when the connector is available, but keep the persisted bundle so
+    // a later provider bootstrap can register it and take ownership.
+    const connectorId =
+      bundle.walletSession.connectorId ?? bundle.walletSession.walletType;
+    if (this.connectorManager.get(connectorId)) {
+      this.connectorManager.adopt(bundle.walletSession);
+    }
     this.bundles.set(bundleId, bundle);
     this.activeBundleId = bundleId;
 
@@ -447,13 +556,14 @@ export class SessionManager extends SessionEventEmitter {
     chainId: string,
     connectorId: string,
   ): ChainSession {
+    validateChainId(chainId);
     const { namespace } = parseChainId(chainId);
 
     const nativeCurrency = this.config.defaultCurrencies?.[chainId] ??
       DEFAULT_CHAIN_METADATA[chainId] ?? {
         name: chainId,
         symbol: chainId.includes(":") ? chainId.split(":")[1] : chainId,
-        decimals: 18,
+        decimals: NAMESPACE_NATIVE_DECIMALS[namespace],
       };
 
     const rpcUrl =
@@ -490,10 +600,16 @@ export class SessionManager extends SessionEventEmitter {
       };
     }
 
+    // `namespaces[ns].chains` carries two contracts at once: this manager
+    // treats it as the set of known chains (activeChainId tracks the active
+    // one), while every connector that reads it — evm-injected, coinbase,
+    // embedded, reown — treats `chains[0]` as the active chain. Appending
+    // satisfies the first and silently fails the second, which is why the
+    // connectors all rewrite the array themselves. Promote instead, so both
+    // readings agree and a connector that relies on this path is not handed a
+    // stale head.
     const ns = session.namespaces[namespace];
-    if (!ns.chains.includes(chainId)) {
-      ns.chains.push(chainId);
-    }
+    ns.chains = [chainId, ...ns.chains.filter((c) => c !== chainId)];
   }
 
   /**
@@ -502,11 +618,12 @@ export class SessionManager extends SessionEventEmitter {
   private resolveConnector(
     session: UniversalWalletSession,
   ): UniversalConnector {
-    const connector = this.connectorManager.get(session.walletType);
+    const connectorId = session.connectorId ?? session.walletType;
+    const connector = this.connectorManager.get(connectorId);
     if (!connector) {
       throw createSessionError(
         "chain_unsupported",
-        `No connector found for wallet type: ${session.walletType}`,
+        `No connector found for connector: ${connectorId}`,
       );
     }
     return connector;

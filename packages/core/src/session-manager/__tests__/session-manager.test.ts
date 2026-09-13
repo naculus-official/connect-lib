@@ -5,10 +5,19 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { SessionManager, createSessionManager } from "../session-manager";
-import type { ActiveSessionBundle, ChainSession, SessionManagerConfig } from "../types";
+import { type SessionManager, createSessionManager } from "../session-manager";
+import { createSessionPersistence } from "../persistence";
+import { MemoryStorageAdapter } from "../../storage";
+import type {
+  ActiveSessionBundle,
+  ChainSession,
+  SessionManagerConfig,
+} from "../types";
 import { parseChainId, validateChainId } from "../types";
-import { ConnectorManager, createConnectorManager } from "../../connector-manager";
+import {
+  type ConnectorManager,
+  createConnectorManager,
+} from "../../connector-manager";
 import type { UniversalConnector, ConnectorSupport } from "../../connector";
 import type { UniversalWalletSession } from "../../session";
 
@@ -73,7 +82,7 @@ const defaultConfig: SessionManagerConfig = {
   },
   defaultCurrencies: {
     "eip155:1": { name: "Ether", symbol: "ETH", decimals: 18 },
-    "eip155:137": { name: "MATIC", symbol: "MATIC", decimals: 18 },
+    "eip155:137": { name: "POL", symbol: "POL", decimals: 18 },
   },
 };
 
@@ -129,6 +138,29 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("attach()", () => {
+    it("adopts an already-connected session without reconnecting", async () => {
+      const session = await mockConnector.connect();
+      const connectSpy = vi.spyOn(mockConnector, "connect");
+
+      const bundle = await sm.attach(session, "eip155:137");
+
+      expect(connectSpy).not.toHaveBeenCalled();
+      expect(bundle.activeChainId).toBe("eip155:137");
+      expect(cm.getActiveSession()).toBe(session);
+      expect(session.connectorId).toBe("eip6963");
+    });
+
+    it("rejects a session whose connector has not been registered", async () => {
+      const session = await mockConnector.connect();
+      session.connectorId = "missing";
+
+      await expect(sm.attach(session, "eip155:1")).rejects.toThrow(
+        'Connector "missing" not found',
+      );
+    });
+  });
+
   describe("switchChain()", () => {
     it("should switch chain and update activeChainId", async () => {
       await sm.connect("eip6963", "eip155:1");
@@ -161,6 +193,24 @@ describe("SessionManager", () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
+    it("syncs an externally changed chain without calling the connector", async () => {
+      await sm.connect("eip6963", "eip155:1");
+      const switchSpy = vi.spyOn(mockConnector, "switchChain");
+      const handler = vi.fn();
+      sm.on("chainChanged", handler);
+
+      await sm.syncExternalChain("eip155:137");
+
+      expect(switchSpy).not.toHaveBeenCalled();
+      expect(sm.getActiveBundle()!.activeChainId).toBe("eip155:137");
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          previousChainId: "eip155:1",
+          newChainId: "eip155:137",
+        }),
+      );
+    });
+
     it("should throw if no active session", async () => {
       await expect(sm.switchChain("eip155:137")).rejects.toThrow(
         "No active session",
@@ -178,7 +228,14 @@ describe("SessionManager", () => {
         id: "session-test",
         walletId: "no-switch",
         walletType: "no-switch",
-        namespaces: { eip155: { chains: ["eip155:1"], accounts: [], methods: [], events: [] } },
+        namespaces: {
+          eip155: {
+            chains: ["eip155:1"],
+            accounts: [],
+            methods: [],
+            events: [],
+          },
+        },
         platform: "desktop-web",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -189,7 +246,14 @@ describe("SessionManager", () => {
         id: "session-test",
         walletId: "no-switch",
         walletType: "no-switch",
-        namespaces: { eip155: { chains: ["eip155:1"], accounts: [], methods: [], events: [] } },
+        namespaces: {
+          eip155: {
+            chains: ["eip155:1"],
+            accounts: [],
+            methods: [],
+            events: [],
+          },
+        },
         platform: "desktop-web",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -235,7 +299,14 @@ describe("SessionManager", () => {
         id: "session-reject",
         walletId: "reject",
         walletType: "reject",
-        namespaces: { eip155: { chains: ["eip155:1"], accounts: [], methods: [], events: [] } },
+        namespaces: {
+          eip155: {
+            chains: ["eip155:1"],
+            accounts: [],
+            methods: [],
+            events: [],
+          },
+        },
         platform: "desktop-web",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -264,6 +335,23 @@ describe("SessionManager", () => {
       await expect(rejectSm.switchChain("eip155:137")).rejects.toThrow(
         /rejected/,
       );
+    });
+
+    it("preserves the connector failure for a diagnosable unsupported chain", async () => {
+      const cause = new Error("embedded signer rejected chain state");
+      const rejectingConnector = createMockConnector("reject-details");
+      rejectingConnector.switchChain = vi.fn().mockRejectedValue(cause);
+      const cm = createConnectorManager();
+      cm.register("reject-details", rejectingConnector);
+      const manager = createSessionManager(cm, defaultConfig);
+      const session = await rejectingConnector.connect();
+      session.connectorId = "reject-details";
+      await manager.attach(session, "eip155:1");
+
+      await expect(manager.switchChain("eip155:137")).rejects.toMatchObject({
+        code: "chain_unsupported",
+        details: cause,
+      });
     });
   });
 
@@ -328,7 +416,7 @@ describe("SessionManager", () => {
               chainId: "eip155:137",
               connectorId: "eip6963",
               rpcUrl: "",
-              nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
+              nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
             },
           ],
         ]),
@@ -486,6 +574,57 @@ describe("SessionManager", () => {
   });
 });
 
+describe("Session persistence encryption", () => {
+  it("encrypts persisted session envelopes when an encryption key is configured", async () => {
+    const backing = new MemoryStorageAdapter();
+    const persistence = createSessionPersistence(
+      "encrypted-session",
+      backing,
+      "senderpay-test-key",
+    );
+    const data = {
+      walletSession: {
+        id: "session-1",
+        walletId: "wallet-1",
+        walletType: "walletconnect",
+        namespaces: {},
+        platform: "desktop-web",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      lastActiveChainId: "eip155:1",
+      chainSessions: {},
+      lastConnectedAt: new Date().toISOString(),
+    } as any;
+
+    await persistence.save(data);
+    const raw = await backing.get<any>("encrypted-session");
+    expect(raw).toMatchObject({ version: 1 });
+    expect(raw).not.toHaveProperty("walletSession");
+    await expect(persistence.load()).resolves.toMatchObject({
+      walletSession: { id: "session-1" },
+    });
+  });
+
+  it("does not load a plaintext record when encryption is configured", async () => {
+    const backing = new MemoryStorageAdapter();
+    await backing.set("encrypted-session", {
+      walletSession: { id: "plaintext" },
+      lastActiveChainId: "eip155:1",
+      chainSessions: {},
+      lastConnectedAt: new Date().toISOString(),
+    });
+    const persistence = createSessionPersistence(
+      "encrypted-session",
+      backing,
+      "senderpay-test-key",
+    );
+
+    await expect(persistence.load()).resolves.toBeNull();
+    await expect(backing.get("encrypted-session")).resolves.toBeNull();
+  });
+});
+
 describe("parseChainId", () => {
   it("should parse eip155:1 correctly", () => {
     const result = parseChainId("eip155:1");
@@ -493,10 +632,10 @@ describe("parseChainId", () => {
     expect(result.reference).toBe("1");
   });
 
-  it("should parse solana:0 correctly", () => {
-    const result = parseChainId("solana:0");
+  it("should parse canonical Solana CAIP-2 IDs correctly", () => {
+    const result = parseChainId("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
     expect(result.namespace).toBe("solana");
-    expect(result.reference).toBe("0");
+    expect(result.reference).toBe("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
   });
 
   it("should throw for invalid format", () => {
@@ -510,7 +649,9 @@ describe("validateChainId", () => {
   it("should accept valid chain IDs", () => {
     expect(() => validateChainId("eip155:1")).not.toThrow();
     expect(() => validateChainId("eip155:137")).not.toThrow();
-    expect(() => validateChainId("solana:0")).not.toThrow();
+    expect(() =>
+      validateChainId("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"),
+    ).not.toThrow();
     expect(() => validateChainId("xrpl:0")).not.toThrow();
   });
 
@@ -521,5 +662,119 @@ describe("validateChainId", () => {
 
   it("should reject non-numeric references", () => {
     expect(() => validateChainId("eip155:mainnet")).toThrow();
+    expect(() => validateChainId("eip155:0")).toThrow();
+  });
+});
+
+describe("native currency metadata", () => {
+  /**
+   * Precision is a namespace property, so an unlisted chain must not inherit
+   * the EVM assumption. A session reporting 18 decimals for XRP misstates a
+   * balance by 10^12, and the connector itself already encodes 6 (drops).
+   */
+  const makeNsConnector = (
+    namespace: string,
+    chains: string[],
+  ): UniversalConnector =>
+    ({
+      id: namespace,
+      name: `Mock ${namespace}`,
+      kind: "eip6963",
+      namespaces: [namespace],
+      supports: {
+        desktop: true,
+        mobile: true,
+        deepLink: false,
+        qr: false,
+        trustedReconnect: false,
+      },
+      async connect() {
+        return {
+          id: `session-${namespace}-1`,
+          walletId: namespace,
+          walletType: namespace,
+          namespaces: {
+            [namespace]: {
+              chains,
+              accounts: [`${namespace}:addr`],
+              methods: [],
+              events: [],
+            },
+          },
+          platform: "desktop-web",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as UniversalWalletSession;
+      },
+      async disconnect() {},
+      async getAccounts() {
+        return [`${namespace}:addr`];
+      },
+    }) as unknown as UniversalConnector;
+
+  it("reports XRP with 6 decimals, not the EVM default", async () => {
+    const cm2 = createConnectorManager();
+    cm2.register("xrpl", makeNsConnector("xrpl", ["xrpl:0"]));
+    const sm2 = createSessionManager(cm2, { autoRefreshFeeOnSwitch: false });
+    const bundle = await sm2.connect("xrpl", "xrpl:0");
+    const chain = bundle.chainSessions.get("xrpl:0")!;
+    expect(chain.nativeCurrency).toMatchObject({ symbol: "XRP", decimals: 6 });
+  });
+
+  it("falls back to the namespace precision for an unlisted chain", async () => {
+    const cm2 = createConnectorManager();
+    const unlisted = "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
+    cm2.register("solana", makeNsConnector("solana", [unlisted]));
+    const sm2 = createSessionManager(cm2, { autoRefreshFeeOnSwitch: false });
+    const bundle = await sm2.connect("solana", unlisted);
+    const chain = bundle.chainSessions.get(unlisted)!;
+    expect(chain.nativeCurrency.decimals).toBe(9);
+  });
+
+  it("rejects unsupported chains instead of assigning EVM currency precision", async () => {
+    const cm2 = createConnectorManager();
+    cm2.register(
+      "eip155",
+      makeNsConnector("eip155", ["eip155:1", "unknown:network"]),
+    );
+    const sm2 = createSessionManager(cm2, { autoRefreshFeeOnSwitch: false });
+
+    await expect(sm2.connect("eip155", "eip155:1")).rejects.toThrow(
+      'Unsupported namespace "unknown"',
+    );
+  });
+});
+
+describe("chains[0] active-chain contract", () => {
+  /**
+   * Connectors read chains[0] as the active chain while this manager tracks
+   * activeChainId separately. Appending kept both readings from agreeing.
+   */
+  it("promotes the switched-to chain to the head of the known set", async () => {
+    const cm2 = createConnectorManager();
+    const mc = createMockConnector("eip6963");
+    cm2.register("eip6963", mc);
+    const sm2 = createSessionManager(cm2, { autoRefreshFeeOnSwitch: false });
+    const bundle = await sm2.connect("eip6963", "eip155:1");
+    expect(bundle.walletSession.namespaces.eip155!.chains[0]).toBe("eip155:1");
+
+    await sm2.switchChain("eip155:137");
+    const chains = bundle.walletSession.namespaces.eip155!.chains;
+    expect(chains[0]).toBe("eip155:137");
+    expect(chains).toContain("eip155:1");
+    expect(new Set(chains).size).toBe(chains.length);
+  });
+
+  it("keeps chains[0] correct when the wallet switches externally", async () => {
+    const cm2 = createConnectorManager();
+    const mc = createMockConnector("eip6963");
+    cm2.register("eip6963", mc);
+    const sm2 = createSessionManager(cm2, { autoRefreshFeeOnSwitch: false });
+    const bundle = await sm2.connect("eip6963", "eip155:1");
+
+    await sm2.syncExternalChain("eip155:137");
+    expect(bundle.walletSession.namespaces.eip155!.chains[0]).toBe(
+      "eip155:137",
+    );
   });
 });

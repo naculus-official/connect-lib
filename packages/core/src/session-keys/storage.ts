@@ -15,6 +15,7 @@
  * @see docs/features/session-keys.md §6
  */
 
+import { gcm } from "@noble/ciphers/aes.js";
 import { hmac } from "@noble/hashes/hmac";
 import { pbkdf2 } from "@noble/hashes/pbkdf2";
 import { sha256 } from "@noble/hashes/sha256";
@@ -31,22 +32,44 @@ const KEY_LENGTH = 32; // AES-256
 const IV_LENGTH = 12; // GCM recommended nonce length
 const SALT_LENGTH = 16;
 const DEFAULT_PBKDF2_ITERATIONS = 600_000;
+/**
+ * Floor for caller-supplied PBKDF2 work factors, matching the OWASP guidance
+ * for PBKDF2-HMAC-SHA256. Enforced when writing new material only: existing
+ * records encrypted under a weaker factor must stay readable so they can be
+ * migrated, and refusing to decrypt them would not make them any stronger.
+ */
+const MIN_PBKDF2_ITERATIONS = 600_000;
+
+function assertIterationFloor(
+  iterations: number | undefined,
+  allowWeak = false,
+): void {
+  if (allowWeak) return;
+  if (iterations === undefined) return;
+  // NaN slips past a bare `< MIN` comparison because every NaN comparison is
+  // false. @noble/hashes rejects it downstream, but the floor should not
+  // depend on that, and "positive integer expected" does not tell the caller
+  // which parameter was wrong.
+  if (!Number.isInteger(iterations) || iterations < MIN_PBKDF2_ITERATIONS) {
+    throw new Error(
+      `PBKDF2 iterations must be an integer of at least ` +
+        `${MIN_PBKDF2_ITERATIONS}; received ${iterations}.`,
+    );
+  }
+}
 const STORAGE_KEY = "session_keys";
 const ENCRYPTION_KEY_STORAGE_KEY = "session_key_encryption_salt";
 
-// ─── AES-256-GCM using @noble/hashes (pure JS, no Web Crypto dependency) ──
-// We implement AES-256-GCM manually using noble/hashes primitives.
+type AsyncOperation<T> = () => Promise<T>;
 
 /**
- * Simple XOR-based stream cipher using HMAC-SHA256 as a PRF (CTR mode).
- * This avoids the dependency on Web Crypto API for environments
- * where it's not available (Node.js < 15, test runners, etc.).
- *
- * Security note: This is NOT production-grade AES-GCM. For production
- * use with real assets, integrate with Web Crypto API's subtle.crypto
- * for hardware-backed AES-GCM. This implementation provides reasonable
- * protection against casual access but should be upgraded for mainnet.
+ * A process-local fallback for runtimes without the Web Locks API. Browser
+ * tabs use navigator.locks below, while this map keeps multiple managers in
+ * the same process serialized (including tests and SSR).
  */
+const processLocks = new WeakMap<StorageAdapter, Map<string, Promise<void>>>();
+
+// ─── Key derivation and legacy compatibility ──────────────────────────
 
 function deriveEncryptionKey(
   password: string,
@@ -59,56 +82,8 @@ function deriveEncryptionKey(
   });
 }
 
-function aes256ctrEncrypt(
-  plaintext: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array,
-): { ciphertext: Uint8Array; tag: Uint8Array } {
-  const blockSize = 16;
-
-  // Generate keystream blocks using HMAC-SHA256 as PRF
-  const numBlocks = Math.ceil((plaintext.length + blockSize) / blockSize);
-  const keystream = new Uint8Array(numBlocks * 32); // each HMAC output is 32 bytes
-  const counter = new Uint8Array(iv);
-  // Convert IV bytes to a BigInt counter
-  let ctrValue = 0n;
-  for (let i = 0; i < iv.length; i++) {
-    ctrValue = (ctrValue << 8n) | BigInt(iv[i]);
-  }
-
-  for (let b = 0; b < numBlocks; b++) {
-    const counterBytes = new Uint8Array(8);
-    let blockCtr = ctrValue + BigInt(b);
-    for (let i = 7; i >= 0; i--) {
-      counterBytes[i] = Number(blockCtr & 0xffn);
-      blockCtr >>= 8n;
-    }
-
-    // Combine IV (first 4 bytes) with counter
-    const input = new Uint8Array(iv.length + 8);
-    input.set(iv.slice(0, 4), 0);
-    input.set(counterBytes, 4);
-
-    const blockKey = hmac(sha256, key, input);
-    keystream.set(blockKey, b * 32);
-  }
-
-  // XOR plaintext with keystream
-  const ciphertext = new Uint8Array(plaintext.length);
-  for (let i = 0; i < plaintext.length; i++) {
-    ciphertext[i] = plaintext[i] ^ keystream[i];
-  }
-
-  // Compute authentication tag: HMAC of iv + ciphertext (binds IV to auth)
-  const authData = new Uint8Array(iv.length + ciphertext.length);
-  authData.set(iv);
-  authData.set(ciphertext, iv.length);
-  const tag = hmac(sha256, key, authData).slice(0, 16);
-
-  return { ciphertext, tag };
-}
-
-function aes256ctrDecrypt(
+/** Decrypt records written by the pre-0.2 implementation. */
+function legacyCtrHmacDecrypt(
   ciphertext: Uint8Array,
   key: Uint8Array,
   iv: Uint8Array,
@@ -178,6 +153,7 @@ function aes256ctrDecrypt(
  * @param privateKeyHex - The raw private key as a 0x-prefixed hex string
  * @param password - Derivation password (e.g. wallet seed hash or user-provided)
  * @param salt - Optional salt override (provided for decryption consistency)
+ * @param iterations - PBKDF2 work factor; must be >= MIN_PBKDF2_ITERATIONS
  * @returns EncryptedKeyPair with ciphertext, IV, and salt
  */
 export function encryptPrivateKey(
@@ -186,27 +162,25 @@ export function encryptPrivateKey(
   salt?: Uint8Array,
   iterations?: number,
   publicKeyHex?: `0x${string}`,
+  options?: { unsafeAllowWeakKdf?: boolean },
 ): EncryptedKeyPair {
+  assertIterationFloor(iterations, options?.unsafeAllowWeakKdf);
   const pkBytes = hexToBytes(privateKeyHex.slice(2));
   const actualSalt = salt ?? randomBytes(SALT_LENGTH);
   const iv = randomBytes(IV_LENGTH);
   const key = deriveEncryptionKey(password, actualSalt, iterations);
 
-  const { ciphertext, tag } = aes256ctrEncrypt(pkBytes, key, iv);
-
-  // Concatenate tag + ciphertext for storage
-  const combined = new Uint8Array(tag.length + ciphertext.length);
-  combined.set(tag, 0);
-  combined.set(ciphertext, tag.length);
-
   const resultPublicKey =
     publicKeyHex ?? (`0x${bytesToHex(pkBytes)}` as `0x${string}`);
+  const aad = hexToBytes(resultPublicKey.slice(2));
+  const combined = gcm(key, iv, aad).encrypt(pkBytes);
 
   return {
     publicKey: resultPublicKey,
     encryptedPrivateKey: bytesToHex(combined),
     iv: bytesToHex(iv),
     salt: bytesToHex(actualSalt),
+    algorithm: "aes-256-gcm",
   };
 }
 
@@ -224,13 +198,18 @@ export function decryptPrivateKey(
   iterations?: number,
 ): `0x${string}` {
   const combined = hexToBytes(encrypted.encryptedPrivateKey);
-  const tag = combined.slice(0, 16);
-  const ciphertext = combined.slice(16);
   const iv = hexToBytes(encrypted.iv);
   const salt = hexToBytes(encrypted.salt);
   const key = deriveEncryptionKey(password, salt, iterations);
 
-  const plaintext = aes256ctrDecrypt(ciphertext, key, iv, tag);
+  const plaintext = encrypted.algorithm === "aes-256-gcm"
+    ? gcm(key, iv, hexToBytes(encrypted.publicKey.slice(2))).decrypt(combined)
+    : legacyCtrHmacDecrypt(
+        combined.slice(16),
+        key,
+        iv,
+        combined.slice(0, 16),
+      );
 
   return `0x${bytesToHex(plaintext)}`;
 }
@@ -284,19 +263,85 @@ export class SessionKeyStorage {
    */
   async loadAll(): Promise<StoredSessionKey[]> {
     try {
-      const raw = await this.adapter.get<string>(STORAGE_KEY);
-      if (!raw) return [];
-      if (typeof raw === "string") {
-        return JSON.parse(raw, bigintReviver) as StoredSessionKey[];
-      }
-      // Fallback: if already deserialized (e.g. MemoryStorageAdapter), re-parse
-      return JSON.parse(
-        JSON.stringify(raw),
-        bigintReviver,
-      ) as StoredSessionKey[];
+      return await this.loadAllStrict();
     } catch {
       return [];
     }
+  }
+
+  /** Load records without hiding parse or backend errors from mutations. */
+  private async loadAllStrict(): Promise<StoredSessionKey[]> {
+    const raw = await this.adapter.get<string>(STORAGE_KEY);
+    if (!raw) return [];
+    if (typeof raw === "string") {
+      return JSON.parse(raw, bigintReviver) as StoredSessionKey[];
+    }
+    // Fallback: if already deserialized (e.g. MemoryStorageAdapter), re-parse
+    return JSON.parse(JSON.stringify(raw), bigintReviver) as StoredSessionKey[];
+  }
+
+  /**
+   * Serialize all operations for one key across managers and browser tabs.
+   * navigator.locks is supported by modern browsers and provides the
+   * cross-tab part; the WeakMap covers runtimes where it is unavailable.
+   */
+  async withKeyLock<T>(id: string, operation: AsyncOperation<T>): Promise<T> {
+    return this.withLock(
+      `key:${id}`,
+      `naculus-session-key:${STORAGE_KEY}:${id}`,
+      operation,
+    );
+  }
+
+  /** Serialize array read-modify-write operations across all session keys. */
+  async withStorageLock<T>(operation: AsyncOperation<T>): Promise<T> {
+    return this.withLock(
+      "all",
+      `naculus-session-storage:${STORAGE_KEY}`,
+      operation,
+    );
+  }
+
+  private async withLock<T>(
+    processKey: string,
+    webLockName: string,
+    operation: AsyncOperation<T>,
+  ): Promise<T> {
+    const runInProcess = async (): Promise<T> => {
+      let locks = processLocks.get(this.adapter);
+      if (!locks) {
+        locks = new Map();
+        processLocks.set(this.adapter, locks);
+      }
+
+      const previous = locks.get(processKey) ?? Promise.resolve();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      locks.set(processKey, gate);
+      await previous.catch(() => undefined);
+      try {
+        return await operation();
+      } finally {
+        release();
+        if (locks.get(processKey) === gate) locks.delete(processKey);
+      }
+    };
+
+    const locks = (
+      globalThis as typeof globalThis & {
+        navigator?: {
+          locks?: {
+            request<T>(name: string, callback: () => Promise<T>): Promise<T>;
+          };
+        };
+      }
+    ).navigator?.locks;
+    if (locks) {
+      return locks.request(webLockName, runInProcess);
+    }
+    return runInProcess();
   }
 
   /**
@@ -315,21 +360,23 @@ export class SessionKeyStorage {
    * Save a single session key (adds or updates).
    */
   async save(key: StoredSessionKey): Promise<void> {
-    const keys = await this.loadAll();
-    const index = keys.findIndex((k) => k.id === key.id);
-    if (index >= 0) {
-      keys[index] = key;
-    } else {
-      keys.push(key);
-    }
-    await this.persistAll(keys);
+    await this.withStorageLock(async () => {
+      const keys = await this.loadAllStrict();
+      const index = keys.findIndex((k) => k.id === key.id);
+      if (index >= 0) {
+        keys[index] = key;
+      } else {
+        keys.push(key);
+      }
+      await this.persistAll(keys);
+    });
   }
 
   /**
    * Retrieve a single session key by ID.
    */
   async get(id: string): Promise<StoredSessionKey | null> {
-    const keys = await this.loadAll();
+    const keys = await this.loadAllStrict();
     return keys.find((k) => k.id === id) ?? null;
   }
 
@@ -337,9 +384,11 @@ export class SessionKeyStorage {
    * Remove a single session key by ID.
    */
   async remove(id: string): Promise<void> {
-    const keys = await this.loadAll();
-    const filtered = keys.filter((k) => k.id !== id);
-    await this.persistAll(filtered);
+    await this.withStorageLock(async () => {
+      const keys = await this.loadAllStrict();
+      const filtered = keys.filter((k) => k.id !== id);
+      await this.persistAll(filtered);
+    });
   }
 
   /**
@@ -349,33 +398,54 @@ export class SessionKeyStorage {
     id: string,
     status: StoredSessionKey["status"],
   ): Promise<void> {
-    const keys = await this.loadAll();
-    const key = keys.find((k) => k.id === id);
-    if (!key) {
-      throw createSessionKeyError("session_key_not_found", id);
-    }
-    key.status = status;
-    await this.persistAll(keys);
+    await this.withStorageLock(async () => {
+      const keys = await this.loadAllStrict();
+      const key = keys.find((k) => k.id === id);
+      if (!key) {
+        throw createSessionKeyError("session_key_not_found", id);
+      }
+      key.status = status;
+      await this.persistAll(keys);
+    });
   }
 
   /**
    * Increment the usage counter for a session key.
    */
-  async incrementUsage(id: string): Promise<void> {
-    const keys = await this.loadAll();
-    const key = keys.find((k) => k.id === id);
-    if (!key) {
-      throw createSessionKeyError("session_key_not_found", id);
-    }
-    key.useCount += 1;
-    key.lastUsedAt = Date.now();
-    await this.persistAll(keys);
+  async incrementUsage(
+    id: string,
+    tx?: { value?: string; gas?: string },
+  ): Promise<void> {
+    await this.withKeyLock(id, () => this.incrementUsageUnlocked(id, tx));
+  }
+
+  /** @internal Call only while holding withKeyLock for the same ID. */
+  async incrementUsageUnlocked(
+    id: string,
+    tx?: { value?: string; gas?: string },
+  ): Promise<void> {
+    await this.withStorageLock(async () => {
+      const keys = await this.loadAllStrict();
+      const key = keys.find((k) => k.id === id);
+      if (!key) {
+        throw createSessionKeyError("session_key_not_found", id);
+      }
+      key.useCount += 1;
+      key.lastUsedAt = Date.now();
+      if (tx?.value) {
+        key.accumulatedValue = (key.accumulatedValue ?? 0n) + BigInt(tx.value);
+      }
+      if (tx?.gas) {
+        key.accumulatedGas = (key.accumulatedGas ?? 0n) + BigInt(tx.gas);
+      }
+      await this.persistAll(keys);
+    });
   }
 
   /**
    * Remove all session keys.
    */
   async clear(): Promise<void> {
-    await this.adapter.remove(STORAGE_KEY);
+    await this.withStorageLock(() => this.adapter.remove(STORAGE_KEY));
   }
 }

@@ -13,6 +13,7 @@ import type { UniversalWalletSession } from "../session";
 import { isSessionExpired } from "../session";
 import type { StorageAdapter } from "../storage";
 import { LocalStorageAdapter, MemoryStorageAdapter } from "../storage";
+import { EncryptedRecordStorageAdapter } from "../storage/encrypted-record";
 import type {
   ActiveSessionBundle,
   ChainSession,
@@ -134,7 +135,10 @@ export class SessionPersistence {
 export function createSessionPersistence(
   key?: string,
   adapter?: StorageAdapter,
+  encryptionKey?: string,
 ): SessionPersistence {
+  const useEncryption = typeof encryptionKey === "string" && encryptionKey.length > 0;
+
   // If no localStorage available, use memory storage to avoid crashes
   if (!adapter) {
     const hasLocalStorage =
@@ -142,8 +146,17 @@ export function createSessionPersistence(
       typeof (globalThis as any).localStorage !== "undefined";
 
     if (!hasLocalStorage) {
-      return new SessionPersistence(key, new MemoryStorageAdapter());
+      const memory = new MemoryStorageAdapter();
+      return new SessionPersistence(
+        key,
+        useEncryption ? new EncryptedRecordStorageAdapter(memory, encryptionKey!) : memory,
+      );
     }
   }
-  return new SessionPersistence(key, adapter);
+
+  const base = adapter ?? new LocalStorageAdapter("naculus_sm:");
+  return new SessionPersistence(
+    key,
+    useEncryption ? new EncryptedRecordStorageAdapter(base, encryptionKey!) : base,
+  );
 }

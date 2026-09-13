@@ -24,6 +24,7 @@ export type {
   SessionKeyManagerConfig,
   SessionKeyPair,
   SessionKeyScope,
+  SessionKeyTransaction,
   SessionKeyStatus,
   SignedAuthorization,
   StoredSessionKey,

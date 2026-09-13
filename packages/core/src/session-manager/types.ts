@@ -17,7 +17,7 @@ import type { UniversalWalletSession } from "../session";
  * across different namespaces (e.g., EVM + Solana).
  */
 export interface ChainSession {
-  /** Chain ID in CAIP-2 format (e.g., "eip155:1", "solana:0") */
+  /** Chain ID in CAIP-2 format (e.g., "eip155:1", canonical Solana genesis-hash ID) */
   chainId: string;
 
   /** The connector instance ID that manages this chain */
@@ -106,14 +106,17 @@ export interface SessionManagerConfig {
   autoRefreshFeeOnSwitch?: boolean;
   /** Maximum active session bundles (default: 10) */
   maxActiveSessions?: number;
-  /** Optional AES-GCM encryption key for session persistence */
+  /**
+   * Optional AES-GCM key for session persistence. This is only at-rest
+   * obfuscation in a browser: anything shipped to frontend code is readable by
+   * XSS, extensions, and a compromised hosting control plane.
+   */
   encryptionKey?: string;
 }
 
 // ─── Refresh Fees Options ──────────────────────────────────────────────
 
 export interface RefreshFeesOptions {
-  force?: boolean;
   userOverrides?: Partial<FeeEstimationConfig>;
 }
 
@@ -122,7 +125,7 @@ export interface RefreshFeesOptions {
 /**
  * Parse a CAIP-2 chain ID into namespace and reference parts.
  * e.g., "eip155:1" → { namespace: "eip155", reference: "1" }
- * e.g., "solana:0" → { namespace: "solana", reference: "0" }
+ * e.g., "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" → namespace + reference
  */
 export function parseChainId(chainId: string): {
   namespace: string;
@@ -149,9 +152,18 @@ export function validateChainId(chainId: string): void {
       `Unsupported namespace "${namespace}" in chain ID "${chainId}". Supported: ${supported.join(", ")}`,
     );
   }
-  if (!/^\d+$/.test(reference)) {
+  if (namespace === "eip155" && !/^[1-9]\d*$/.test(reference)) {
+    throw new Error(`Invalid EIP-155 chain reference "${reference}".`);
+  }
+  if (namespace === "solana" && !/^[1-9A-HJ-NP-Za-km-z]{32}$/.test(reference)) {
     throw new Error(
-      `Invalid reference "${reference}" in chain ID "${chainId}". Reference must be numeric.`,
+      `Invalid Solana CAIP-2 reference "${reference}". Use the first 32 characters of getGenesisHash().`,
     );
+  }
+  if (
+    namespace === "xrpl" &&
+    (!/^(0|[1-9]\d*)$/.test(reference) || BigInt(reference) > 4_294_967_295n)
+  ) {
+    throw new Error(`Invalid XRPL network ID "${reference}".`);
   }
 }
