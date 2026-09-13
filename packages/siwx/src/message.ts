@@ -10,7 +10,7 @@
  */
 
 import type { SiwxMessage, SiwxParams } from "./types";
-import { nowISO } from "./utils";
+import { isValidDomain, nowISO } from "./utils";
 
 /**
  * Default nonce length for SIWx messages.
@@ -21,6 +21,119 @@ export const DEFAULT_NONCE_LENGTH = 16;
  * Current version of the SIWx message format.
  */
 export const SIWX_VERSION = 1;
+
+const CAIP2_PATTERN = /^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/;
+const RFC3339_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const REQUEST_ID_PATTERN =
+  /^(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2}|[!$&'()*+,;=:@])*$/;
+const FIELD_PREFIXES = [
+  "URI: ",
+  "Version: ",
+  "Chain ID: ",
+  "Nonce: ",
+  "Issued At: ",
+  "Expiration Time: ",
+  "Not Before: ",
+  "Request ID: ",
+  "Resources:",
+] as const;
+
+function isValidRfc3339(value: string): boolean {
+  return (
+    RFC3339_PATTERN.test(value) && Number.isFinite(new Date(value).getTime())
+  );
+}
+
+function hasControlCharacter(value: string): boolean {
+  return [...value].some((char) => {
+    const code = char.charCodeAt(0);
+    return code <= 0x20 || code === 0x7f;
+  });
+}
+
+function hasInvalidStatementCharacter(value: string): boolean {
+  return [...value].some((char) => {
+    const code = char.charCodeAt(0);
+    return code < 0x20 || code === 0x7f || code > 0x7f;
+  });
+}
+
+function isValidUri(value: string): boolean {
+  if (!value || hasControlCharacter(value)) return false;
+  try {
+    // URL accepts the URI schemes used by CAIP-122 resources (https, ipfs,
+    // urn, did, etc.) and rejects malformed authorities and control bytes.
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateParams(params: SiwxParams): void {
+  if (!isValidDomain(params.domain)) {
+    throw new Error(`Invalid SIWx domain: "${params.domain}"`);
+  }
+  if (!params.address || /[\r\n]/.test(params.address)) {
+    throw new Error("Invalid SIWx account address");
+  }
+  if (!isValidUri(params.uri)) {
+    throw new Error(`Invalid SIWx URI: "${params.uri}"`);
+  }
+  if (params.version !== undefined && params.version !== SIWX_VERSION) {
+    throw new Error(`Unsupported SIWx version: ${params.version}`);
+  }
+  if (!CAIP2_PATTERN.test(params.chainId)) {
+    throw new Error(`Invalid CAIP-2 chain ID: "${params.chainId}"`);
+  }
+  if (
+    params.chainId.startsWith("eip155:") &&
+    !/^eip155:[1-9][0-9]*$/.test(params.chainId)
+  ) {
+    throw new Error(`Invalid EIP-155 chain ID: "${params.chainId}"`);
+  }
+  if (
+    params.chainId.startsWith("eip155:") &&
+    !/^0x[0-9a-fA-F]{40}$/.test(params.address)
+  ) {
+    throw new Error("Invalid EIP-155 account address");
+  }
+  if (!/^[A-Za-z0-9]{8,}$/.test(params.nonce)) {
+    throw new Error(
+      "Invalid SIWx nonce: expected at least 8 alphanumeric characters",
+    );
+  }
+  const issuedAt = params.issuedAt ?? nowISO();
+  if (!isValidRfc3339(issuedAt)) {
+    throw new Error(`Invalid SIWx issuedAt: "${issuedAt}"`);
+  }
+  for (const [label, value] of [
+    ["expirationTime", params.expirationTime],
+    ["notBefore", params.notBefore],
+  ] as const) {
+    if (value !== undefined && !isValidRfc3339(value)) {
+      throw new Error(`Invalid SIWx ${label}: "${value}"`);
+    }
+  }
+  if (
+    params.statement !== undefined &&
+    hasInvalidStatementCharacter(params.statement)
+  ) {
+    throw new Error("Invalid SIWx statement: must be single-line ASCII");
+  }
+  if (
+    params.requestId !== undefined &&
+    !REQUEST_ID_PATTERN.test(params.requestId)
+  ) {
+    throw new Error(`Invalid SIWx requestId: "${params.requestId}"`);
+  }
+  for (const resource of params.resources ?? []) {
+    if (!isValidUri(resource)) {
+      throw new Error(`Invalid SIWx resource URI: "${resource}"`);
+    }
+  }
+}
 
 /**
  * Derive a human-readable blockchain name from a CAIP-2 chain ID.
@@ -40,6 +153,7 @@ export function getBlockchainName(chainId: string): string {
  * The returned string is what the user signs.
  */
 export function createSiwxMessage(params: SiwxParams): string {
+  validateParams(params);
   const domain = params.domain;
   const address = params.address;
   const statement = params.statement;
@@ -117,6 +231,9 @@ export function createSiwxMessage(params: SiwxParams): string {
  */
 export function parseSiwxMessage(raw: string): SiwxMessage | null {
   try {
+    // The canonical serialization uses LF; accepting CRLF would create a
+    // different signed byte sequence across implementations.
+    if (!raw || raw.includes("\r")) return null;
     const lines = raw.split("\n");
     if (lines.length < 4) return null;
 
@@ -138,7 +255,7 @@ export function parseSiwxMessage(raw: string): SiwxMessage | null {
     // Find field lines by scanning for known prefixes
     let statement: string | null = null;
     let uri = "";
-    let version = SIWX_VERSION;
+    let version = 0;
     let chainId = "";
     let nonce = "";
     let issuedAt: string | null = null;
@@ -153,17 +270,7 @@ export function parseSiwxMessage(raw: string): SiwxMessage | null {
     // Fields are: URI:, Version:, Chain ID:, Nonce:, Issued At:, etc.
     let fieldStart = -1;
     for (let i = 2; i < lines.length; i++) {
-      if (
-        lines[i].startsWith("URI:") ||
-        lines[i].startsWith("Version:") ||
-        lines[i].startsWith("Chain ID:") ||
-        lines[i].startsWith("Nonce:") ||
-        lines[i].startsWith("Issued At:") ||
-        lines[i].startsWith("Expiration Time:") ||
-        lines[i].startsWith("Not Before:") ||
-        lines[i].startsWith("Request ID:") ||
-        lines[i].startsWith("Resources:")
-      ) {
+      if (FIELD_PREFIXES.some((prefix) => lines[i].startsWith(prefix))) {
         fieldStart = i;
         break;
       }
@@ -180,35 +287,81 @@ export function parseSiwxMessage(raw: string): SiwxMessage | null {
 
     if (fieldStart === -1) return null;
 
-    // Parse fields
+    // Parse fields. Each field appears at most once and follows the order in
+    // the EIP-4361/CAIP-122 text representation.
+    const fieldOrder = [
+      "URI: ",
+      "Version: ",
+      "Chain ID: ",
+      "Nonce: ",
+      "Issued At: ",
+      "Expiration Time: ",
+      "Not Before: ",
+      "Request ID: ",
+      "Resources:",
+    ];
+    const seen = new Set<string>();
+    let previousOrder = -1;
     for (let i = fieldStart; i < lines.length; i++) {
       const line = lines[i];
 
-      if (line.startsWith("URI:")) {
-        uri = line.slice(4).trim();
-      } else if (line.startsWith("Version:")) {
-        version = parseInt(line.slice(8).trim(), 10) || SIWX_VERSION;
-      } else if (line.startsWith("Chain ID:")) {
-        chainId = line.slice(9).trim();
-      } else if (line.startsWith("Nonce:")) {
-        nonce = line.slice(6).trim();
-      } else if (line.startsWith("Issued At:")) {
-        issuedAt = line.slice(10).trim();
-      } else if (line.startsWith("Expiration Time:")) {
-        expirationTime = line.slice(16).trim();
-      } else if (line.startsWith("Not Before:")) {
-        notBefore = line.slice(11).trim();
-      } else if (line.startsWith("Request ID:")) {
-        requestId = line.slice(11).trim();
-      } else if (line.startsWith("Resources:")) {
+      const field = fieldOrder.find((prefix) => line.startsWith(prefix));
+      if (field) {
+        const order = fieldOrder.indexOf(field);
+        if (seen.has(field) || order < previousOrder) return null;
+        seen.add(field);
+        previousOrder = order;
+      }
+
+      if (line.startsWith("URI: ")) {
+        uri = line.slice("URI: ".length);
+      } else if (line.startsWith("Version: ")) {
+        const value = line.slice("Version: ".length);
+        if (!/^1$/.test(value)) return null;
+        version = SIWX_VERSION;
+      } else if (line.startsWith("Chain ID: ")) {
+        chainId = line.slice("Chain ID: ".length);
+      } else if (line.startsWith("Nonce: ")) {
+        nonce = line.slice("Nonce: ".length);
+      } else if (line.startsWith("Issued At: ")) {
+        issuedAt = line.slice("Issued At: ".length);
+      } else if (line.startsWith("Expiration Time: ")) {
+        expirationTime = line.slice("Expiration Time: ".length);
+      } else if (line.startsWith("Not Before: ")) {
+        notBefore = line.slice("Not Before: ".length);
+      } else if (line.startsWith("Request ID: ")) {
+        requestId = line.slice("Request ID: ".length);
+      } else if (line === "Resources:") {
         inResources = true;
       } else if (inResources && line.startsWith("- ")) {
-        resources.push(line.slice(2).trim());
+        resources.push(line.slice(2));
+      } else {
+        // Unknown field-like lines would otherwise be omitted from the
+        // signed data model while still being shown to a user.
+        return null;
       }
     }
 
     // Validate required fields
-    if (!domain || !address || !uri || !chainId || !nonce) {
+    if (
+      !isValidDomain(domain) ||
+      !address ||
+      !uri ||
+      !isValidUri(uri) ||
+      version !== SIWX_VERSION ||
+      !CAIP2_PATTERN.test(chainId) ||
+      (chainId.startsWith("eip155:") &&
+        !/^eip155:[1-9][0-9]*$/.test(chainId)) ||
+      (chainId.startsWith("eip155:") && !/^0x[0-9a-fA-F]{40}$/.test(address)) ||
+      !/^[A-Za-z0-9]{8,}$/.test(nonce) ||
+      !issuedAt ||
+      !isValidRfc3339(issuedAt) ||
+      (statement !== null && hasInvalidStatementCharacter(statement)) ||
+      (expirationTime !== null && !isValidRfc3339(expirationTime)) ||
+      (notBefore !== null && !isValidRfc3339(notBefore)) ||
+      (requestId !== null && !REQUEST_ID_PATTERN.test(requestId)) ||
+      resources.some((resource) => !isValidUri(resource))
+    ) {
       return null;
     }
 

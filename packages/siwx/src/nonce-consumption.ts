@@ -30,6 +30,8 @@ export interface SiwxNonceStorage {
   issue(nonce: string): Promise<void>;
   /** Ensure a nonce was previously issued — returns true if valid */
   isIssued(nonce: string): Promise<boolean>;
+  /** Atomically consume an issued, unused nonce. Returns false for invalid/replayed nonces. */
+  consumeIfValid(nonce: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +73,12 @@ export function createMemoryNonceStorage(): SiwxNonceStorage {
     async isIssued(nonce: string): Promise<boolean> {
       return issued.has(nonce);
     },
+
+    async consumeIfValid(nonce: string): Promise<boolean> {
+      if (!issued.has(nonce) || consumed.has(nonce)) return false;
+      consumed.add(nonce);
+      return true;
+    },
   };
 }
 
@@ -109,7 +117,7 @@ export function resetNonceStorage(): SiwxNonceStorage {
 
 /**
  * Mark a nonce as issued (tracked but not yet consumed).
- * Called automatically when generating a nonce for a sign-in request.
+ * Call this when creating a sign-in request and retain the nonce until verify.
  */
 export async function issueNonce(nonce: string): Promise<void> {
   await activeStorage.issue(nonce);
@@ -121,6 +129,18 @@ export async function issueNonce(nonce: string): Promise<void> {
  */
 export async function consumeNonce(nonce: string): Promise<void> {
   await activeStorage.consume(nonce);
+}
+
+/**
+ * Atomically validate and consume a nonce.
+ *
+ * Custom backends must implement this as one datastore operation (for example
+ * Redis SETNX or a SQL conditional update). Keeping the operation in the
+ * storage contract prevents a verification path from reintroducing a replay
+ * race by composing separate read/write calls.
+ */
+export async function consumeNonceIfValid(nonce: string): Promise<boolean> {
+  return activeStorage.consumeIfValid(nonce);
 }
 
 /**

@@ -1,9 +1,8 @@
-export async function verifyStarknetSignInMessage(input: {
-  address: string;
-  message: string;
-  signature: string;
-  chainId?: string;
-}): Promise<boolean> {
+import type { SignInVerificationInput } from "./types";
+
+export async function verifyStarknetSignInMessage(
+  input: SignInVerificationInput,
+): Promise<boolean> {
   try {
     // @ts-expect-error — starknet is optional; caught at runtime
     const { verifyMessage } = await import("starknet");

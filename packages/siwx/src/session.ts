@@ -193,7 +193,9 @@ export class SiwxSessionManager {
     const uri = params.uri ?? this.defaultUri;
     const nonce = params.nonce ?? generateNonce();
     const issuedAt = nowISO();
-    const expirySeconds = params.expirySeconds ?? this.defaultExpirySeconds;
+    const expirySeconds = validateExpirySeconds(
+      params.expirySeconds ?? this.defaultExpirySeconds,
+    );
     const expirationTime =
       expirySeconds > 0
         ? new Date(Date.now() + expirySeconds * 1000).toISOString()
@@ -286,7 +288,9 @@ export class SiwxSessionManager {
       throw new Error("No active session to refresh");
     }
 
-    const expirySeconds = params?.expirySeconds ?? this.defaultExpirySeconds;
+    const expirySeconds = validateExpirySeconds(
+      params?.expirySeconds ?? this.defaultExpirySeconds,
+    );
     const newIssuedAt = nowISO();
     const newExpirationTime =
       expirySeconds > 0
@@ -301,7 +305,10 @@ export class SiwxSessionManager {
       uri: current.message.uri,
       version: 1,
       chainId: current.chainId,
-      nonce: current.message.nonce, // preserve original nonce for continuity
+      // A refresh is a new signed authentication request. Reusing the
+      // original nonce would make nonce-consumption/replay protection either
+      // reject a legitimate refresh or require unsafe nonce reuse.
+      nonce: generateNonce(),
       issuedAt: newIssuedAt,
       expirationTime: newExpirationTime,
       requestId: current.message.requestId ?? undefined,
@@ -365,6 +372,13 @@ export class SiwxSessionManager {
    */
   async restore(): Promise<SiwxSession | null> {
     const stored = await this.storage.get();
+    if (stored && checkSessionExpired(stored)) {
+      await this.storage.remove();
+      this.clearExpiryTimer();
+      this.session = null;
+      this.notifySessionChange(null);
+      return null;
+    }
     if (stored) {
       this.session = stored;
       this.notifySessionChange(stored);
@@ -499,4 +513,11 @@ function generateSessionId(): string {
   const ts = Date.now().toString(36);
   const rand = generateNonce(12);
   return `siwx_${ts}_${rand}`;
+}
+
+function validateExpirySeconds(value: number): number {
+  if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+    throw new Error("expirySeconds must be a non-negative integer");
+  }
+  return value;
 }

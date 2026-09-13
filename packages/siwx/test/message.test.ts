@@ -81,7 +81,7 @@ describe("createSiwxMessage", () => {
       uri: "https://service.org/auth",
       version: 1,
       chainId: "eip155:1",
-      nonce: "n-0S6_WzA2Mj",
+      nonce: "n0S6WzA2Mj",
       issuedAt: "2026-01-01T00:00:00Z",
       expirationTime: "2026-12-31T23:59:59Z",
       notBefore: "2026-01-01T00:00:00Z",
@@ -149,7 +149,7 @@ describe("parseSiwxMessage", () => {
       "URI: https://service.org/auth",
       "Version: 1",
       "Chain ID: eip155:1",
-      "Nonce: n-0S6_WzA2Mj",
+      "Nonce: n0S6WzA2Mj",
       "Issued At: 2026-01-01T00:00:00Z",
       "Expiration Time: 2026-12-31T23:59:59Z",
       "Not Before: 2026-01-01T00:00:00Z",
@@ -167,7 +167,7 @@ describe("parseSiwxMessage", () => {
     expect(parsed!.uri).toBe("https://service.org/auth");
     expect(parsed!.version).toBe(1);
     expect(parsed!.chainId).toBe("eip155:1");
-    expect(parsed!.nonce).toBe("n-0S6_WzA2Mj");
+    expect(parsed!.nonce).toBe("n0S6WzA2Mj");
     expect(parsed!.issuedAt).toBe("2026-01-01T00:00:00Z");
     expect(parsed!.expirationTime).toBe("2026-12-31T23:59:59Z");
     expect(parsed!.notBefore).toBe("2026-01-01T00:00:00Z");
@@ -199,7 +199,7 @@ describe("parseSiwxMessage", () => {
       statement: "Sign in to continue.",
       uri: "https://example.com/login",
       chainId: "solana:4sGjMW1s",
-      nonce: "r4nD0mN0nc3!",
+      nonce: "r4nD0mN0nc3",
       resources: ["https://example.com/resource"],
     };
 
@@ -302,12 +302,12 @@ describe("parseChainId", () => {
 
 describe("isValidNonce", () => {
   it("should accept alphanumeric nonces", () => {
-    expect(isValidNonce("abc123")).toBe(true);
+    expect(isValidNonce("abc12345")).toBe(true);
     expect(isValidNonce("ABC123xyz")).toBe(true);
   });
 
   it("should reject nonces with special characters", () => {
-    expect(isValidNonce("abc-123")).toBe(false);
+    expect(isValidNonce("abc-1234")).toBe(false);
     expect(isValidNonce("abc 123")).toBe(false);
     expect(isValidNonce("")).toBe(false);
   });

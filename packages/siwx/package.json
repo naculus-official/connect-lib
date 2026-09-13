@@ -2,12 +2,14 @@
   "name": "@naculus/siwx",
   "version": "0.2.0",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "files": [
@@ -43,5 +45,21 @@
   ],
   "description": "Sign-In With X (CAIP-122) library",
   "homepage": "https://github.com/naculus-official/connect-lib#readme",
-  "bugs": "https://github.com/naculus-official/connect-lib/issues"
+  "bugs": "https://github.com/naculus-official/connect-lib/issues",
+  "peerDependencies": {
+    "@cosmjs/amino": "*",
+    "@polkadot/util-crypto": "*",
+    "starknet": "*"
+  },
+  "peerDependenciesMeta": {
+    "@cosmjs/amino": {
+      "optional": true
+    },
+    "@polkadot/util-crypto": {
+      "optional": true
+    },
+    "starknet": {
+      "optional": true
+    }
+  }
 }

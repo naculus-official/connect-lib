@@ -11,14 +11,13 @@ export function generateNonce(length: number = 16): string {
   const charset =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const array = new Uint8Array(length);
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    crypto.getRandomValues(array);
-  } else {
-    // Fallback for environments without crypto.getRandomValues
-    for (let i = 0; i < length; i++) {
-      array[i] = Math.floor(Math.random() * 256);
-    }
+  const secureCrypto = globalThis.crypto;
+  if (!secureCrypto?.getRandomValues) {
+    throw new Error(
+      "A cryptographically secure random source is required to generate a SIWx nonce.",
+    );
   }
+  secureCrypto.getRandomValues(array);
   let result = "";
   for (let i = 0; i < length; i++) {
     result += charset[array[i] % charset.length];
@@ -48,12 +47,12 @@ export function parseChainId(chainId: string): {
   namespace: string;
   reference: string;
 } {
-  const colonIndex = chainId.indexOf(":");
-  if (colonIndex === -1) {
+  if (!/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/.test(chainId)) {
     throw new Error(
       `Invalid CAIP-2 chain ID: "${chainId}". Expected format: "namespace:reference"`,
     );
   }
+  const colonIndex = chainId.indexOf(":");
   return {
     namespace: chainId.slice(0, colonIndex),
     reference: chainId.slice(colonIndex + 1),
@@ -61,10 +60,11 @@ export function parseChainId(chainId: string): {
 }
 
 /**
- * Validate that a nonce contains only alphanumeric characters.
+ * Validate the nonce grammar required by EIP-4361/CAIP-122 text messages:
+ * at least eight ASCII alphanumeric characters.
  */
 export function isValidNonce(nonce: string): boolean {
-  return /^[A-Za-z0-9]+$/.test(nonce);
+  return /^[A-Za-z0-9]{8,}$/.test(nonce);
 }
 
 /**

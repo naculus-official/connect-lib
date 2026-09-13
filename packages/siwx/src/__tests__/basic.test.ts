@@ -1,20 +1,27 @@
-import { describe, it, expect, beforeEach } from "vitest";
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
-import { createSiwxMessage, parseSiwxMessage, getBlockchainName } from "../message";
-import { verifySiwxMessage, type VerifySiwxMessageParams } from "../verify";
-import { generateNonce, nowISO, addSecondsISO, isValidNonce } from "../utils";
-import { checkSessionExpired, createMemorySiwxSessionStorage } from "../session-storage";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
-  setNonceStorage,
-  resetNonceStorage,
-  createMemoryNonceStorage,
-  issueNonce,
+  createSiwxMessage,
+  getBlockchainName,
+  parseSiwxMessage,
+} from "../message";
+import {
   consumeNonce,
+  createMemoryNonceStorage,
   isNonceConsumed,
   isNonceIssued,
   isNonceValid,
+  issueNonce,
+  resetNonceStorage,
+  setNonceStorage,
 } from "../nonce-consumption";
-import type { SiwxParams, SiwxMessage } from "../types";
+import {
+  checkSessionExpired,
+  createMemorySiwxSessionStorage,
+} from "../session-storage";
+import type { SiwxMessage, SiwxParams } from "../types";
+import { addSecondsISO, generateNonce, isValidNonce, nowISO } from "../utils";
+import { type VerifySiwxMessageParams, verifySiwxMessage } from "../verify";
 
 // Reset nonce storage before each test to avoid cross-test contamination
 beforeEach(async () => {
@@ -66,7 +73,7 @@ describe("time utilities", () => {
   });
 
   it("addSecondsISO returns a future timestamp", () => {
-    const past = new Date().getTime();
+    const past = Date.now();
     const result = addSecondsISO(3600);
     const future = new Date(result).getTime();
     expect(future - past).toBeGreaterThan(3_500_000);
@@ -77,7 +84,7 @@ describe("time utilities", () => {
 // ─── message parsing edge cases ────────────────────────────────
 
 describe("parseSiwxMessage edge cases", () => {
-  it("parses statement with multiple paragraphs", () => {
+  it("rejects statements containing line breaks", () => {
     const raw = [
       "example.com wants you to sign in with your Ethereum account:",
       ADDRESSES.TEST_1,
@@ -93,16 +100,23 @@ describe("parseSiwxMessage edge cases", () => {
       "Issued At: 2026-01-01T00:00:00Z",
     ].join("\n");
     const parsed = parseSiwxMessage(raw);
-    expect(parsed).not.toBeNull();
-    expect(parsed!.statement).toBe("Paragraph one.\nParagraph two.");
+    expect(parsed).toBeNull();
   });
 
   it("returns null for malformed first line", () => {
-    expect(parseSiwxMessage("garbage line\n0xaddr\n\nURI: https://x.com\nVersion: 1\nChain ID: eip155:1\nNonce: abc\nIssued At: 2026-01-01T00:00:00Z")).toBeNull();
-    expect(parseSiwxMessage(" wants you to sign in with your account:\n0xaddr\n\nURI: https://x.com\nVersion: 1\nChain ID: eip155:1\nNonce: abc\nIssued At: 2026-01-01T00:00:00Z")).toBeNull();
+    expect(
+      parseSiwxMessage(
+        "garbage line\n0xaddr\n\nURI: https://x.com\nVersion: 1\nChain ID: eip155:1\nNonce: abc\nIssued At: 2026-01-01T00:00:00Z",
+      ),
+    ).toBeNull();
+    expect(
+      parseSiwxMessage(
+        " wants you to sign in with your account:\n0xaddr\n\nURI: https://x.com\nVersion: 1\nChain ID: eip155:1\nNonce: abc\nIssued At: 2026-01-01T00:00:00Z",
+      ),
+    ).toBeNull();
   });
 
-  it("handles resources with trailing whitespace", () => {
+  it("rejects resources with trailing whitespace", () => {
     const raw = [
       "example.com wants you to sign in with your Ethereum account:",
       ADDRESSES.TEST_1,
@@ -116,8 +130,7 @@ describe("parseSiwxMessage edge cases", () => {
       "-  https://example.com/resource/1  ",
     ].join("\n");
     const parsed = parseSiwxMessage(raw);
-    expect(parsed).not.toBeNull();
-    expect(parsed!.resources).toEqual(["https://example.com/resource/1"]);
+    expect(parsed).toBeNull();
   });
 
   it("parses legacy format without blockchain name", () => {
@@ -233,6 +246,7 @@ describe("verifySiwxMessage edge cases", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
       timestamp: "not-a-date",
     });
@@ -241,14 +255,18 @@ describe("verifySiwxMessage edge cases", () => {
   });
 
   it("rejects invalid expirationTime in message", async () => {
-    const raw = createSiwxMessage({ ...BASE_PARAMS, expirationTime: "bad-date" });
+    const raw = createSiwxMessage(BASE_PARAMS).replace(
+      "Issued At:",
+      "Expiration Time: bad-date\nIssued At:",
+    );
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(result.isValid).toBe(false);
-    expect(result.error).toContain("Invalid expiration time");
+    expect(result.error).toContain("Failed to parse SIWx message");
   });
 
   it("verifies null statement round-trips correctly", async () => {
@@ -260,6 +278,7 @@ describe("verifySiwxMessage edge cases", () => {
     const result = await verifySiwxMessage({
       raw: msg,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(result.isValid).toBe(true);
@@ -270,7 +289,10 @@ describe("verifySiwxMessage edge cases", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
-      recoverAddress: mockRecoverAddress("0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF"),
+      domain: "example.com",
+      recoverAddress: mockRecoverAddress(
+        "0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",
+      ),
       expectedAddress: BASE_PARAMS.address,
     });
     expect(result.isValid).toBe(false);
@@ -283,6 +305,7 @@ describe("verifySiwxMessage edge cases", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(result.isValid).toBe(true);
@@ -295,6 +318,7 @@ describe("verifySiwxMessage edge cases", () => {
     const first = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(first.isValid).toBe(true);
@@ -303,6 +327,7 @@ describe("verifySiwxMessage edge cases", () => {
     const second = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(second.isValid).toBe(false);
@@ -316,30 +341,44 @@ describe("verifySiwxMessage edge cases", () => {
     const first = await verifySiwxMessage({
       raw: raw1,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(first.isValid).toBe(true);
 
-    // Different domain/uri/address but same nonce — still replay
-    const raw2 = createSiwxMessage({
+    // A phishing message reusing the nonce is now stopped one step earlier, by
+    // domain binding, which is the stronger rejection: the verifier never even
+    // reaches the nonce.
+    const phish = createSiwxMessage({
       ...BASE_PARAMS,
       domain: "evil.com",
       uri: "https://evil.com/phish",
     });
     const second = await verifySiwxMessage({
-      raw: raw2,
+      raw: phish,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(second.isValid).toBe(false);
-    expect(second.error).toContain("replay");
+    expect(second.error).toContain("Domain mismatch");
+
+    // Same domain, same nonce, replayed: caught by nonce consumption.
+    const third = await verifySiwxMessage({
+      raw: createSiwxMessage(BASE_PARAMS),
+      signature: "0xsig",
+      domain: "example.com",
+      recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
+    });
+    expect(third.isValid).toBe(false);
+    expect(third.error).toContain("replay");
   });
 
   it("different nonces are independently consumable", async () => {
-    await issueNonce("nonce-a");
-    await issueNonce("nonce-b");
-    const params1 = { ...BASE_PARAMS, nonce: "nonce-a" };
-    const params2 = { ...BASE_PARAMS, nonce: "nonce-b" };
+    await issueNonce("nonceA123");
+    await issueNonce("nonceB123");
+    const params1 = { ...BASE_PARAMS, nonce: "nonceA123" };
+    const params2 = { ...BASE_PARAMS, nonce: "nonceB123" };
 
     const raw1 = createSiwxMessage(params1);
     const raw2 = createSiwxMessage(params2);
@@ -347,6 +386,7 @@ describe("verifySiwxMessage edge cases", () => {
     const first = await verifySiwxMessage({
       raw: raw1,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(first.isValid).toBe(true);
@@ -354,6 +394,7 @@ describe("verifySiwxMessage edge cases", () => {
     const second = await verifySiwxMessage({
       raw: raw2,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(BASE_PARAMS.address),
     });
     expect(second.isValid).toBe(true);

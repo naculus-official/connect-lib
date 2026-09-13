@@ -63,6 +63,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xmocksignature123",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(baseParams.address),
     });
 
@@ -75,6 +76,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw: "not a valid SIWx message",
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress("0x1234"),
     });
 
@@ -86,6 +88,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw: "",
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress("0x1234"),
     });
 
@@ -107,12 +110,13 @@ describe("verifySiwxMessage", () => {
   });
 
   it("should detect nonce mismatch", async () => {
-    const raw = createRawMessage({ nonce: "wrong-nonce" });
+    const raw = createRawMessage({ nonce: "wrongNonce" });
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(baseParams.address),
-      nonce: "expected-nonce",
+      nonce: "expectedNonce",
     });
 
     expect(result.isValid).toBe(false);
@@ -126,6 +130,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(baseParams.address),
       timestamp: "2026-01-01T00:00:00Z",
     });
@@ -141,6 +146,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(baseParams.address),
       timestamp: "2026-01-01T00:00:00Z",
     });
@@ -157,6 +163,7 @@ describe("verifySiwxMessage", () => {
       {
         raw,
         signature: "0xsig",
+        domain: "example.com",
         recoverAddress: mockRecoverAddress(baseParams.address),
         timestamp: "2026-01-01T00:00:00Z",
       },
@@ -174,6 +181,7 @@ describe("verifySiwxMessage", () => {
       {
         raw,
         signature: "0xsig",
+        domain: "example.com",
         recoverAddress: mockRecoverAddress(baseParams.address),
         timestamp: "2026-01-01T00:00:00Z",
       },
@@ -189,6 +197,7 @@ describe("verifySiwxMessage", () => {
       {
         raw,
         signature: "0xsig",
+        domain: "example.com",
         recoverAddress: mockRecoverAddress(baseParams.address),
       },
       { requireExpirationTime: true },
@@ -203,6 +212,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockWrongAddress(),
       expectedAddress: baseParams.address,
     });
@@ -217,6 +227,7 @@ describe("verifySiwxMessage", () => {
       raw,
       signature: "0xsig",
       // recoverAddress recovers the wrong address
+      domain: "example.com",
       recoverAddress: ({
         message,
         signature,
@@ -236,6 +247,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xbad",
+      domain: "example.com",
       recoverAddress: mockFailingVerifier(),
     });
 
@@ -248,6 +260,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(baseParams.address),
       expectedAddress: baseParams.address,
     });
@@ -295,6 +308,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(baseParams.address),
       timestamp: "2026-01-01T00:00:00Z",
     });
@@ -308,6 +322,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(baseParams.address),
     });
 
@@ -316,13 +331,14 @@ describe("verifySiwxMessage", () => {
 
   it("should compare addresses case-insensitively", async () => {
     const raw = createRawMessage({
-      address: "0xAbCd1234567890abcdef1234567890abcdef12345678",
+      address: "0xAbCd1234567890abcdef1234567890abcdef1234",
     });
     const result = await verifySiwxMessage({
       raw,
       signature: "0xsig",
       // Return the same address but mixed case
-      recoverAddress: () => "0xabcd1234567890abcdef1234567890abcdef12345678",
+      domain: "example.com",
+      recoverAddress: () => "0xabcd1234567890abcdef1234567890abcdef1234",
     });
 
     expect(result.isValid).toBe(true);
@@ -337,6 +353,7 @@ describe("verifySiwxMessage", () => {
     const result = await verifySiwxMessage({
       raw,
       signature: "base58sig123",
+      domain: "example.com",
       recoverAddress: mockRecoverAddress(
         "7S3W4YxKv3PBpBVpQqZzKjWxqGQtQfG5eGwJeDiLBfhG",
       ),
@@ -411,7 +428,7 @@ const SOL = {
  */
 const DEPENDENCY_WORDING = /dependenc|install|pnpm add|npm install/i;
 
-describe("createSolanaVerifier — verification behaviour", () => {
+describe("createSolanaVerifier — verification behavior", () => {
   it("loads bs58 and tweetnacl as real modules", async () => {
     const bs58 = (await import("bs58")).default;
     const nacl = (await import("tweetnacl")).default;

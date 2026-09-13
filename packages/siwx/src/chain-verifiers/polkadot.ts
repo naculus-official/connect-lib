@@ -1,13 +1,14 @@
-export async function verifyPolkadotSignInMessage(input: {
-  address: string;
-  message: string;
-  signature: string;
-  chainId?: string;
-}): Promise<boolean> {
+import type { SignInVerificationInput } from "./types";
+
+export async function verifyPolkadotSignInMessage(
+  input: SignInVerificationInput,
+): Promise<boolean> {
   try {
+    // signatureVerify lives in @polkadot/util-crypto, not @polkadot/keyring —
+    // keyring re-exports decodeAddress but not signatureVerify, so importing
+    // both from keyring left this verifier calling undefined.
     const { decodeAddress, signatureVerify } = await import(
-      // @ts-ignore — @polkadot/keyring is optional; caught at runtime
-      "@polkadot/keyring"
+      "@polkadot/util-crypto"
     );
     const publicKey = decodeAddress(input.address);
     const result = signatureVerify(input.message, input.signature, publicKey);
@@ -15,8 +16,8 @@ export async function verifyPolkadotSignInMessage(input: {
   } catch (err) {
     if (err instanceof Error && err.message.includes("Cannot find module")) {
       throw new Error(
-        "@polkadot/keyring is required for Polkadot SIWx verification. " +
-          "Install it via: pnpm add @polkadot/keyring",
+        "@polkadot/util-crypto is required for Polkadot SIWx verification. " +
+          "Install it via: pnpm add @polkadot/util-crypto",
       );
     }
     console.warn("polkadot SIWx verification failed:", err);

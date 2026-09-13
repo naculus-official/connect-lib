@@ -26,12 +26,14 @@
  */
 
 import { parseSiwxMessage } from "./message";
-import {
-  consumeNonce,
-  isNonceConsumed,
-  isNonceIssued,
-} from "./nonce-consumption";
+import { consumeNonceIfValid, isNonceIssued } from "./nonce-consumption";
 import type { SiwxMessage, SiwxVerificationResult } from "./types";
+import {
+  type EthCall,
+  decodeErc6492Signature,
+  hashPersonalMessage,
+  verifyErc1271,
+} from "./contract-signature";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,9 +55,13 @@ export interface VerifySiwxMessageParams {
   recoverAddress: (params: {
     message: string;
     signature: string;
-  }) => string | Promise<string>;
+    /** Public key/address needed by non-recoverable signature schemes. */
+    publicKey?: string;
+  }) => string | boolean | Promise<string | boolean>;
   /** Expected signer address. If provided, verification checks address match. */
   expectedAddress?: string;
+  /** Public key for schemes such as Solana and XRPL that cannot recover it. */
+  publicKey?: string;
   /** Expected domain. If provided, verification checks domain match. */
   domain?: string;
   /** Expected nonce. If provided, verification checks nonce match. */
@@ -71,6 +77,19 @@ export interface VerifySiwxMessageParams {
  * Additional options controlling validation strictness.
  */
 export interface VerifyOptions {
+  /**
+   * Verify a message without binding it to a domain.
+   *
+   * Domain binding is what stops a signature harvested on a phishing site
+   * from being replayed against the real one: the signature is genuine and
+   * the nonce is genuine, and the domain line is the only field that says who
+   * the user meant to sign in to. Verification therefore requires
+   * `params.domain` by default, and opting out has to be spelled out.
+   *
+   * Legitimate uses are narrow — inspecting a message whose origin is already
+   * established by other means, or tests. Never set it on a login path.
+   */
+  allowUnboundDomain?: boolean;
   /** When true, messages without expirationTime are rejected (default: false) */
   requireExpirationTime?: boolean;
   /** When true, expirationTime check is skipped (default: false) */
@@ -89,7 +108,7 @@ export interface VerifyOptions {
  * Steps:
  * 1. Parse the raw message
  * 2. Validate structural integrity
- * 3. Check optional constraints (domain, nonce, expiry, notBefore)
+ * 3. Check constraints (domain is required, then nonce, expiry, notBefore)
  * 4. Recover the signer address from the signature
  * 5. Compare recovered address with expected address (if provided)
  *
@@ -122,10 +141,39 @@ export async function verifySiwxMessage(
   // 3. Recover address from signature
   let recoveredAddress: string;
   try {
-    recoveredAddress = await params.recoverAddress({
+    const verificationKey =
+      params.publicKey ?? params.expectedAddress ?? parsed.address;
+    const recovered = await params.recoverAddress({
       message: params.raw,
       signature: params.signature,
+      publicKey: verificationKey,
     });
+    if (typeof recovered === "boolean") {
+      if (!recovered) {
+        return {
+          address: params.expectedAddress ?? parsed.address,
+          isValid: false,
+          error: "Signature verification failed",
+        };
+      }
+      // A boolean only proves that `verificationKey` signed. It does not prove
+      // that an unrelated address named by the message owns that key. This is
+      // naturally bound for Solana, where the public key is the address. Other
+      // schemes (XRPL, for example) must return the address derived from the
+      // verified public key instead of a bare true.
+      const claimedAddress = params.expectedAddress ?? parsed.address;
+      if (!compareAddresses(parsed.chainId, verificationKey, claimedAddress)) {
+        return {
+          address: claimedAddress,
+          isValid: false,
+          error:
+            "Signature verifier confirmed a public key that is not the claimed account address",
+        };
+      }
+      recoveredAddress = verificationKey;
+    } else {
+      recoveredAddress = recovered;
+    }
   } catch (err) {
     return {
       address: parsed.address,
@@ -136,9 +184,27 @@ export async function verifySiwxMessage(
     };
   }
 
-  // 4. Compare addresses (case-insensitive for hex addresses)
+  // 4. Compare addresses using the namespace's canonical rules.
   const expected = params.expectedAddress ?? parsed.address;
-  const addressesMatch = compareAddresses(recoveredAddress, expected);
+  if (
+    params.expectedAddress !== undefined &&
+    !compareAddresses(parsed.chainId, parsed.address, params.expectedAddress)
+  ) {
+    return {
+      address: params.expectedAddress,
+      isValid: false,
+      error:
+        "SIWx message address does not match expected address. Message: " +
+        parsed.address +
+        ", Expected: " +
+        params.expectedAddress,
+    };
+  }
+  const addressesMatch = compareAddresses(
+    parsed.chainId,
+    recoveredAddress,
+    expected,
+  );
 
   if (!addressesMatch) {
     return {
@@ -154,24 +220,19 @@ export async function verifySiwxMessage(
 
   // 5. Validate and consume nonce to prevent replay attacks
   if (parsed.nonce) {
-    // Nonce must have been issued by this system (not arbitrary)
-    const wasIssued = await isNonceIssued(parsed.nonce);
-    if (!wasIssued) {
+    const consumed = await consumeNonceIfValid(parsed.nonce);
+    if (!consumed) {
+      // The atomic operation owns the security decision. This read is only for
+      // a useful diagnostic after the operation has already failed.
+      const wasIssued = await isNonceIssued(parsed.nonce);
       return {
         address: recoveredAddress,
         isValid: false,
-        error: `unissued nonce: nonce="${parsed.nonce}" was not issued by this system`,
+        error: wasIssued
+          ? `replay: nonce already consumed for nonce="${parsed.nonce}"`
+          : `unissued nonce: nonce="${parsed.nonce}" was not issued by this system`,
       };
     }
-    const alreadyConsumed = await isNonceConsumed(parsed.nonce);
-    if (alreadyConsumed) {
-      return {
-        address: recoveredAddress,
-        isValid: false,
-        error: `replay: nonce already consumed for nonce="${parsed.nonce}"`,
-      };
-    }
-    await consumeNonce(parsed.nonce);
   }
 
   return {
@@ -189,6 +250,16 @@ function validateConstraints(
   params: VerifySiwxMessageParams,
   options?: VerifyOptions,
 ): string | null {
+  // Domain binding. Absent expected domain means the caller has no way to
+  // tell a message signed for their site from one signed for an attacker's.
+  if (params.domain === undefined && !options?.allowUnboundDomain) {
+    return (
+      "Refusing to verify without domain binding: pass `domain` so a " +
+      'signature obtained on another site cannot be replayed here, or set ' +
+      "`allowUnboundDomain` if this is deliberately not a login check."
+    );
+  }
+
   // Domain check
   if (params.domain !== undefined && parsed.domain !== params.domain) {
     return (
@@ -221,7 +292,7 @@ function validateConstraints(
     ? new Date(params.timestamp).getTime()
     : Date.now();
 
-  if (isNaN(refTime)) {
+  if (Number.isNaN(refTime)) {
     return (
       'Invalid reference timestamp: "' + (params.timestamp ?? "undefined") + '"'
     );
@@ -230,7 +301,7 @@ function validateConstraints(
   // Expiration time check
   if (parsed.expirationTime && !options?.skipExpirationCheck) {
     const expTime = new Date(parsed.expirationTime).getTime();
-    if (isNaN(expTime)) {
+    if (Number.isNaN(expTime)) {
       return (
         'Invalid expiration time in message: "' + parsed.expirationTime + '"'
       );
@@ -243,7 +314,7 @@ function validateConstraints(
   // NotBefore check
   if (parsed.notBefore && !options?.skipNotBeforeCheck) {
     const nbfTime = new Date(parsed.notBefore).getTime();
-    if (isNaN(nbfTime)) {
+    if (Number.isNaN(nbfTime)) {
       return 'Invalid notBefore time in message: "' + parsed.notBefore + '"';
     }
     if (refTime < nbfTime) {
@@ -264,8 +335,9 @@ function validateConstraints(
  * Compare two blockchain addresses case-insensitively.
  * Handles Ethereum addresses (case-insensitive hex) and Solana base58 addresses.
  */
-function compareAddresses(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
+function compareAddresses(chainId: string, a: string, b: string): boolean {
+  const namespace = chainId.split(":", 1)[0];
+  return namespace === "eip155" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,23 +350,80 @@ function compareAddresses(a: string, b: string): boolean {
  * Requires `viem` to be installed.
  * Throws if viem cannot be imported.
  */
-export function createEVMVerifier(): (params: {
+export interface EVMVerifierOptions {
+  /**
+   * Performs an `eth_call`. Supplying it enables contract-account
+   * verification (ERC-1271, and ERC-6492 for an account that is already
+   * deployed). Without it only externally owned accounts can be verified,
+   * because `ecrecover` has nothing to say about a contract signature.
+   */
+  call?: EthCall;
+  /** Returns the deployed bytecode at an address, or "0x" when there is none. */
+  getCode?: (address: string) => Promise<string>;
+}
+
+export function createEVMVerifier(
+  options?: EVMVerifierOptions,
+): (params: {
   message: string;
   signature: string;
-}) => Promise<string> {
-  return async ({ message, signature }) => {
+  publicKey?: string;
+}) => Promise<string | boolean> {
+  return async ({ message, signature, publicKey }) => {
+    let recoverMessageAddress: typeof import("viem").recoverMessageAddress;
     try {
-      const { recoverMessageAddress } = await import("viem");
-      return await recoverMessageAddress({
-        message,
-        signature: signature as `0x${string}`,
-      });
-    } catch {
+      ({ recoverMessageAddress } = await import("viem"));
+    } catch (err) {
       throw new Error(
-        "viem is required for EVM SIWx verification. " +
-          "Install it via: pnpm add viem",
+        "viem is required for EVM SIWx verification. Install it via: pnpm add viem",
+        { cause: err },
       );
     }
+
+    // Contract accounts sign through their own logic, so there is no address
+    // to recover; they are verified against the address that claims them.
+    const account = publicKey;
+    const wrapped = decodeErc6492Signature(signature);
+
+    if (options?.call && account) {
+      const hash = hashPersonalMessage(message);
+
+      if (wrapped) {
+        const code = options.getCode
+          ? await options.getCode(account).catch(() => "0x")
+          : "0x";
+        if (code && code !== "0x") {
+          // Deployed after signing: the wrapper is now redundant and the
+          // inner signature is what the account would answer for.
+          return verifyErc1271(account, hash, wrapped.signature, options.call);
+        }
+        // Still counterfactual. Deciding this requires deploying the account
+        // inside an eth_call against a validator contract, which this module
+        // deliberately does not carry an address for — see the note on
+        // ERC6492_MAGIC_SUFFIX. Report unverified rather than guess.
+        return false;
+      }
+
+      const contractResult = await verifyErc1271(
+        account,
+        hash,
+        signature,
+        options.call,
+      );
+      if (contractResult) return true;
+      // Fall through: an EOA's signature is not an ERC-1271 one.
+    }
+
+    if (wrapped) {
+      // No chain access, so the wrapper cannot be resolved. Recovering from
+      // the envelope bytes would return a meaningless address.
+      return false;
+    }
+
+    return recoverMessageAddress({
+      message,
+      signature: signature as `0x${string}`,
+    });
   };
 }
 
@@ -332,9 +461,11 @@ function moduleLoadFailed(pkg: string, err: unknown): never {
 export function createSolanaVerifier(): (params: {
   message: string;
   signature: string;
-  publicKey: string;
+  publicKey?: string;
 }) => Promise<boolean> {
   return async ({ message, signature, publicKey }) => {
+    if (!publicKey)
+      throw new Error("Solana publicKey is required for verification");
     const nacl = (
       await import("tweetnacl").catch((err) =>
         moduleLoadFailed("tweetnacl", err),
@@ -359,22 +490,29 @@ export function createSolanaVerifier(): (params: {
 /**
  * Create an XRPL verifier using ripple-keypairs.
  *
- * Requires `ripple-keypairs` to be installed.
- * Throws if dependency cannot be imported.
+ * `ripple-keypairs` is a runtime dependency of this package. Import failures
+ * therefore indicate a broken module-resolution/bundling setup, while invalid
+ * signatures remain ordinary input failures and are not rewritten as install
+ * errors.
  */
 export function createXRPLVerifier(): (params: {
   message: string;
   signature: string;
-}) => Promise<string> {
-  return async ({ message, signature }) => {
-    try {
-      const keypairs = await import("ripple-keypairs");
-      return (keypairs as any).verifyMessage(message, signature);
-    } catch {
-      throw new Error(
-        "ripple-keypairs is required for XRPL SIWx verification. " +
-          "Install it via: pnpm add ripple-keypairs",
-      );
-    }
+  publicKey?: string;
+}) => Promise<string | boolean> {
+  return async ({ message, signature, publicKey }) => {
+    if (!publicKey)
+      throw new Error("XRPL publicKey is required for verification");
+    const keypairs = await import("ripple-keypairs").catch((err) =>
+      moduleLoadFailed("ripple-keypairs", err),
+    );
+    const messageHex = Array.from(new TextEncoder().encode(message))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    if (!keypairs.verify(messageHex, signature, publicKey)) return false;
+    // Unlike Solana, an XRPL account address is not the public key itself.
+    // Return the address derived from the key that actually verified so the
+    // common verifier can compare signer identity with the SIWx claim.
+    return keypairs.deriveAddress(publicKey);
   };
 }
