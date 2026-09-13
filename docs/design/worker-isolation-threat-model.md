@@ -127,7 +127,7 @@ entry point to reach it from today.
 | change | class |
 |---|---|
 | payload gains `v` / `iterations`, read stays backward compatible | minor |
-| `isolation: "worker"` decrypts inside the worker | minor — behaviour changes, and `load()`'s failure modes move into the worker |
+| `isolation: "worker"` decrypts inside the worker | minor — behavior changes, and `load()`'s failure modes move into the worker |
 | `StorageAdapter` gains raw-ciphertext access as an optional method | minor |
 | …as a required interface method | **major** |
 

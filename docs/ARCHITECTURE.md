@@ -287,7 +287,9 @@ Some connectors (e.g., WalletConnect) need to modify namespaces after session cr
 - IndexedDB provides origin isolation — XSS cannot directly access across origins
 - Async API, does not block main thread rendering
 - Larger storage quota (50MB+ vs 5MB)
-- localStorage only used as degradation fallback when IndexedDB is unavailable
+- localStorage is only a degraded fallback when IndexedDB is unavailable; in a
+  browser it is rejected unless encryptionPassphrase or the explicit
+  allowInsecureStorage development override is supplied
 
 ### StorageAdapter.type property
 
@@ -296,11 +298,15 @@ letting connect-react determine whether to show security warnings.
 
 ### Developer force-switch
 
-> ⚠️ Testing utility only, not a production path. PocketWallet auto-selects the best backend at runtime.
+> ⚠️ Prefer IndexedDB or an encrypted adapter in production. An unencrypted
+> localStorage backend is restricted to controlled development/test contexts.
 
 ```typescript
 // Force localStorage for test isolation
-const wallet = new PocketWallet({ storageType: "localStorage" });
+const wallet = new PocketWallet({
+  storageType: "localStorage",
+  allowInsecureStorage: true,
+});
 
 // Force IndexedDB (throws if unavailable)
 const wallet = new PocketWallet({ storageType: "indexedDb" });
@@ -311,10 +317,12 @@ const wallet = new PocketWallet({ storageType: "indexedDb" });
 `EncryptedStorageAdapter` wraps any backend, using PBKDF2 (SHA-256, 600K iterations) + AES-256-GCM.
 Each write uses random salt (16 bytes) + IV (12 bytes).
 
-### Why not encrypt by default?
+### Why wallet encryption is opt-in
 
-Encryption requires the user to provide a passphrase, which adds friction. The default is IndexedDB (origin isolation + non-blocking).
-Users needing higher security can optionally wrap `EncryptedStorageAdapter`.
+Encryption requires the user to provide a passphrase, which adds friction. The
+default is IndexedDB (origin isolation + non-blocking), but IndexedDB is not a
+cryptographic boundary: an XSS payload running in the same origin can read it.
+Use `encryptionPassphrase` or `EncryptedStorageAdapter` for sensitive wallets.
 
 ---
 

@@ -11,6 +11,7 @@ export const AA_ERROR_MESSAGES: Record<AAErrorCode, string>;
 export const AA_SUPPORTED_CHAINS: Record<string, {
     entryPoint: Address;
     factory: Address;
+    version: UserOperationVersion;
 }>;
 
 // @public
@@ -44,7 +45,15 @@ export class AccountAbstractionError extends Error {
     hasCode(code: AAErrorCode): boolean;
 }
 
-// @public (undocumented)
+// @public
+export interface AccountCapabilities {
+    atomicBatch: boolean;
+    discovered: boolean;
+    maxBatchSize?: number;
+    sponsoredTransactions: boolean;
+}
+
+// @public
 export type AccountType = "simple" | "light" | "kernel" | "safe";
 
 // @public
@@ -123,31 +132,6 @@ export class AutoReconnectManager<T = UniversalWalletSession> {
 }
 
 // @public (undocumented)
-export class AxelarProvider implements BridgeProvider {
-    constructor(config?: AxelarProviderConfig);
-    // (undocumented)
-    getRoutes(fromChain: string, toChain: string, fromToken: string, toToken: string, amount: string): Promise<Route[]>;
-    // (undocumented)
-    getRouteStatus(bridgeReference: string): Promise<RouteStatus>;
-    // (undocumented)
-    getTransactionParams(_route: Route, _sender: string, _recipient: string): Promise<ProviderTransaction[]>;
-    // (undocumented)
-    readonly id: BridgeProviderId;
-    // (undocumented)
-    readonly name = "Axelar";
-    // (undocumented)
-    supportsChainPair(fromChain: string, toChain: string): boolean;
-    // (undocumented)
-    supportsToken(chain: string, token: string): boolean;
-}
-
-// @public
-export interface AxelarProviderConfig {
-    apiUrl?: string;
-    backendUrl?: string;
-}
-
-// @public (undocumented)
 export interface BalanceChange {
     amount: string;
     direction: "in" | "out";
@@ -155,7 +139,7 @@ export interface BalanceChange {
     humanReadable: string;
     to: `0x${string}`;
     tokenAddress: `0x${string}`;
-    tokenDecimals: number;
+    tokenDecimals: number | undefined;
     tokenSymbol: string;
 }
 
@@ -166,44 +150,13 @@ export const BASE_TOKENS: TokenListEntry[];
 export interface BatchCall {
     // (undocumented)
     data?: `0x${string}`;
-    // (undocumented)
-    to: `0x${string}`;
+    to?: `0x${string}`;
     // (undocumented)
     value?: string;
 }
 
 // @public
-export class BlowfishProvider implements SimulationProvider {
-    constructor(apiKey: string);
-    // (undocumented)
-    isAvailable(chainId: number): boolean;
-    // (undocumented)
-    readonly name: SimulationProviderName;
-    // (undocumented)
-    simulate(tx: TransactionDescriptor, from: `0x${string}`, options?: {
-        origin?: string;
-        rpcUrl?: string;
-    }): Promise<SimulationResult>;
-    // (undocumented)
-    readonly supportedChains: number[];
-}
-
-// @public
-export interface BridgeProvider {
-    getRoutes(fromChain: string, toChain: string, fromToken: string, toToken: string, amount: string): Promise<Route[]>;
-    getRouteStatus(bridgeReference: string): Promise<RouteStatus>;
-    getTransactionParams(route: Route, sender: string, recipient: string): Promise<ProviderTransaction[]>;
-    readonly id: BridgeProviderId;
-    readonly name: string;
-    supportsChainPair(fromChain: string, toChain: string): boolean;
-    supportsToken(chain: string, token: string): boolean;
-}
-
-// @public
-export type BridgeProviderId = "lifi" | "axelar" | "socket" | "across";
-
-// @public
-export function buildCallData(calls: Call[]): Hex;
+export function buildCallData(calls: Call[], version?: UserOperationVersion): Hex;
 
 // @public
 export function buildUserOperation(params: Partial<UserOperation>): UserOperation;
@@ -213,6 +166,9 @@ export interface BundlerClient {
     apiKey?: string;
     url: string;
 }
+
+// @public
+export function caip2ToHexChain(chainId: string): string | undefined;
 
 // @public (undocumented)
 export interface Call {
@@ -224,45 +180,40 @@ export interface Call {
 // @public
 export interface CallsStatus {
     // (undocumented)
+    atomic: boolean;
+    // (undocumented)
+    capabilities?: Record<string, unknown>;
+    // (undocumented)
+    chainId: `0x${string}`;
+    // (undocumented)
+    id: `0x${string}`;
+    // (undocumented)
     receipts?: Array<{
         logs: Array<{
-            address: string;
-            data: string;
-            topics: string[];
+            address: `0x${string}`;
+            data: `0x${string}`;
+            topics: `0x${string}`[];
         }>;
-        status: "0x1" | "0x0";
-        blockHash: string;
-        blockNumber: string;
-        gasUsed: string;
-        transactionHash: string;
+        status: `0x${string}`;
+        blockHash: `0x${string}`;
+        blockNumber: `0x${string}`;
+        gasUsed: `0x${string}`;
+        transactionHash: `0x${string}`;
     }>;
     // (undocumented)
-    status: "PENDING" | "CONFIRMED";
-}
-
-// @public (undocumented)
-export interface ChainAbstractionConfig {
-    axelarConfig?: {
-        apiUrl?: string;
-    };
-    backendUrl?: string;
-    defaultSlippage?: number;
-    lifiApiKey?: string;
-    quoteCacheTtl?: number;
-    statusPollInterval?: number;
-}
-
-// @public (undocumented)
-export class ChainAbstractionError extends Error {
-    constructor(code: ChainAbstractionErrorCode, message?: string, details?: Record<string, unknown>);
+    status: CallsStatusCode;
     // (undocumented)
-    code: ChainAbstractionErrorCode;
-    // (undocumented)
-    details?: Record<string, unknown>;
+    version: string;
 }
 
-// @public (undocumented)
-export type ChainAbstractionErrorCode = "chain_pair_not_supported" | "token_not_supported" | "route_expired" | "insufficient_balance" | "approve_needed" | "approve_rejected" | "transaction_failed" | "backend_unavailable" | "invalid_config" | "no_routes_available" | "provider_unavailable" | "execution_failed";
+// @public
+export type CallsStatusCode = 100 | 200 | 400 | 500 | 600 | number;
+
+// @public
+export interface CapabilityQueryable {
+    // (undocumented)
+    getCapabilities?: (session: UniversalWalletSession) => Promise<Record<string, WalletCapabilities>> | undefined;
+}
 
 // @public
 export interface ChainFeeEstimator {
@@ -320,6 +271,9 @@ export interface ChannelCapability {
 }
 
 // @public
+export function chooseExecutionStrategy(capabilities: AccountCapabilities, callCount: number): ExecutionStrategy;
+
+// @public
 export function clearAutoDetectCache(): Promise<void>;
 
 // @public
@@ -363,6 +317,7 @@ export type ConnectorId = string;
 // @public (undocumented)
 export class ConnectorManager {
     constructor(config?: ConnectorManagerConfig);
+    adopt(session: UniversalWalletSession): void;
     // (undocumented)
     clear(): void;
     // (undocumented)
@@ -380,7 +335,7 @@ export class ConnectorManager {
     // (undocumented)
     getBalance(chainId?: string): Promise<string>;
     // (undocumented)
-    getCapabilities(session: UniversalWalletSession): Promise<Record<string, WalletCapabilities>>;
+    getCapabilities(_session: UniversalWalletSession): Promise<Record<string, WalletCapabilities>>;
     // (undocumented)
     list(): ConnectorEntry[];
     // (undocumented)
@@ -395,7 +350,7 @@ export class ConnectorManager {
         params: unknown[];
     }): Promise<unknown>;
     // (undocumented)
-    sendCalls(session: UniversalWalletSession, calls: BatchCall[], chainId?: string): Promise<string>;
+    sendCalls(_session: UniversalWalletSession, calls: BatchCall[], chainId?: string): Promise<string>;
     // (undocumented)
     sendTransaction(input: unknown): Promise<unknown>;
     // (undocumented)
@@ -432,27 +387,6 @@ export interface ConnectorSupport {
 }
 
 // @public (undocumented)
-export interface CostComparison {
-    chain: string;
-    chainName: string;
-    congestionLevel?: "low" | "medium" | "high";
-    fee: string;
-    gasCost: string;
-    time: number;
-    totalCost: string;
-}
-
-// @public (undocumented)
-export type CostComparisonOperation = "send_native" | "send_erc20" | "swap" | "cross_chain_transfer";
-
-// @public (undocumented)
-export interface CostComparisonOptions {
-    amount?: string;
-    includeCrossChain?: boolean;
-    token?: string;
-}
-
-// @public (undocumented)
 export function createAutoReconnectManager<T = UniversalWalletSession>(config?: Partial<AutoReconnectConfig>): AutoReconnectManager<T>;
 
 // @public (undocumented)
@@ -486,9 +420,6 @@ export interface CreateEmptySessionInput {
 // @public
 export function createPaymasterService(config: PaymasterConfig): PaymasterService;
 
-// @public (undocumented)
-export function createRouteEngine(config?: ChainAbstractionConfig): RouteEngine;
-
 // @public
 export function createSessionError(code: SessionErrorCode, details?: unknown): WalletError;
 
@@ -499,7 +430,7 @@ export function createSessionKeyError(code: SessionKeyErrorCode, details?: unkno
 export function createSessionManager(connectorManager: ConnectorManager, config?: SessionManagerConfig): SessionManager;
 
 // @public
-export function createSessionPersistence(key?: string, adapter?: StorageAdapter): SessionPersistence;
+export function createSessionPersistence(key?: string, adapter?: StorageAdapter, encryptionKey?: string): SessionPersistence;
 
 // @public (undocumented)
 export function createStorageAdapter(type: "local" | "session" | "memory" | "none", prefix?: string): StorageAdapter;
@@ -531,14 +462,14 @@ export const DEFAULT_NONCE_LENGTH = 16;
 // @public
 export const DEFAULT_PRE_VERIFICATION_GAS = 50000n;
 
-// @public (undocumented)
+// @public
 export const DEFAULT_RPC_URLS: Record<string, string>;
 
 // @public (undocumented)
 export const DEFAULT_SESSION_KEY_CONFIG: Required<SessionKeyManagerConfig>;
 
 // @public
-export const DEFAULT_SOLANA_CLUSTER = "solana:0";
+export const DEFAULT_SOLANA_CLUSTER = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 
 // @public
 export const DEFAULT_SOURCES: TokenListSource[];
@@ -561,25 +492,16 @@ export function detectTokenInfo(address: string, chainId: number, rpcUrl: string
 export const EIP155_ARBITRUM = "eip155:42161";
 
 // @public (undocumented)
-export const EIP155_ARBITRUM_GOERLI = "eip155:421613";
-
-// @public (undocumented)
 export const EIP155_BASE = "eip155:8453";
 
 // @public (undocumented)
-export const EIP155_GOERLI = "eip155:5";
+export const EIP155_HOLESKY = "eip155:17000";
 
 // @public
 export const EIP155_MAINNET = "eip155:1";
 
 // @public (undocumented)
-export const EIP155_MUMBAI = "eip155:80001";
-
-// @public (undocumented)
 export const EIP155_OPTIMISM = "eip155:10";
-
-// @public (undocumented)
-export const EIP155_OPTIMISM_GOERLI = "eip155:420";
 
 // @public (undocumented)
 export const EIP155_POLYGON = "eip155:137";
@@ -588,10 +510,14 @@ export const EIP155_POLYGON = "eip155:137";
 export const EIP155_SEPOLIA = "eip155:11155111";
 
 // @public
+export function encodeGasFees(maxPriorityFeePerGas: bigint, maxFeePerGas: bigint): Hex;
+
+// @public
 export function encodeGasLimits(verificationGasLimit: bigint, callGasLimit: bigint): Hex;
 
 // @public
 export interface EncryptedKeyPair {
+    algorithm?: "aes-256-gcm" | "legacy-ctr-hmac";
     // (undocumented)
     encryptedPrivateKey: string;
     // (undocumented)
@@ -603,7 +529,9 @@ export interface EncryptedKeyPair {
 }
 
 // @public
-export function encryptPrivateKey(privateKeyHex: `0x${string}`, password: string, salt?: Uint8Array, iterations?: number, publicKeyHex?: `0x${string}`): EncryptedKeyPair;
+export function encryptPrivateKey(privateKeyHex: `0x${string}`, password: string, salt?: Uint8Array, iterations?: number, publicKeyHex?: `0x${string}`, options?: {
+    unsafeAllowWeakKdf?: boolean;
+}): EncryptedKeyPair;
 
 // @public
 export class ENSProvider implements ResolverProvider {
@@ -779,7 +707,7 @@ export class ERC20TokenError extends Error {
 }
 
 // @public
-export type ERC20TokenErrorCode = "token_not_deployed" | "invalid_address" | "invalid_amount" | "insufficient_allowance" | "insufficient_balance" | "decimals_fetch_failed" | "token_info_fetch_failed" | "rpc_error" | "encoding_error" | "unknown_error";
+export type ERC20TokenErrorCode = "token_not_deployed" | "invalid_address" | "invalid_chain" | "invalid_amount" | "insufficient_allowance" | "insufficient_balance" | "decimals_fetch_failed" | "token_info_fetch_failed" | "rpc_error" | "encoding_error" | "unknown_error";
 
 // @public (undocumented)
 export class ERC20TokenHelper {
@@ -839,7 +767,7 @@ export function estimateFees(config: FeeEstimationConfig): Promise<FeeValues>;
 export function estimateMaxPriorityFeePerGas(rpcUrl: string): Promise<bigint>;
 
 // @public
-export function estimateUserOperationGas(userOp: Partial<UserOperation>, entryPoint: Address, bundlerUrl: string): Promise<UserOperationGasEstimate>;
+export function estimateUserOperationGas(userOp: Partial<UserOperation>, entryPoint: Address, bundlerUrl: string, version?: UserOperationVersion): Promise<UserOperationGasEstimate>;
 
 // @public
 export class EthCallProvider implements SimulationProvider {
@@ -860,23 +788,7 @@ export class EthCallProvider implements SimulationProvider {
 export const ETHEREUM_MAINNET_TOKENS: TokenListEntry[];
 
 // @public (undocumented)
-export interface ExecuteOptions {
-    approveAmount?: string;
-    autoApprove?: boolean;
-    recipient?: string;
-}
-
-// @public (undocumented)
-export interface ExecuteRouteResult {
-    bridgeReference?: string;
-    error?: string;
-    estimatedCompletionAt?: number;
-    fromChain: string;
-    fromTxHash: string;
-    status: RouteStatusValue;
-    toChain: string;
-    toTxHash?: string;
-}
+export type ExecutionStrategy = "atomic-batch" | "sequential";
 
 // @public (undocumented)
 export function extractAccounts(namespaces: Record<Namespace, SessionNamespace>): string[];
@@ -939,15 +851,6 @@ export interface FeeValuesLegacy {
 // @public
 export function formatUnits(amount: bigint, decimals: number): string;
 
-// @public
-export interface GasEstimate {
-    gasLimit: string;
-    maxFeePerGas: string;
-    maxPriorityFeePerGas: string;
-    totalCostUsd: string;
-    totalCostWei: string;
-}
-
 // @public (undocumented)
 export interface GasInfo {
     estimatedFeeEth?: string;
@@ -955,6 +858,9 @@ export interface GasInfo {
     gasLimit: bigint;
     gasPrice?: bigint;
 }
+
+// @public
+export function getAccountCapabilities(connector: CapabilityQueryable, session: UniversalWalletSession, chainId?: string): Promise<AccountCapabilities>;
 
 // @public
 export function getAllBuiltinTokens(): TokenListEntry[];
@@ -981,7 +887,7 @@ export function getLatestBaseFee(rpcUrl: string): Promise<bigint | null>;
 export function getMethodsFromNamespaces(namespaces: Record<Namespace, SessionNamespace>): string[];
 
 // @public
-export function getNativeTokenPriceUsd(chain: string, _rpcUrl?: string): Promise<number | null>;
+export function getNativeTokenPriceUsd(chain: string, _rpcUrl?: string, options?: NativeTokenPriceOptions): Promise<number | null>;
 
 // @public (undocumented)
 export function getPermissions(provider: {
@@ -995,13 +901,22 @@ export function getPermissions(provider: {
 export function getRpcUrl(chainId: string, fallback?: string): string | undefined;
 
 // @public (undocumented)
-export function hashUserOperation(userOp: UserOperation, entryPoint: Address, chainId: number): Hex;
+export function hashUserOperation(userOp: UserOperation, entryPoint: Address, chainId: number | bigint): Hex;
+
+// @public
+export function hashUserOperationV06(userOp: UserOperation, entryPoint: Address, chainId: number | bigint): Hex;
 
 // @public (undocumented)
 export function hasPermission(permissions: WalletPermission[] | null, capability: string): boolean;
 
 // @public (undocumented)
 export type Hex = `0x${string}`;
+
+// @public
+export function hexChainToCaip2(key: string): string | undefined;
+
+// @public
+export function hexEncode(message: string): `0x${string}`;
 
 // @public
 export class InAppChannel implements NotificationChannel {
@@ -1045,9 +960,6 @@ export function isAAError(e: unknown): e is AccountAbstractionError;
 // @public
 export function isBurnAddress(address: string): boolean;
 
-// @public (undocumented)
-export function isChainAbstractionError(e: unknown, code?: ChainAbstractionErrorCode): e is ChainAbstractionError;
-
 // @public
 export function isERC20TokenError(e: unknown): e is ERC20TokenError;
 
@@ -1070,32 +982,6 @@ export function isWalletError(e: unknown, code?: WalletErrorCode): e is WalletEr
 export function isZeroAddress(address: string): boolean;
 
 // @public (undocumented)
-export class LiFiProvider implements BridgeProvider {
-    constructor(config?: LiFiProviderConfig);
-    // (undocumented)
-    getRoutes(fromChain: string, toChain: string, fromToken: string, toToken: string, amount: string): Promise<Route[]>;
-    // (undocumented)
-    getRouteStatus(bridgeReference: string): Promise<RouteStatus>;
-    // (undocumented)
-    getTransactionParams(route: Route, sender: string, recipient: string): Promise<ProviderTransaction[]>;
-    // (undocumented)
-    readonly id: BridgeProviderId;
-    // (undocumented)
-    readonly name = "LI.FI";
-    // (undocumented)
-    supportsChainPair(fromChain: string, toChain: string): boolean;
-    // (undocumented)
-    supportsToken(chain: string, token: string): boolean;
-}
-
-// @public
-export interface LiFiProviderConfig {
-    apiKey?: string;
-    apiUrl?: string;
-    backendUrl?: string;
-}
-
-// @public (undocumented)
 export class LocalStorageAdapter implements StorageAdapter {
     constructor(prefix?: string);
     // (undocumented)
@@ -1114,7 +1000,7 @@ export class LocalStorageAdapter implements StorageAdapter {
 
 // @public
 export class LocalStorageSessionStorage implements SessionStorage {
-    constructor(key?: string);
+    constructor(key?: string, encryptionKey?: string);
     // (undocumented)
     clear(): Promise<void>;
     isAvailable(): boolean;
@@ -1246,6 +1132,14 @@ export interface NamespaceCapabilities {
 }
 
 // @public
+export interface NativeTokenPriceOptions {
+    maxAgeSeconds?: number;
+}
+
+// @public
+export const NO_CAPABILITIES: AccountCapabilities;
+
+// @public
 export class NoopChannel implements NotificationChannel {
     // (undocumented)
     getCapabilities(): ChannelCapability;
@@ -1276,6 +1170,9 @@ export class NoopStorageAdapter implements StorageAdapter {
     // (undocumented)
     set<T>(_key: string, _value: T): Promise<void>;
 }
+
+// @public
+export function normalizeEip5792Capabilities(raw: unknown): Record<string, WalletCapabilities>;
 
 // @public (undocumented)
 export interface NotificationChannel {
@@ -1443,7 +1340,7 @@ export function parseUnits(amount: string | number | bigint, decimals: number): 
 
 // @public (undocumented)
 export interface Paymaster {
-    getPaymasterData(userOp: Partial<UserOperation>): Promise<PaymasterData>;
+    getPaymasterData(userOp: Partial<UserOperation>, request?: PaymasterRequestOptions): Promise<PaymasterData>;
     isSponsored(userOp: Partial<UserOperation>): Promise<boolean>;
 }
 
@@ -1466,9 +1363,21 @@ export interface PaymasterData {
 }
 
 // @public
+export interface PaymasterRequestOptions {
+    // (undocumented)
+    chainId: number | bigint;
+    // (undocumented)
+    context?: Record<string, unknown>;
+    // (undocumented)
+    entryPoint: Address;
+    // (undocumented)
+    version?: UserOperationVersion;
+}
+
+// @public
 export class PaymasterService implements Paymaster {
     constructor(config: PaymasterServiceConfig);
-    getPaymasterData(userOp: Partial<UserOperation>): Promise<PaymasterData>;
+    getPaymasterData(userOp: Partial<UserOperation>, request?: PaymasterRequestOptions): Promise<PaymasterData>;
     isSponsored(userOp: Partial<UserOperation>): Promise<boolean>;
     get sponsorInfo(): string | null;
 }
@@ -1512,61 +1421,14 @@ export type Platform = "desktop-web" | "mobile-web" | "in-app-browser";
 // @public
 export const POLYGON_TOKENS: TokenListEntry[];
 
-// @public (undocumented)
-export interface ProviderTransaction {
-    // (undocumented)
-    chainId: string;
-    // (undocumented)
-    data: string;
-    // (undocumented)
-    to: string;
-    // (undocumented)
-    type: "approve" | "cross-chain";
-    // (undocumented)
-    value: string;
-}
-
 // @public
-export interface Quote {
-    approveAmount?: string;
-    approveSpender?: string;
-    approveTarget?: string;
-    estimatedArrival: string;
-    estimatedArrivalSeconds: number;
-    exchangeRate: string;
-    expiresAt: number;
-    fromAmountFormatted: string;
-    fromChain: string;
-    fromTokenSymbol: string;
-    needsApprove: boolean;
-    netReceiveFormatted: string;
-    priceImpact: string;
-    provider: BridgeProviderId;
-    routeId: string;
-    summary: string;
-    toAmountFormatted: string;
-    toAmountMinFormatted: string;
-    toChain: string;
-    totalFeeUsd: string;
-    totalGasCostUsd: string;
-    toTokenSymbol: string;
-}
-
-// @public (undocumented)
-export interface QuoteOptions {
-    excludeBridges?: BridgeProviderId[];
-    preferredBridges?: BridgeProviderId[];
-    slippage?: number;
-    sortBy?: QuoteSortBy;
-}
-
-// @public
-export type QuoteSortBy = "netReceive" | "fastest" | "cheapest";
+export function readAtomicSupport(entry: Record<string, unknown>): {
+    supported: boolean;
+    maxBatchSize?: number;
+};
 
 // @public (undocumented)
 export interface RefreshFeesOptions {
-    // (undocumented)
-    force?: boolean;
     // (undocumented)
     userOverrides?: Partial<FeeEstimationConfig>;
 }
@@ -1635,75 +1497,108 @@ export type RiskWarningCategory = "phishing" | "unlimited_approval" | "high_valu
 // @public (undocumented)
 export type RiskWarningSeverity = "low" | "medium" | "high" | "critical";
 
-// @public
+// @public (undocumented)
 export interface Route {
-    estimatedTime: number;
-    fee: {
-        protocolFee: string;
-        integrationFee?: string;
-    };
-    fromAmount: string;
-    fromChain: string;
-    fromToken: string;
-    gasCosts: {
-        fromChain: GasEstimate;
-        toChain: GasEstimate;
-        totalUsd: string;
-    };
-    id: string;
-    provider: BridgeProviderId;
+    // (undocumented)
+    fromChain: ChainInfo;
+    // (undocumented)
+    inputAmount: bigint;
+    // (undocumented)
+    inputToken: Token;
+    // (undocumented)
+    outputAmount: bigint;
+    // (undocumented)
+    outputToken: Token;
+    // (undocumented)
+    slippage: number;
+    // (undocumented)
     steps: RouteStep[];
-    summary: string;
-    toAmount: string;
-    toAmountMin: string;
-    toChain: string;
-    toToken: string;
+    // (undocumented)
+    toChain: ChainInfo;
+    // (undocumented)
+    totalCost: bigint;
 }
 
 // @public
 export class RouteEngine {
-    constructor(config?: ChainAbstractionConfig);
-    compareCosts(operation: CostComparisonOperation, chains: string[], options?: CostComparisonOptions): Promise<CostComparison[]>;
-    executeRoute(quote: Quote, recipient: string, options?: ExecuteOptions): Promise<ExecuteRouteResult>;
-    getProvider(providerId: BridgeProviderId): BridgeProvider | undefined;
-    getQuote(fromChain: string, toChain: string, token: string, amount: string, options?: QuoteOptions): Promise<Quote[]>;
-    getRouteStatus(bridgeReference: string): Promise<RouteStatus>;
-    listProviders(): BridgeProvider[];
-    registerProvider(provider: BridgeProvider): void;
-    unregisterProvider(providerId: BridgeProviderId): void;
+    // Warning: (ae-forgotten-export) The symbol "RouteEngineConfig" needs to be exported by the entry point index.d.ts
+    constructor(config?: RouteEngineConfig);
+    executeRoute(route: Route): Promise<{
+        txHash: string;
+    }>;
+    getBestRoute(params: {
+        inputToken: Token;
+        outputToken: Token;
+        amount: bigint;
+        fromChain: {
+            chainId: number;
+        };
+        toChain: {
+            chainId: number;
+        };
+    }): Promise<Route | null>;
+    getBestRouteWithUSDCPriority(params: {
+        inputToken: Token;
+        outputToken: Token;
+        amount: bigint;
+        fromChain: {
+            chainId: number;
+        };
+        toChain: {
+            chainId: number;
+        };
+    }): Promise<Route | null>;
+    getBridgeProvider(name: string): BridgeProvider | undefined;
+    getRouteStatus(txHash: string, chainId?: number): Promise<{
+        status: "pending" | "confirmed" | "failed" | "unavailable";
+        confirmations: number;
+    }>;
+    getSwapProvider(name: string): SwapProvider | undefined;
+    listBridgeProviders(): BridgeProvider[];
+    listSwapProviders(): SwapProvider[];
+    // Warning: (ae-forgotten-export) The symbol "BridgeProvider" needs to be exported by the entry point index.d.ts
+    registerBridgeProvider(provider: BridgeProvider): void;
+    // Warning: (ae-forgotten-export) The symbol "SwapProvider" needs to be exported by the entry point index.d.ts
+    registerSwapProvider(provider: SwapProvider): void;
+    // Warning: (ae-forgotten-export) The symbol "EVMRouteExecutor" needs to be exported by the entry point index.d.ts
+    setExecutor(executor: EVMRouteExecutor): void;
 }
 
 // @public (undocumented)
-export interface RouteStatus {
+export interface RouteQuote {
     // (undocumented)
-    currentStep?: string;
-    error?: string;
-    estimatedCompletionAt?: number;
+    estimatedTimeMs: number;
+    outputAmount: bigint;
     // (undocumented)
-    fromTxHash?: string;
-    progress?: number;
+    provider: string;
     // (undocumented)
-    status: RouteStatusValue;
+    slippage: number;
     // (undocumented)
-    toTxHash?: string;
+    steps: RouteStep[];
+    // (undocumented)
+    totalCost: bigint;
 }
 
 // @public (undocumented)
-export type RouteStatusValue = "pending" | "bridging" | "completed" | "failed";
-
-// @public
 export interface RouteStep {
     // (undocumented)
-    chain: string;
+    amount: bigint;
     // (undocumented)
-    contractAddress: string;
+    description: string;
     // (undocumented)
-    data?: string;
-    estimatedGas: string;
+    estimatedGas: bigint;
     // (undocumented)
-    token: string;
+    fromToken: Token;
     // (undocumented)
-    type: "approve" | "swap" | "cross-chain";
+    toToken: Token;
+    transaction?: {
+        to: `0x${string}`;
+        data: `0x${string}`;
+        value?: bigint;
+        chainId?: number;
+    };
+    // (undocumented)
+    type: "swap" | "bridge" | "transfer";
 }
 
 // @public (undocumented)
@@ -1720,8 +1615,13 @@ export interface ScopeCheckResult {
     valid: boolean;
 }
 
+// @public (undocumented)
+export interface SendCallsOptions {
+    atomicRequired?: boolean;
+}
+
 // @public
-export function sendUserOperation(userOp: UserOperation, bundlerUrl: string, entryPoint: Address): Promise<UserOperationResponse>;
+export function sendUserOperation(userOp: UserOperation, bundlerUrl: string, entryPoint: Address, version?: UserOperationVersion): Promise<UserOperationResponse>;
 
 // @public (undocumented)
 export interface SendUserOpOptions {
@@ -1815,7 +1715,7 @@ export interface SessionKeyBundle {
 }
 
 // @public
-export type SessionKeyErrorCode = "session_key_not_found" | "session_key_expired" | "session_key_revoked" | "session_key_scope_exceeded" | "session_key_method_forbidden" | "session_key_contract_not_allowed" | "session_key_chain_not_allowed" | "session_key_storage_unavailable" | "session_key_encryption_failed" | "session_key_required_fields_missing" | "session_key_max_tx_count_exceeded" | "session_key_value_limit_exceeded" | "session_key_gas_limit_exceeded";
+export type SessionKeyErrorCode = "session_key_not_found" | "session_key_expired" | "session_key_revoked" | "session_key_scope_exceeded" | "session_key_method_forbidden" | "session_key_contract_not_allowed" | "session_key_chain_not_allowed" | "session_key_storage_unavailable" | "session_key_encryption_failed" | "session_key_required_fields_missing" | "session_key_max_tx_count_exceeded" | "session_key_value_limit_exceeded" | "session_key_gas_limit_exceeded" | "session_key_invalid_input";
 
 // @public
 export interface SessionKeyInfo {
@@ -1840,13 +1740,7 @@ export interface SessionKeyInfo {
 // @public
 export class SessionKeyManager {
     constructor(config?: SessionKeyManagerConfig, storageAdapter?: StorageAdapter);
-    checkSessionScope(sessionId: string, tx: {
-        to?: string;
-        value?: string;
-        data?: string;
-        chainId?: number;
-        gas?: string;
-    }): Promise<ScopeCheckResult>;
+    checkSessionScope(sessionId: string, tx: SessionKeyTransaction): Promise<ScopeCheckResult>;
     clearAll(): Promise<void>;
     createSessionKey(scope?: Partial<SessionKeyScope>, signerAddress?: `0x${string}`): Promise<SessionKeyInfo>;
     getSessionBundle(sessionId: string): Promise<SessionKeyBundle>;
@@ -1855,7 +1749,7 @@ export class SessionKeyManager {
     listSessions(): Promise<SessionKeyInfo[]>;
     revokeSession(sessionId: string): Promise<void>;
     setAuthorization(sessionId: string, authorization: SignedAuthorization): Promise<void>;
-    signWithSessionKey(sessionId: string, messageHash: `0x${string}`): Promise<`0x${string}`>;
+    signWithSessionKey(sessionId: string, messageHash: `0x${string}`, tx?: SessionKeyTransaction): Promise<`0x${string}`>;
 }
 
 // @public (undocumented)
@@ -1869,6 +1763,7 @@ export interface SessionKeyManagerConfig {
     pbkdf2Iterations?: number;
     requireAllowedContracts?: boolean;
     storagePrefix?: string;
+    unsafeAllowWeakKdf?: boolean;
 }
 
 // @public
@@ -1902,17 +1797,43 @@ export class SessionKeyStorage {
     constructor(adapter?: StorageAdapter);
     clear(): Promise<void>;
     get(id: string): Promise<StoredSessionKey | null>;
-    incrementUsage(id: string): Promise<void>;
+    incrementUsage(id: string, tx?: {
+        value?: string;
+        gas?: string;
+    }): Promise<void>;
+    // @internal
+    incrementUsageUnlocked(id: string, tx?: {
+        value?: string;
+        gas?: string;
+    }): Promise<void>;
     isAvailable(): boolean;
     loadAll(): Promise<StoredSessionKey[]>;
     remove(id: string): Promise<void>;
     save(key: StoredSessionKey): Promise<void>;
     updateStatus(id: string, status: StoredSessionKey["status"]): Promise<void>;
+    // Warning: (ae-forgotten-export) The symbol "AsyncOperation" needs to be exported by the entry point index.d.ts
+    withKeyLock<T>(id: string, operation: AsyncOperation<T>): Promise<T>;
+    withStorageLock<T>(operation: AsyncOperation<T>): Promise<T>;
+}
+
+// @public
+export interface SessionKeyTransaction {
+    // (undocumented)
+    chainId?: number;
+    // (undocumented)
+    data?: string;
+    // (undocumented)
+    gas?: string;
+    // (undocumented)
+    to?: string;
+    // (undocumented)
+    value?: string;
 }
 
 // @public
 export class SessionManager extends SessionEventEmitter {
     constructor(connectorManager: ConnectorManager, config?: SessionManagerConfig);
+    attach(session: UniversalWalletSession, chainId?: string): Promise<ActiveSessionBundle>;
     clearUserFeeOverrides(chainId?: string): void;
     connect(walletType: string, chainId: string, input?: unknown): Promise<ActiveSessionBundle>;
     disconnect(): Promise<void>;
@@ -1922,14 +1843,12 @@ export class SessionManager extends SessionEventEmitter {
     getAllActiveSessions(): ActiveSessionBundle[];
     getAllChainSessions(): ChainSession[];
     getUserFeeOverrides(chainId: string): UserFeeOverrides[string] | undefined;
-    // (undocumented)
-    off<E extends SessionEvent>(event: E, handler: SessionEventHandler<E>): void;
-    // (undocumented)
-    on<E extends SessionEvent>(event: E, handler: SessionEventHandler<E>): void;
     refreshFees(chainId?: string, options?: RefreshFeesOptions): Promise<FeeValues | null>;
+    registerConnector(connector: UniversalConnector, priority?: number): void;
     restoreFromPersistence(): Promise<boolean>;
     setUserFeeOverrides(chainId: string, overrides: Partial<UserFeeOverrides[string]>): void;
     switchChain(chainId: string): Promise<void>;
+    syncExternalChain(chainId: string): Promise<void>;
 }
 
 // @public (undocumented)
@@ -2013,14 +1932,22 @@ export interface SignedAuthorization {
 }
 
 // @public
-export function signUserOperation(userOp: UserOperation, signer: (hash: Hex) => Promise<Hex> | Hex, entryPoint: Address, chainId: number): Promise<UserOperation>;
+export function signUserOperation(userOp: UserOperation, signer: (hash: Hex) => Promise<Hex> | Hex, entryPoint: Address, chainId: number | bigint, signerMode?: "raw" | "eip191"): Promise<UserOperation>;
 
 // @public
-export const SIMPLE_ACCOUNT_FACTORY: Address;
+export function signUserOperationV06(userOp: UserOperation, signer: (hash: Hex) => Promise<Hex> | Hex, entryPoint: Address, chainId: number | bigint, signerMode?: "raw" | "eip191"): Promise<UserOperation>;
+
+// @public
+export const SIMPLE_ACCOUNT_FACTORY: `0x${string}`;
+
+// @public
+export const SIMPLE_ACCOUNT_FACTORY_V06: Address;
+
+// @public
+export const SIMPLE_ACCOUNT_FACTORY_V07: Address;
 
 // @public (undocumented)
 export interface SimulationConfig {
-    blowfishApiKey?: string;
     defaultProvider?: SimulationProviderName;
     enabled?: boolean;
     rpcUrl?: string;
@@ -2032,7 +1959,6 @@ export class SimulationManager {
     get enabled(): boolean;
     isAvailable(chainId: number): boolean;
     registerProvider(name: SimulationProviderName, provider: SimulationProvider): void;
-    setBlowfishApiKey(apiKey: string): void;
     setEnabled(enabled: boolean): void;
     simulate(tx: TransactionDescriptor, from: `0x${string}`, options?: {
         chainId?: number;
@@ -2048,6 +1974,7 @@ export interface SimulationProvider {
     isAvailable(chainId: number): boolean;
     readonly name: SimulationProviderName;
     simulate(tx: TransactionDescriptor, from: `0x${string}`, options?: {
+        chainId?: number;
         origin?: string;
         rpcUrl?: string;
     }): Promise<SimulationResult>;
@@ -2055,7 +1982,7 @@ export interface SimulationProvider {
 }
 
 // @public
-export type SimulationProviderName = "eth_call" | "blowfish" | "tenderly" | "auto";
+export type SimulationProviderName = "eth_call" | "tenderly" | "auto";
 
 // @public (undocumented)
 export interface SimulationResult {
@@ -2096,7 +2023,7 @@ export class SmartAccountManager {
     constructor(config: SmartAccountManagerConfig);
     createAccount(config: SmartAccountConfig): Promise<SmartAccountInfo>;
     deployAccount(config: SmartAccountConfig): Promise<Hex>;
-    estimateUserOperationGas(entryPoint: Address, partialUserOp: Partial<UserOperation>): Promise<UserOperationGasEstimate>;
+    estimateUserOperationGas(entryPoint: Address, partialUserOp: Partial<UserOperation>, version?: "0.6" | "0.7"): Promise<UserOperationGasEstimate>;
     getAccountAddress(config: SmartAccountConfig): Promise<Address>;
     getBaseFee(): Promise<bigint>;
     getDeployCallData(config: SmartAccountConfig): Promise<{
@@ -2110,7 +2037,7 @@ export class SmartAccountManager {
     isAASupported(chainId?: string): boolean;
     sendBatch(config: SmartAccountConfig, calls: Call[], options?: SendUserOpOptions): Promise<UserOperationResponse>;
     sendUserOperation(config: SmartAccountConfig, calls: Call[], options?: SendUserOpOptions): Promise<UserOperationResponse>;
-    sendUserOpToBundler(userOp: UserOperation): Promise<Hex>;
+    sendUserOpToBundler(userOp: UserOperation, entryPoint?: Address, version?: "0.6" | "0.7"): Promise<Hex>;
 }
 
 // @public
@@ -2120,6 +2047,8 @@ export interface SmartAccountManagerConfig {
     defaultPaymasterConfig?: PaymasterConfig;
     paymaster?: PaymasterService;
     rpcUrl: string;
+    signer?: (hash: Hex) => Promise<Hex> | Hex;
+    signerMode?: "raw" | "eip191";
 }
 
 // @public
@@ -2136,13 +2065,13 @@ export class SNSProvider implements ResolverProvider {
 }
 
 // @public (undocumented)
-export const SOLANA_DEVNET = "solana:1";
+export const SOLANA_DEVNET = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
 
 // @public
-export const SOLANA_MAINNET = "solana:0";
+export const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 
 // @public (undocumented)
-export const SOLANA_TESTNET = "solana:2";
+export const SOLANA_TESTNET = "solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z";
 
 // @public
 export const STORAGE_KEYS: {
@@ -2176,6 +2105,8 @@ export class StorageError extends Error {
 
 // @public
 export interface StoredSessionKey {
+    accumulatedGas?: bigint;
+    accumulatedValue?: bigint;
     authorization: SignedAuthorization;
     createdAt: number;
     id: string;
@@ -2214,6 +2145,9 @@ export class TelegramChannel implements NotificationChannel {
 export function toDecString(value: bigint): string;
 
 // @public
+export function toEthSignedMessageHash(hash: Hex): Hex;
+
+// @public
 export function toHumanReadable(wei: bigint, decimals?: number, unit?: string): string;
 
 // @public
@@ -2226,6 +2160,7 @@ export interface Token {
     decimals: number;
     // (undocumented)
     symbol: string;
+    variant?: "native" | "bridged";
 }
 
 // @public
@@ -2421,6 +2356,8 @@ export interface UniversalConnector {
     name: string;
     // (undocumented)
     namespaces: string[];
+    onAccountsChanged?(session: UniversalWalletSession, handler: (accounts: string[]) => void): () => void;
+    onChainChanged?(session: UniversalWalletSession, handler: (chainId: string) => void): () => void;
     // (undocumented)
     reconnect?(session: UniversalWalletSession): Promise<UniversalWalletSession>;
     // (undocumented)
@@ -2429,9 +2366,10 @@ export interface UniversalConnector {
         params: unknown[];
     }): Promise<unknown>;
     // (undocumented)
-    sendCalls?(session: UniversalWalletSession, calls: BatchCall[], chainId?: string): Promise<string>;
+    sendCalls?(session: UniversalWalletSession, calls: BatchCall[], chainId?: string, options?: SendCallsOptions): Promise<string>;
     // (undocumented)
     sendTransaction?(session: UniversalWalletSession, input: unknown): Promise<unknown>;
+    showCallsStatus?(session: UniversalWalletSession, bundleHash: string): Promise<void>;
     // (undocumented)
     signMessage?(session: UniversalWalletSession, input: unknown): Promise<unknown>;
     // (undocumented)
@@ -2504,6 +2442,7 @@ export interface UserOperation {
     accountGasLimits: Hex;
     // (undocumented)
     callData: Hex;
+    gasFees?: Hex;
     // (undocumented)
     initCode: Hex;
     // (undocumented)
@@ -2562,6 +2501,9 @@ export interface UserOperationResponse {
     userOpHash: Hex;
 }
 
+// @public (undocumented)
+export type UserOperationVersion = "0.6" | "0.7";
+
 // @public
 export function validateChainId(chainId: string): void;
 
@@ -2582,7 +2524,9 @@ export interface WalletCapabilities {
 
 // @public (undocumented)
 export class WalletError extends Error {
-    constructor(code: WalletErrorCode, message?: string, details?: unknown);
+    constructor(code: WalletErrorCode, message?: string, details?: unknown, cause?: unknown);
+    // (undocumented)
+    cause?: unknown;
     // (undocumented)
     code: WalletErrorCode;
     // (undocumented)
@@ -2590,7 +2534,7 @@ export class WalletError extends Error {
 }
 
 // @public (undocumented)
-export type WalletErrorCode = "wallet_unavailable" | "user_rejected" | "deeplink_timeout" | "session_expired" | "intent_expired" | "namespace_mismatch" | "chain_unsupported" | "method_not_allowed" | "method_unsupported" | "signature_rejected" | "tx_failed" | "invalid_proposal" | "invalid_input" | "siwx_error" | "no_active_session" | "chain_switch_rejected" | "invalid_chain" | "no_solana_session" | "unsupported_chain" | "fee_rpc_error";
+export type WalletErrorCode = "wallet_unavailable" | "user_rejected" | "deeplink_timeout" | "session_expired" | "intent_expired" | "namespace_mismatch" | "chain_unsupported" | "chain_mismatch" | "method_not_allowed" | "method_unsupported" | "signature_rejected" | "tx_failed" | "invalid_proposal" | "invalid_input" | "siwx_error" | "no_active_session" | "chain_switch_rejected" | "invalid_chain" | "no_solana_session" | "unsupported_chain" | "fee_rpc_error" | "rpc_error" | "session_not_found" | "session_inactive" | "session_scope_exceeded" | "invalid_scope" | "bad_stuff" | "no_rpc" | "not_initialized" | "no_wallet" | "storage_unavailable" | "terminated" | "test_code" | "timeout" | "worker_error" | "decryption_failed" | "storage_quota" | "storage_read_failed" | "storage_write_failed" | "storage_clear_failed" | "session_decrypt_failed" | "crypto_worker_error" | "simulation_unavailable" | "derivation_failed" | "invalid_fee" | "invalid_key" | "invalid_mnemonic" | "invalid_multiplier" | "rpc_timeout" | "simulation_malicious" | "simulation_reverted" | "fee_estimation_failed";
 
 // @public (undocumented)
 export interface WalletPermission {
@@ -2627,7 +2571,7 @@ export const XRPL_TESTNET = "xrpl:1";
 
 // Warnings were encountered during analysis:
 //
-// packages/core/dist/index.d.ts:1613:5 - (ae-forgotten-export) The symbol "createNamespace" needs to be exported by the entry point index.d.ts
+// packages/core/dist/index.d.ts:1349:5 - (ae-forgotten-export) The symbol "createNamespace" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

@@ -78,7 +78,8 @@ Self-custodial embedded wallet (`PocketConnector` / `createPocketConnector`):
 - `generateWallet()` — BIP39 mnemonic → HD key → EVM address
 - `importFromMnemonic()` — import from 12/24-word phrase
 - `importFromPrivateKey()` — import from raw 64-char hex
-- `save()` / `load()` / `clear()` / `wipe()` — localStorage persistence (base64-encoded)
+- `save()` / `load()` / `clear()` / `wipe()` — persistent wallet storage; the
+  browser rejects unencrypted localStorage unless `allowInsecureStorage: true`
 - `signMessage()` — `personal_sign` with secp256k1
 - `sendTransaction()` — simulated tx with deterministic hash
 - `switchChain()` — update chain ID

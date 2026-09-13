@@ -4,8 +4,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 // ── Config ──────────────────────────────────────────────────────
 
 const PROJECT_ID =
-  process.env.VITE_WALLETCONNECT_PROJECT_ID ||
-  "70f75bd70b2718c8bcea689f413cc666";
+  process.env.VITE_WALLETCONNECT_PROJECT_ID || "";
 
 const WALLET_METADATA = {
   name: "E2E Test Wallet",
@@ -53,6 +52,11 @@ export class E2EWalletAdapter {
   }
 
   async init() {
+    if (!PROJECT_ID) {
+      throw new Error(
+        "VITE_WALLETCONNECT_PROJECT_ID is required for the E2E wallet; do not commit or reuse a production project ID.",
+      );
+    }
     this.client = await SignClient.init({
       projectId: PROJECT_ID,
       metadata: WALLET_METADATA,

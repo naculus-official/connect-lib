@@ -72,10 +72,12 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       thresholds: {
-        statements: 38,
-        branches: 32,
-        functions: 40,
-        lines: 39,
+        // Keep the gate above the current baseline (71.48/59.80/74.95/71.48)
+        // so new packages cannot quietly lower the monorepo's quality bar.
+        statements: 70,
+        branches: 55,
+        functions: 70,
+        lines: 70,
       },
       reporter: ["text", "json", "html"],
       exclude: [
