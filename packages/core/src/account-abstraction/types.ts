@@ -11,6 +11,7 @@
 
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
+export type UserOperationVersion = "0.6" | "0.7";
 
 // ─── UserOperation (ERC-4337 v0.7) ──────────────────────────────────────
 
@@ -26,6 +27,8 @@ export interface UserOperation {
   callData: Hex;
   /** ABI-encoded callGasLimit + verificationGasLimit (v0.7) */
   accountGasLimits: Hex;
+  /** ABI-encoded maxPriorityFeePerGas + maxFeePerGas (v0.7) */
+  gasFees?: Hex;
   preVerificationGas: bigint;
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
@@ -47,6 +50,18 @@ export interface Call {
 
 // ─── Smart Account Configuration ────────────────────────────────────────
 
+/**
+ * Smart account implementations this module knows about.
+ *
+ * Only "simple" (eth-infinitism SimpleAccount) is implemented; the others are
+ * named so a caller's intent survives in config and so adding one is a change
+ * in one place. Passing any of them today throws `aa_unknown_account_type`
+ * rather than silently deriving an address from the SimpleAccount factory,
+ * which would be an address the user could send funds to and never control.
+ *
+ * None of these verifies a P-256 signature, which is why a passkey cannot own
+ * one — that needs a WebAuthn validator or the RIP-7212 precompile.
+ */
 export type AccountType = "simple" | "light" | "kernel" | "safe";
 
 export interface SmartAccountConfig {
@@ -118,6 +133,8 @@ export interface UserOperationGasEstimate {
   preVerificationGas: bigint;
   /** v0.7 bundlers may return accountGasLimits */
   accountGasLimits?: Hex;
+  /** v0.7 paymaster validation gas returned when a paymaster is present. */
+  paymasterVerificationGasLimit?: bigint;
 }
 
 // ─── Paymaster Types ────────────────────────────────────────────────────
@@ -146,9 +163,24 @@ export interface PaymasterData {
   sponsorInfo?: string;
 }
 
+/**
+ * Chain and EntryPoint context for the ERC-7677 paymaster web-service API.
+ * Supplying this context makes the request standards-based; omitting it keeps
+ * the legacy `pm_sponsorUserOperation` compatibility path.
+ */
+export interface PaymasterRequestOptions {
+  entryPoint: Address;
+  chainId: number | bigint;
+  version?: UserOperationVersion;
+  context?: Record<string, unknown>;
+}
+
 export interface Paymaster {
   /** Get paymaster data for a UserOperation */
-  getPaymasterData(userOp: Partial<UserOperation>): Promise<PaymasterData>;
+  getPaymasterData(
+    userOp: Partial<UserOperation>,
+    request?: PaymasterRequestOptions,
+  ): Promise<PaymasterData>;
   /** Verify if a UserOperation is eligible for sponsorship */
   isSponsored(userOp: Partial<UserOperation>): Promise<boolean>;
 }
@@ -193,11 +225,23 @@ export const DEFAULT_ENTRY_POINT = ENTRY_POINT_V0_7;
 // ─── SimpleAccount Factory Addresses ────────────────────────────────────
 
 /**
- * SimpleAccount Factory address (eth-infinitism).
- * Deployed at the same address on all supported chains via CREATE2.
+ * SimpleAccount Factory v0.6 address (eth-infinitism).
+ * This factory is coupled to EntryPoint v0.6 through its immutable account
+ * implementation; it must not be used with a v0.7 EntryPoint.
  */
-export const SIMPLE_ACCOUNT_FACTORY: Address =
+export const SIMPLE_ACCOUNT_FACTORY_V06: Address =
   "0x9406Cc6185a346906296840746125a0E44976454";
+
+/**
+ * SimpleAccount Factory v0.7 address (eth-infinitism).
+ * This factory is coupled to EntryPoint v0.7 through its immutable account
+ * implementation; it must not be used with a v0.6 EntryPoint.
+ */
+export const SIMPLE_ACCOUNT_FACTORY_V07: Address =
+  "0x91E60e0613810449d098b0b5Ec8b51A0FE8c8985";
+
+/** Default SimpleAccount factory for the default EntryPoint v0.7. */
+export const SIMPLE_ACCOUNT_FACTORY = SIMPLE_ACCOUNT_FACTORY_V07;
 
 // ─── Gas Budget Defaults ────────────────────────────────────────────────
 
@@ -218,27 +262,36 @@ export const DEFAULT_PRE_VERIFICATION_GAS = 50_000n;
  */
 export const AA_SUPPORTED_CHAINS: Record<
   string,
-  { entryPoint: Address; factory: Address }
+  { entryPoint: Address; factory: Address; version: UserOperationVersion }
 > = {
-  "eip155:1": { entryPoint: ENTRY_POINT_V0_7, factory: SIMPLE_ACCOUNT_FACTORY }, // Ethereum
+  "eip155:1": {
+    entryPoint: ENTRY_POINT_V0_7,
+    factory: SIMPLE_ACCOUNT_FACTORY_V07,
+    version: "0.7",
+  }, // Ethereum
   "eip155:137": {
     entryPoint: ENTRY_POINT_V0_6,
-    factory: SIMPLE_ACCOUNT_FACTORY,
+    factory: SIMPLE_ACCOUNT_FACTORY_V06,
+    version: "0.6",
   }, // Polygon
   "eip155:10": {
     entryPoint: ENTRY_POINT_V0_6,
-    factory: SIMPLE_ACCOUNT_FACTORY,
+    factory: SIMPLE_ACCOUNT_FACTORY_V06,
+    version: "0.6",
   }, // Optimism
   "eip155:42161": {
     entryPoint: ENTRY_POINT_V0_6,
-    factory: SIMPLE_ACCOUNT_FACTORY,
+    factory: SIMPLE_ACCOUNT_FACTORY_V06,
+    version: "0.6",
   }, // Arbitrum
   "eip155:8453": {
     entryPoint: ENTRY_POINT_V0_7,
-    factory: SIMPLE_ACCOUNT_FACTORY,
+    factory: SIMPLE_ACCOUNT_FACTORY_V07,
+    version: "0.7",
   }, // Base
   "eip155:11155111": {
     entryPoint: ENTRY_POINT_V0_7,
-    factory: SIMPLE_ACCOUNT_FACTORY,
+    factory: SIMPLE_ACCOUNT_FACTORY_V07,
+    version: "0.7",
   }, // Sepolia
 };

@@ -15,7 +15,7 @@ import { ADDRESSES } from "@naculus/test-utils/test-constants";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PaymasterService, createPaymasterService, type PaymasterServiceConfig } from "../paymaster";
 import { buildUserOperation } from "../user-operation";
-import { type Address, type PaymasterConfig } from "../types";
+import type { Address, PaymasterConfig } from "../types";
 import { AccountAbstractionError } from "../errors";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────
@@ -198,6 +198,85 @@ describe("verifying paymaster data", () => {
     expect(body.method).toBe("pm_sponsorUserOperation");
     expect(body.params[0].nonce).toBe("0x2a");
     expect(body.params[0].sender).toBe(TEST_SENDER);
+  });
+
+  it("uses ERC-7677 v0.7 stub and final methods when chain context is supplied", async () => {
+    const spy = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          result: {
+            paymaster: "0x2222222222222222222222222222222222222222",
+            paymasterData: "0x01",
+            paymasterVerificationGasLimit: "0x1000",
+            paymasterPostOpGasLimit: "0x2000",
+          },
+        }),
+      }) as unknown as Response)
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          result: {
+            paymaster: "0x2222222222222222222222222222222222222222",
+            paymasterData: "0xabcd",
+            sponsor: { name: "Standard PM" },
+          },
+        }),
+      }) as unknown as Response);
+
+    const service = new PaymasterService(createServiceConfig());
+    const data = await service.getPaymasterData(
+      buildUserOperation({ sender: TEST_SENDER }),
+      {
+        entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+        chainId: 1,
+        version: "0.7",
+      },
+    );
+
+    expect(JSON.parse(spy.mock.calls[0][1]?.body as string).method).toBe(
+      "pm_getPaymasterStubData",
+    );
+    expect(JSON.parse(spy.mock.calls[1][1]?.body as string).method).toBe(
+      "pm_getPaymasterData",
+    );
+    expect(data.paymasterAndData).toBe(
+      "0x2222222222222222222222222222222222222222" +
+        "00000000000000000000000000001000" +
+        "00000000000000000000000000002000" +
+        "abcd",
+    );
+    expect(data.sponsorInfo).toBe("Standard PM");
+  });
+
+  it("uses the ERC-7677 v0.6 paymasterAndData result", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        result: {
+          paymasterAndData: "0x1234",
+          isFinal: true,
+        },
+      }),
+    } as unknown as Response);
+    const service = new PaymasterService(createServiceConfig());
+    const data = await service.getPaymasterData(
+      buildUserOperation({ sender: TEST_SENDER }),
+      {
+        entryPoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
+        chainId: 1,
+        version: "0.6",
+      },
+    );
+    expect(data.paymasterAndData).toBe("0x1234");
+    const body = JSON.parse(spy.mock.calls[0][1]?.body as string);
+    expect(body.params[1]).toBe(
+      "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
+    );
+    expect(body.params[2]).toBe("0x1");
   });
 });
 

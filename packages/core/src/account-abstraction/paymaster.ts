@@ -16,9 +16,17 @@ import type {
   PaymasterConfig,
   PaymasterData,
   Paymaster as PaymasterInterface,
+  PaymasterRequestOptions,
   PaymasterType,
   UserOperation,
+  UserOperationVersion,
 } from "./types";
+import { serializeUserOperationForRpc } from "./user-operation";
+
+export interface PaymasterStubData extends PaymasterData {
+  /** When true, ERC-7677 permits skipping pm_getPaymasterData. */
+  isFinal: boolean;
+}
 
 // ─── Paymaster Service ─────────────────────────────────────────────────
 
@@ -64,7 +72,9 @@ export class PaymasterService implements PaymasterInterface {
    */
   async getPaymasterData(
     userOp: Partial<UserOperation>,
+    request?: PaymasterRequestOptions,
   ): Promise<PaymasterData> {
+    if (request) return this.getStandardPaymasterData(userOp, request);
     switch (this.config.type) {
       case "verifying":
         return this.getVerifyingPaymasterData(userOp);
@@ -80,6 +90,54 @@ export class PaymasterService implements PaymasterInterface {
           `Unknown paymaster type: ${this.config.type}`,
         );
     }
+  }
+
+  /** Obtain ERC-7677 stub fields before bundler gas estimation. */
+  async getPaymasterStubData(
+    userOp: Partial<UserOperation>,
+    request: PaymasterRequestOptions,
+  ): Promise<PaymasterStubData> {
+    const version = request.version ?? "0.7";
+    const result = parsePaymasterResult(
+      await this.postRpc(
+        "pm_getPaymasterStubData",
+        this.standardParams(userOp, request),
+      ),
+    );
+    this._sponsorInfo = result.sponsor?.name ?? "Sponsored by Paymaster";
+    return packStandardPaymasterResult(result, version, this._sponsorInfo, true);
+  }
+
+  /** Obtain final ERC-7677 fields after bundler gas estimation. */
+  async getPaymasterFinalData(
+    userOp: Partial<UserOperation>,
+    request: PaymasterRequestOptions,
+    stub: PaymasterStubData,
+    estimatedVerificationGas?: bigint,
+  ): Promise<PaymasterData> {
+    const estimatedStub =
+      estimatedVerificationGas === undefined ||
+      (request.version ?? "0.7") === "0.6"
+        ? stub
+        : replacePaymasterVerificationGas(stub, estimatedVerificationGas);
+    if (estimatedStub.isFinal) return estimatedStub;
+    const version = request.version ?? "0.7";
+    const result = parsePaymasterResult(
+      await this.postRpc(
+        "pm_getPaymasterData",
+        this.standardParams(
+          { ...userOp, paymasterAndData: estimatedStub.paymasterAndData },
+          request,
+        ),
+      ),
+    );
+    return packStandardPaymasterResult(
+      result,
+      version,
+      result.sponsor?.name ?? stub.sponsorInfo ?? "Sponsored by Paymaster",
+      false,
+      estimatedStub,
+    );
   }
 
   /**
@@ -334,6 +392,75 @@ export class PaymasterService implements PaymasterInterface {
     return this.getVerifyingPaymasterData(userOp);
   }
 
+  /**
+   * ERC-7677 paymaster flow. The stub call is required for v0.7 because the
+   * paymaster supplies the verification and post-op gas limits that are
+   * packed into `paymasterAndData`.
+   */
+  private async getStandardPaymasterData(
+    userOp: Partial<UserOperation>,
+    request: PaymasterRequestOptions,
+  ): Promise<PaymasterData> {
+    const stub = await this.getPaymasterStubData(userOp, request);
+    return this.getPaymasterFinalData(userOp, request, stub);
+  }
+
+  private standardParams(
+    userOp: Partial<UserOperation>,
+    request: PaymasterRequestOptions,
+  ): unknown[] {
+    return [
+      this.serializeForPaymaster(userOp, request.version ?? "0.7"),
+      request.entryPoint,
+      toQuantity(request.chainId),
+      request.context ?? {},
+    ];
+  }
+
+  private async postRpc(method: string, params: unknown[]): Promise<unknown> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.config.apiKey) headers.Authorization = `Bearer ${this.config.apiKey}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(this.config.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new AccountAbstractionError(
+          "aa_paymaster_rejected",
+          `Paymaster returned status ${response.status}`,
+        );
+      }
+      const json = (await response.json()) as {
+        result?: unknown;
+        error?: { code?: number; message?: string };
+      };
+      if (json.error) {
+        throw new AccountAbstractionError(
+          "aa_paymaster_rejected",
+          `Paymaster error: ${json.error.message ?? "unknown error"}`,
+          json.error,
+        );
+      }
+      return json.result;
+    } catch (error) {
+      if (error instanceof AccountAbstractionError) throw error;
+      throw new AccountAbstractionError(
+        "aa_paymaster_rejected",
+        "Failed to get paymaster data",
+        error,
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────
 
   /**
@@ -342,7 +469,33 @@ export class PaymasterService implements PaymasterInterface {
    */
   private serializeForPaymaster(
     userOp: Partial<UserOperation>,
+    version?: UserOperationVersion,
   ): Record<string, string> {
+    if (version) {
+      const serialized = serializeUserOperationForRpc(
+        {
+          sender:
+            userOp.sender ?? "0x0000000000000000000000000000000000000000",
+          nonce: userOp.nonce ?? 0n,
+          initCode: userOp.initCode ?? "0x",
+          callData: userOp.callData ?? "0x",
+          accountGasLimits:
+            userOp.accountGasLimits ?? `0x${"00".repeat(32)}`,
+          preVerificationGas: userOp.preVerificationGas ?? 0n,
+          maxFeePerGas: userOp.maxFeePerGas ?? 0n,
+          maxPriorityFeePerGas: userOp.maxPriorityFeePerGas ?? 0n,
+          paymasterAndData: userOp.paymasterAndData ?? "0x",
+          signature: "0x",
+        },
+        version,
+      );
+      delete serialized.signature;
+      return serialized;
+    }
+
+    // Compatibility payload for providers that only implement the older
+    // pm_sponsorUserOperation convention. It is intentionally not used by
+    // SmartAccountManager, which always supplies ERC-7677 context.
     return {
       sender: userOp.sender ?? "0x0000000000000000000000000000000000000000",
       nonce: `0x${(userOp.nonce ?? 0n).toString(16)}`,
@@ -359,6 +512,169 @@ export class PaymasterService implements PaymasterInterface {
       signature: userOp.signature ?? "0x",
     };
   }
+}
+
+interface PaymasterRpcResult {
+  paymasterAndData?: string;
+  paymaster?: string;
+  paymasterData?: string;
+  paymasterVerificationGasLimit?: string;
+  paymasterPostOpGasLimit?: string;
+  isFinal?: boolean;
+  sponsor?: { name?: string };
+}
+
+function parsePaymasterResult(value: unknown): PaymasterRpcResult {
+  if (!value || typeof value !== "object") {
+    throw new AccountAbstractionError(
+      "aa_paymaster_rejected",
+      "Paymaster returned an invalid result",
+    );
+  }
+  return value as PaymasterRpcResult;
+}
+
+function decodePackedPaymasterData(value: Hex): {
+  paymaster: Address;
+  paymasterVerificationGasLimit: string;
+  paymasterPostOpGasLimit: string;
+  paymasterData: Hex;
+} {
+  const raw = value.slice(2);
+  if (!/^(?:[0-9a-fA-F]{2})+$/.test(raw) || raw.length < 104) {
+    throw new AccountAbstractionError(
+      "aa_paymaster_rejected",
+      "ERC-7677 v0.7 stub returned malformed packed paymaster data",
+    );
+  }
+  return {
+    paymaster: `0x${raw.slice(0, 40)}` as Address,
+    paymasterVerificationGasLimit: toQuantity(
+      BigInt(`0x${raw.slice(40, 72)}`),
+    ),
+    paymasterPostOpGasLimit: toQuantity(BigInt(`0x${raw.slice(72, 104)}`)),
+    paymasterData: `0x${raw.slice(104)}` as Hex,
+  };
+}
+
+function replacePaymasterVerificationGas(
+  stub: PaymasterStubData,
+  verificationGasLimit: bigint,
+): PaymasterStubData {
+  const decoded = decodePackedPaymasterData(stub.paymasterAndData);
+  return {
+    ...stub,
+    paymasterAndData: encodePackedPaymasterData(
+      decoded.paymaster,
+      toQuantity(verificationGasLimit),
+      decoded.paymasterPostOpGasLimit,
+      decoded.paymasterData,
+    ),
+  };
+}
+
+function packStandardPaymasterResult(
+  result: PaymasterRpcResult,
+  version: UserOperationVersion,
+  sponsorInfo: string,
+  isStub: boolean,
+  fallback?: PaymasterStubData,
+): PaymasterStubData {
+  if (version === "0.6") {
+    const paymasterAndData = result.paymasterAndData ?? fallback?.paymasterAndData;
+    if (!isHex(paymasterAndData) || paymasterAndData === "0x") {
+      throw new AccountAbstractionError(
+        "aa_paymaster_rejected",
+        "ERC-7677 paymaster did not return v0.6 paymasterAndData",
+      );
+    }
+    return {
+      paymasterAndData,
+      sponsorInfo,
+      isFinal: !isStub || result.isFinal === true,
+    };
+  }
+
+  const prior = fallback
+    ? decodePackedPaymasterData(fallback.paymasterAndData)
+    : undefined;
+  const paymaster = result.paymaster ?? prior?.paymaster;
+  const paymasterData = result.paymasterData ?? prior?.paymasterData;
+  // The stub MUST supply postOp gas. Verification gas is optional and is
+  // intentionally zero until the bundler estimates it.
+  const verificationGas =
+    result.paymasterVerificationGasLimit ??
+    prior?.paymasterVerificationGasLimit ??
+    "0x0";
+  const postOpGas =
+    result.paymasterPostOpGasLimit ?? prior?.paymasterPostOpGasLimit;
+  if (
+    !isAddress(paymaster) ||
+    !isHex(paymasterData) ||
+    !isQuantity(verificationGas) ||
+    !isQuantity(postOpGas)
+  ) {
+    throw new AccountAbstractionError(
+      "aa_paymaster_rejected",
+      "ERC-7677 paymaster did not return complete v0.7 paymaster fields",
+    );
+  }
+  return {
+    paymasterAndData: encodePackedPaymasterData(
+      paymaster,
+      verificationGas,
+      postOpGas,
+      paymasterData,
+    ),
+    sponsorInfo,
+    isFinal: !isStub || result.isFinal === true,
+  };
+}
+
+function isHex(value: unknown): value is Hex {
+  return typeof value === "string" && /^0x(?:[0-9a-fA-F]{2})*$/.test(value);
+}
+
+function isAddress(value: unknown): value is Address {
+  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
+function isQuantity(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value) &&
+    BigInt(value) < 1n << 128n
+  );
+}
+
+function toQuantity(value: bigint | number): string {
+  const quantity = BigInt(value);
+  if (quantity < 0n) {
+    throw new AccountAbstractionError(
+      "aa_encode_error",
+      "Paymaster quantities cannot be negative.",
+    );
+  }
+  return `0x${quantity.toString(16)}`;
+}
+
+function encodePackedPaymasterData(
+  paymaster: Address,
+  verificationGasLimit: string,
+  postOpGasLimit: string,
+  paymasterData: Hex,
+): Hex {
+  if (!isQuantity(verificationGasLimit) || !isQuantity(postOpGasLimit)) {
+    throw new AccountAbstractionError(
+      "aa_paymaster_rejected",
+      "Paymaster gas limits must be canonical uint128 quantities.",
+    );
+  }
+  return `${paymaster}${BigInt(verificationGasLimit)
+    .toString(16)
+    .padStart(32, "0")}${BigInt(postOpGasLimit)
+    .toString(16)
+    .padStart(32, "0")}${paymasterData.slice(2)}` as Hex;
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────

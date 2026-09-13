@@ -20,7 +20,6 @@ export {
 } from "./paymaster";
 export {
   decodeGasLimits,
-  encodeGasLimits,
   SmartAccountManager,
   type SmartAccountManagerConfig,
 } from "./SmartAccountManager";
@@ -40,8 +39,11 @@ export {
   type Paymaster,
   type PaymasterConfig,
   type PaymasterData,
+  type PaymasterRequestOptions,
   type PaymasterType,
   type SendUserOpOptions,
+  SIMPLE_ACCOUNT_FACTORY_V06,
+  SIMPLE_ACCOUNT_FACTORY_V07,
   SIMPLE_ACCOUNT_FACTORY,
   type SmartAccountConfig,
   type SmartAccountInfo,
@@ -49,12 +51,18 @@ export {
   type UserOperationGasEstimate,
   type UserOperationReceipt,
   type UserOperationResponse,
+  type UserOperationVersion,
 } from "./types";
 export {
   buildCallData,
   buildUserOperation,
+  encodeGasFees,
+  encodeGasLimits,
   estimateUserOperationGas,
   hashUserOperation,
+  hashUserOperationV06,
   sendUserOperation,
   signUserOperation,
+  signUserOperationV06,
+  toEthSignedMessageHash,
 } from "./user-operation";
