@@ -15,9 +15,31 @@ export interface ConnectorSupport {
 }
 
 export interface BatchCall {
-  to: `0x${string}`;
+  /** Destination contract; omit for a contract-creation call with data. */
+  to?: `0x${string}`;
   value?: string;
   data?: `0x${string}`;
+}
+
+export interface SendCallsOptions {
+  /**
+   * Require all-or-nothing execution.
+   *
+   * Maps to EIP-5792 `atomicRequired`. When true the wallet must execute every
+   * call atomically or reject the request outright, and a connector must not
+   * substitute individual transactions if `wallet_sendCalls` turns out to be
+   * unavailable — that substitution is precisely the non-atomic execution the
+   * caller ruled out. Leaving an approve on chain with no swap behind it is
+   * the failure this flag exists to prevent.
+   *
+   * Defaults to false, which lets the wallet decide, matching EIP-5792.
+   */
+  atomicRequired?: boolean;
+  /** ERC-7677 service the wallet must use for this request. */
+  paymasterService?: {
+    url: string;
+    context?: Record<string, unknown>;
+  };
 }
 
 export interface WalletCapabilities {
@@ -26,21 +48,29 @@ export interface WalletCapabilities {
   [key: string]: unknown;
 }
 
-/** EIP-5792: getCallsStatus response */
+/** EIP-5792 status codes: 1xx pending, 2xx confirmed, 4xx/5xx failures. */
+export type CallsStatusCode = 100 | 200 | 400 | 500 | 600 | number;
+
+/** EIP-5792: wallet_getCallsStatus response. */
 export interface CallsStatus {
-  status: "PENDING" | "CONFIRMED";
+  version: string;
+  id: `0x${string}`;
+  chainId: `0x${string}`;
+  status: CallsStatusCode;
+  atomic: boolean;
   receipts?: Array<{
     logs: Array<{
-      address: string;
-      data: string;
-      topics: string[];
+      address: `0x${string}`;
+      data: `0x${string}`;
+      topics: `0x${string}`[];
     }>;
-    status: "0x1" | "0x0";
-    blockHash: string;
-    blockNumber: string;
-    gasUsed: string;
-    transactionHash: string;
+    status: `0x${string}`;
+    blockHash: `0x${string}`;
+    blockNumber: `0x${string}`;
+    gasUsed: `0x${string}`;
+    transactionHash: `0x${string}`;
   }>;
+  capabilities?: Record<string, unknown>;
 }
 
 export interface UniversalConnector {
@@ -53,6 +83,42 @@ export interface UniversalConnector {
   reconnect?(session: UniversalWalletSession): Promise<UniversalWalletSession>;
   disconnect(session: UniversalWalletSession): Promise<void>;
   getAccounts(session: UniversalWalletSession): Promise<string[]>;
+  /**
+   * Observe account changes the user makes inside the wallet.
+   *
+   * A wallet can switch accounts without the dApp asking, and every namespace
+   * has some form of it — EIP-1193 `accountsChanged`, Solana's
+   * `accountChanged`, a WalletConnect `session_update`. Consumers should not
+   * have to know which: this is the one place to subscribe, and the reason it
+   * lives on the connector rather than in a framework layer is that only the
+   * connector knows how its wallet reports the change.
+   *
+   * The connector MUST have already updated `session.namespaces` before
+   * invoking the handler, so a consumer can read the session directly. The
+   * `accounts` argument is the flattened CAIP-10 list for convenience; an
+   * empty array means the wallet is no longer authorizing this dApp, which the
+   * consumer should treat as a disconnect.
+   *
+   * Returns an unsubscribe function. Calling it twice is a no-op.
+   */
+  onAccountsChanged?(
+    session: UniversalWalletSession,
+    handler: (accounts: string[]) => void,
+  ): () => void;
+  /**
+   * Observe chain switches the user makes inside the wallet.
+   *
+   * The counterpart to onAccountsChanged, and subject to the same contract:
+   * the connector MUST have already updated `session.namespaces` — including
+   * re-keying the CAIP-10 accounts to the new chain — before invoking the
+   * handler. `chainId` is CAIP-2.
+   *
+   * Returns an unsubscribe function.
+   */
+  onChainChanged?(
+    session: UniversalWalletSession,
+    handler: (chainId: string) => void,
+  ): () => void;
   signMessage?(
     session: UniversalWalletSession,
     input: unknown,
@@ -71,6 +137,7 @@ export interface UniversalConnector {
     session: UniversalWalletSession,
     calls: BatchCall[],
     chainId?: string,
+    options?: SendCallsOptions,
   ): Promise<string>;
   getCapabilities?(
     session: UniversalWalletSession,
@@ -79,6 +146,19 @@ export interface UniversalConnector {
     session: UniversalWalletSession,
     bundleHash: string,
   ): Promise<CallsStatus>;
+  /**
+   * EIP-5792 `wallet_showCallsStatus`: ask the wallet to display a bundle's
+   * status to the user.
+   *
+   * A request for the wallet's own UI, not for data — there is nothing to
+   * return. Treat a rejection as cosmetic: the bundle is unaffected either
+   * way, so a caller should not surface a failure here as a transaction
+   * problem. Wallets that do not implement it answer -32601.
+   */
+  showCallsStatus?(
+    session: UniversalWalletSession,
+    bundleHash: string,
+  ): Promise<void>;
   request?(request: { method: string; params: unknown[] }): Promise<unknown>;
   getBalance?(chainId?: string): Promise<string>;
 }

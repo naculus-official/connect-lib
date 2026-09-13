@@ -165,6 +165,34 @@ describe("ConnectorManager", () => {
 
     expect(accounts.length).toBeGreaterThan(0);
   });
+
+  it("forwards sendCalls options to the active connector", async () => {
+    const connector = createMockConnector("wc");
+    connector.sendCalls = vi.fn().mockResolvedValue("bundle-id");
+    manager.register("wc", connector);
+    const session = await manager.connect("wc");
+    const options = {
+      paymasterService: {
+        url: "https://paymaster.example/rpc",
+        context: { policy: "checkout" },
+      },
+    };
+
+    await expect(
+      manager.sendCalls(
+        session,
+        [{ to: "0x0000000000000000000000000000000000000001" }],
+        "eip155:1",
+        options,
+      ),
+    ).resolves.toBe("bundle-id");
+    expect(connector.sendCalls).toHaveBeenCalledWith(
+      session,
+      [{ to: "0x0000000000000000000000000000000000000001" }],
+      "eip155:1",
+      options,
+    );
+  });
 });
 
 describe("createConnectorManager", () => {

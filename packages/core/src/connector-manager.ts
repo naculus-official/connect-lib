@@ -8,6 +8,7 @@
 import type {
   BatchCall,
   ConnectorSupport,
+  SendCallsOptions,
   UniversalConnector,
   WalletCapabilities,
 } from "./connector";
@@ -69,6 +70,21 @@ export class ConnectorManager {
 
   getActiveSession(): UniversalWalletSession | null {
     return this.activeSession;
+  }
+
+  /**
+   * Adopt a session that a connector/UI layer has already established.
+   * Keeping this transition in ConnectorManager ensures its convenience APIs
+   * (sign, send, switch, request) address the same connector as SessionManager.
+   */
+  adopt(session: UniversalWalletSession): void {
+    const connectorId = session.connectorId ?? session.walletType;
+    if (!this.connectors.has(connectorId)) {
+      throw new Error(`Connector "${connectorId}" not found`);
+    }
+    session.connectorId = connectorId;
+    this.activeConnectorId = connectorId;
+    this.activeSession = session;
   }
 
   list(): ConnectorEntry[] {
@@ -247,6 +263,7 @@ export class ConnectorManager {
     _session: UniversalWalletSession,
     calls: BatchCall[],
     chainId?: string,
+    options?: SendCallsOptions,
   ): Promise<string> {
     if (!this.activeConnectorId || !this.activeSession) {
       throw new Error("No active session");
@@ -260,7 +277,7 @@ export class ConnectorManager {
       throw new Error("sendCalls not supported by this connector");
     }
 
-    return connector.sendCalls(this.activeSession, calls, chainId);
+    return connector.sendCalls(this.activeSession, calls, chainId, options);
   }
 
   async getCapabilities(

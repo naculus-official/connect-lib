@@ -7,6 +7,8 @@ import {
 } from "./connector";
 import type { SessionNamespace } from "./session";
 
+const SOLANA_MAINNET = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+
 describe("extractAccounts", () => {
   it("should extract accounts from all namespaces", () => {
     const namespaces = {
@@ -17,8 +19,8 @@ describe("extractAccounts", () => {
         events: [],
       } as SessionNamespace,
       solana: {
-        chains: ["solana:1"],
-        accounts: ["solana:1:abc123"],
+        chains: [SOLANA_MAINNET],
+        accounts: [`${SOLANA_MAINNET}:abc123`],
         methods: [],
         events: [],
       } as SessionNamespace,
@@ -29,7 +31,7 @@ describe("extractAccounts", () => {
     expect(accounts).toHaveLength(3);
     expect(accounts).toContain("eip155:1:0x123");
     expect(accounts).toContain("eip155:1:0x456");
-    expect(accounts).toContain("solana:1:abc123");
+    expect(accounts).toContain(`${SOLANA_MAINNET}:abc123`);
   });
 
   it("should return empty array when no namespaces", () => {
@@ -48,7 +50,7 @@ describe("getChainsFromNamespaces", () => {
         events: [],
       } as SessionNamespace,
       solana: {
-        chains: ["solana:1"],
+        chains: [SOLANA_MAINNET],
         accounts: [],
         methods: [],
         events: [],
@@ -60,7 +62,7 @@ describe("getChainsFromNamespaces", () => {
     expect(chains).toHaveLength(3);
     expect(chains).toContain("eip155:1");
     expect(chains).toContain("eip155:5");
-    expect(chains).toContain("solana:1");
+    expect(chains).toContain(SOLANA_MAINNET);
   });
 });
 
