@@ -274,7 +274,8 @@ export const AA_SUPPORTED_CHAINS: Record<
   // dev's 1647746 moved them to the v0.7 EntryPoint while leaving
   // `factory: SIMPLE_ACCOUNT_FACTORY`, which on that branch is the v0.6
   // factory 0x9406Cc61 — the same EntryPoint/factory mismatch this table was
-  // restructured to make unrepresentable, applied to three more chains. It was
+  // restructured to make impossible to express, applied to three more chains.
+  // It was
   // not taken in the merge. Moving them to v0.7 is reasonable on its own, but
   // it has to move the factory too, and it leaves no v0.6 chain for the v0.6
   // encoding paths to be exercised through.
