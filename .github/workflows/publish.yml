@@ -52,6 +52,16 @@ jobs:
       - name: Build all packages
         run: pnpm build
 
+      # ci.yml has run this on every push since long before the release work;
+      # publish.yml never had, and that is how 0.2.0 shipped from a tree whose
+      # typecheck was failing with twenty errors. Nothing else here would catch
+      # it: vitest does not typecheck, and tsup only compiles the src entry
+      # graph, so a test file can be broken for weeks without a red build.
+      #
+      # After the build, because the check resolves each package's dist/.
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
       - name: Run tests
         run: pnpm test:run
 
