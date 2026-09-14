@@ -15,6 +15,7 @@ export * from "./fee-estimation";
 export * from "./hex";
 export * from "./logger";
 export * from "./notification";
+export * from "./payment-timeline";
 export * from "./permissions";
 export * from "./platform";
 export * from "./resolver";
