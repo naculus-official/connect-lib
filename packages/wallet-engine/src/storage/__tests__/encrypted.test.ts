@@ -6,12 +6,21 @@ import { IndexedDbStorageAdapter } from "../indexed-db";
 
 const PASSPHRASE = "correct-horse-battery-stable-2026";
 
+// Version 2 keeps the keys in `accounts`; `address` and `privateKey` are
+// read-only views over it, so setting them on a fixture stores nothing.
 const mockData: WalletData = {
   mnemonic:
     "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-  privateKey: "0x" + "ef".repeat(32),
-  address: "0x" + "12".repeat(20),
+  accounts: [
+    {
+      namespace: "eip155",
+      address: "0x" + "12".repeat(20),
+      privateKey: "0x" + "ef".repeat(32),
+    },
+  ],
+  activeNamespace: "eip155",
   createdAt: Date.now(),
+  version: 2,
 };
 
 class MockStorage implements StorageAdapter {

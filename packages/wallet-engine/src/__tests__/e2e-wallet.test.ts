@@ -135,15 +135,16 @@ describe("E2E: Wallet Creation", () => {
 
     // Wallet state must reflect the new wallet
     expect(wallet.hasWallet).toBe(true);
+    expect(data.address).toBeDefined();
     expect(wallet.state.address?.toLowerCase()).toBe(
-      data.address.toLowerCase(),
+      data.address?.toLowerCase(),
     );
     expect(wallet.state.isConnected).toBe(true);
   });
 
   it("should deterministically derive the same address from a known mnemonic", async () => {
     const data = await wallet.importMnemonic(TEST_MNEMONIC);
-    expect(data.address.toLowerCase()).toBe(KNOWN_ADDRESS_FROM_TEST_MNEMONIC);
+    expect(data.address?.toLowerCase()).toBe(KNOWN_ADDRESS_FROM_TEST_MNEMONIC);
     expect(data.mnemonic).toBe(TEST_MNEMONIC);
   });
 
@@ -871,7 +872,8 @@ describe("E2E: Full Wallet Lifecycle", () => {
     });
     const loaded = await w2.load();
     expect(loaded).toBe(true);
-    expect(w2.address?.toLowerCase()).toBe(created.address.toLowerCase());
+    expect(created.address).toBeDefined();
+    expect(w2.address?.toLowerCase()).toBe(created.address?.toLowerCase());
     expect(w2.mnemonic).toBe(created.mnemonic);
 
     // Step 4: Sign with the loaded wallet (confirms keys are intact)

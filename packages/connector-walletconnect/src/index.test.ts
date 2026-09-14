@@ -273,9 +273,11 @@ describe("WalletConnectConnector", () => {
     });
 
     it("does not fall back to user-paid transactions after sponsored sendCalls is unavailable", async () => {
-      const request = vi.fn().mockRejectedValue(
-        Object.assign(new Error("Method not found"), { code: -32601 }),
-      );
+      const request = vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error("Method not found"), { code: -32601 }),
+        );
       await expect(
         connectorWith(request).sendCalls(
           createMockSession(),
@@ -487,8 +489,14 @@ describe("createWalletConnectConnector", () => {
 // connect() performs.
 
 describe("startPairing proposal", () => {
+  /** The parts of a WalletConnect proposal these tests read back. */
+  type ConnectProposal = {
+    requiredNamespaces: { eip155?: { chains?: string[] } };
+    optionalNamespaces?: { eip155?: { chains?: string[] } };
+  };
+
   function connectorWithClient() {
-    const connect = vi.fn(async () => ({
+    const connect = vi.fn(async (_proposal: ConnectProposal) => ({
       uri: "wc:pairing@2?relay-protocol=irn&symKey=abc",
       approval: async () => ({ namespaces: {}, topic: "t" }),
     }));
@@ -506,10 +514,7 @@ describe("startPairing proposal", () => {
   it("advertises optional namespaces, not just the required chain", async () => {
     const { c, connect } = connectorWithClient();
     await c.startPairing();
-    const proposal = connect.mock.calls[0][0] as {
-      requiredNamespaces: unknown;
-      optionalNamespaces?: { eip155?: { chains?: string[] } };
-    };
+    const proposal = connect.mock.calls[0][0];
     expect(proposal.optionalNamespaces).toBeDefined();
     expect(
       proposal.optionalNamespaces?.eip155?.chains?.length ?? 0,
@@ -519,9 +524,7 @@ describe("startPairing proposal", () => {
   it("sends the same required namespaces connect() would", async () => {
     const { c, connect } = connectorWithClient();
     await c.startPairing();
-    const proposal = connect.mock.calls[0][0] as {
-      requiredNamespaces: { eip155?: { chains?: string[] } };
-    };
+    const proposal = connect.mock.calls[0][0];
     expect(proposal.requiredNamespaces.eip155?.chains).toContain("eip155:1");
   });
 });
@@ -589,7 +592,7 @@ describe("cancelPairing", () => {
   it("only tears down the cancelled attempt, not the one that replaced it", async () => {
     // Each pairing gets its own approval; the cancelled one must be torn down
     // and the live one left alone.
-    const resolvers: Array<(v: { topic: string }) => void> = [];
+    const resolvers: Array<() => void> = [];
     const disconnect = vi.fn(async () => {});
     let n = 0;
     const connect = vi.fn(async () => {

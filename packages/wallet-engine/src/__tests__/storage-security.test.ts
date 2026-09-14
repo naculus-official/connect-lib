@@ -40,12 +40,21 @@ function fromBigInt(value: bigint, decimals: number): string {
 // ══════════════════════════════════════════════════════════════════════
 
 describe("A — Storage Security: localStorage vs IndexedDB", () => {
+  // Version 2 keeps the keys in `accounts`; `address` and `privateKey` are
+  // read-only views over it, so setting them here would store nothing.
   const walletData: WalletData = {
     mnemonic:
       "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-    privateKey: "0x" + "ab".repeat(32),
-    address: ADDRESSES.ALICE,
+    accounts: [
+      {
+        namespace: "eip155",
+        address: ADDRESSES.ALICE,
+        privateKey: "0x" + "ab".repeat(32),
+      },
+    ],
+    activeNamespace: "eip155",
     createdAt: Date.now(),
+    version: 2,
   };
 
   it("localStorage adapter stores as base64-encoded plaintext", async () => {
@@ -108,9 +117,16 @@ describe("A — Storage Security: localStorage vs IndexedDB", () => {
 describe("B — IndexedDbStorageAdapter: save → load → clear", () => {
   const walletData: WalletData = {
     mnemonic: "test test test test test test test test test test test junk",
-    privateKey: "0x" + "ab".repeat(32),
-    address: ADDRESSES.ALICE,
+    accounts: [
+      {
+        namespace: "eip155",
+        address: ADDRESSES.ALICE,
+        privateKey: "0x" + "ab".repeat(32),
+      },
+    ],
+    activeNamespace: "eip155",
     createdAt: Date.now(),
+    version: 2,
   };
 
   it("load returns null when IndexedDB is not available (Node env)", async () => {

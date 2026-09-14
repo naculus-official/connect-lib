@@ -61,7 +61,7 @@ describe("BIP-39 / BIP-44 interoperability", () => {
     "derives the address other wallets derive from $address",
     async ({ mnemonic, address }) => {
       const data = await wallet().importMnemonic(mnemonic);
-      expect(data.address.toLowerCase()).toBe(address.toLowerCase());
+      expect(data.address?.toLowerCase()).toBe(address.toLowerCase());
     },
   );
 
@@ -73,7 +73,7 @@ describe("BIP-39 / BIP-44 interoperability", () => {
       derivationPath: "m/44'/60'/0'/0/0",
     });
     const data = await explicit.importMnemonic(VECTORS[0].mnemonic);
-    expect(data.address.toLowerCase()).toBe(VECTORS[0].address.toLowerCase());
+    expect(data.address?.toLowerCase()).toBe(VECTORS[0].address.toLowerCase());
   });
 
   it("generates a 12-word phrase from the standard English wordlist", async () => {
@@ -93,14 +93,14 @@ describe("BIP-39 / BIP-44 interoperability", () => {
     async (mnemonic) => {
       const expected = await deriveIndependently(mnemonic);
       const data = await wallet().importMnemonic(mnemonic);
-      expect(data.address.toLowerCase()).toBe(expected.toLowerCase());
+      expect(data.address?.toLowerCase()).toBe(expected.toLowerCase());
     },
   );
 
   it("agrees independently on a freshly generated phrase too", async () => {
     const created = await wallet().generate();
     const expected = await deriveIndependently(created.mnemonic);
-    expect(created.address.toLowerCase()).toBe(expected.toLowerCase());
+    expect(created.address?.toLowerCase()).toBe(expected.toLowerCase());
   });
 
   it("rejects a phrase that is not valid BIP-39", async () => {

@@ -1,12 +1,22 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import type { WalletData } from "../../wallet";
+import type { WalletAccount, WalletData } from "../../wallet";
 import { IndexedDbStorageAdapter } from "../indexed-db";
+
+// Version 2 holds an account list; `address` and `privateKey` are read-only
+// views over it, so a fixture that sets them directly is not a WalletData and
+// two fixtures that differ only in `address` are the same wallet twice.
+const evmAccount = (address: string): WalletAccount => ({
+  namespace: "eip155",
+  address,
+  privateKey: "0x" + "ab".repeat(32),
+});
 
 const mockData: WalletData = {
   mnemonic: "test test test test test test test test test test test test",
-  privateKey: "0x" + "ab".repeat(32),
-  address: "0x" + "cd".repeat(20),
+  accounts: [evmAccount("0x" + "cd".repeat(20))],
+  activeNamespace: "eip155",
   createdAt: Date.now(),
+  version: 2,
 };
 
 beforeAll(async () => {
@@ -67,8 +77,14 @@ describe("IndexedDbStorageAdapter", () => {
     const key2 = "test_multi_2_" + Date.now();
     const a1 = new IndexedDbStorageAdapter(key1);
     const a2 = new IndexedDbStorageAdapter(key2);
-    const d1: WalletData = { ...mockData, address: "0xaa".repeat(20) };
-    const d2: WalletData = { ...mockData, address: "0xbb".repeat(20) };
+    const d1: WalletData = {
+      ...mockData,
+      accounts: [evmAccount("0x" + "aa".repeat(20))],
+    };
+    const d2: WalletData = {
+      ...mockData,
+      accounts: [evmAccount("0x" + "bb".repeat(20))],
+    };
     await a1.save(d1);
     await a2.save(d2);
     expect(await a1.load()).toEqual(d1);

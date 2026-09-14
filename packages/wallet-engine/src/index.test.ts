@@ -55,7 +55,12 @@ describe("PocketWallet", () => {
 
     it("should expose address as getter after generate", async () => {
       const data = await wallet.generate();
-      expect(wallet.address?.toLowerCase()).toBe(data.address.toLowerCase());
+      // `address` is optional on the type because a wallet need not hold an
+      // account for its active namespace. A freshly generated one does, and
+      // asserting that first keeps the comparison below from passing when
+      // both sides are undefined.
+      expect(data.address).toBeDefined();
+      expect(wallet.address?.toLowerCase()).toBe(data.address?.toLowerCase());
     });
 
     it("should expose mnemonic as getter after generate", async () => {
@@ -306,9 +311,16 @@ describe("LocalStorageAdapter", () => {
     const adapter = new LocalStorageAdapter("test");
     const data: WalletData = {
       mnemonic: "test mnemonic",
-      privateKey: "0x" + "ab".repeat(32),
-      address: "0x" + "cd".repeat(20),
+      accounts: [
+        {
+          namespace: "eip155",
+          address: "0x" + "cd".repeat(20),
+          privateKey: "0x" + "ab".repeat(32),
+        },
+      ],
+      activeNamespace: "eip155",
       createdAt: Date.now(),
+      version: 2,
     };
     await adapter.save(data);
     const loaded = await adapter.load();
@@ -321,9 +333,16 @@ describe("LocalStorageAdapter", () => {
     const adapter = new LocalStorageAdapter("test");
     const data: WalletData = {
       mnemonic: "test",
-      privateKey: "0x" + "ab".repeat(32),
-      address: "0x" + "cd".repeat(20),
+      accounts: [
+        {
+          namespace: "eip155",
+          address: "0x" + "cd".repeat(20),
+          privateKey: "0x" + "ab".repeat(32),
+        },
+      ],
+      activeNamespace: "eip155",
       createdAt: Date.now(),
+      version: 2,
     };
     await adapter.save(data);
     await adapter.clear();
@@ -334,9 +353,16 @@ describe("LocalStorageAdapter", () => {
     const adapter = new LocalStorageAdapter("myapp_wallet");
     await adapter.save({
       mnemonic: "test",
-      privateKey: "0x" + "ab".repeat(32),
-      address: "0x" + "cd".repeat(20),
+      accounts: [
+        {
+          namespace: "eip155",
+          address: "0x" + "cd".repeat(20),
+          privateKey: "0x" + "ab".repeat(32),
+        },
+      ],
+      activeNamespace: "eip155",
       createdAt: Date.now(),
+      version: 2,
     });
     const raw = localStorage.getItem("myapp_wallet");
     expect(raw).not.toBeNull();
