@@ -101,6 +101,15 @@ jobs:
           else
             pnpm -r publish --access public --no-git-checks --provenance
           fi
+        env:
+          # setup-node's registry-url writes an .npmrc containing
+          # `_authToken=${NODE_AUTH_TOKEN}`, and nothing was setting it. Every
+          # run so far has logged `Failed to replace env in config:
+          # ${NODE_AUTH_TOKEN}` and no one read it, because a dry run needs no
+          # credentials — so the first real publish would have been the first
+          # time this mattered, and it would have died with ENEEDAUTH after the
+          # preflight had already passed.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Runs only after the publish step succeeded, so the tag marks what is on
       # the registry rather than what someone intended to put there.
