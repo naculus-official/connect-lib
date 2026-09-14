@@ -24,6 +24,8 @@ import {
   type Address,
   type Call,
   DEFAULT_ENTRY_POINT,
+  ENTRY_POINT_V0_6,
+  ENTRY_POINT_V0_7,
   type Hex,
   SIMPLE_ACCOUNT_FACTORY_V06,
   SIMPLE_ACCOUNT_FACTORY_V07,
@@ -72,25 +74,39 @@ function createAccountConfig(
 // ─── Tests ─────────────────────────────────────────────────────────────
 
 describe("SmartAccountManager", () => {
+  /**
+   * A SimpleAccountFactory hard-codes the EntryPoint into the account
+   * implementation it deploys, so a mismatched pair produces accounts whose
+   * UserOperations the configured EntryPoint cannot validate — and nothing
+   * fails until a real deployment is attempted on chain.
+   *
+   * Asserted over the whole table rather than chain by chain. The previous
+   * version listed six explicit expectations, which meant moving a chain
+   * between EntryPoint versions looked like a test that needed updating
+   * rather than an invariant to check, and a chain added later was not
+   * covered at all.
+   */
   it("keeps each SimpleAccount factory coupled to its EntryPoint version", () => {
-    expect(AA_SUPPORTED_CHAINS["eip155:1"]?.factory).toBe(
-      SIMPLE_ACCOUNT_FACTORY_V07,
-    );
-    expect(AA_SUPPORTED_CHAINS["eip155:8453"]?.factory).toBe(
-      SIMPLE_ACCOUNT_FACTORY_V07,
-    );
-    expect(AA_SUPPORTED_CHAINS["eip155:11155111"]?.factory).toBe(
-      SIMPLE_ACCOUNT_FACTORY_V07,
-    );
-    expect(AA_SUPPORTED_CHAINS["eip155:137"]?.factory).toBe(
-      SIMPLE_ACCOUNT_FACTORY_V06,
-    );
-    expect(AA_SUPPORTED_CHAINS["eip155:10"]?.factory).toBe(
-      SIMPLE_ACCOUNT_FACTORY_V06,
-    );
-    expect(AA_SUPPORTED_CHAINS["eip155:42161"]?.factory).toBe(
-      SIMPLE_ACCOUNT_FACTORY_V06,
-    );
+    const pairing = {
+      "0.6": {
+        entryPoint: ENTRY_POINT_V0_6,
+        factory: SIMPLE_ACCOUNT_FACTORY_V06,
+      },
+      "0.7": {
+        entryPoint: ENTRY_POINT_V0_7,
+        factory: SIMPLE_ACCOUNT_FACTORY_V07,
+      },
+    } as const;
+
+    const entries = Object.entries(AA_SUPPORTED_CHAINS);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const [chainId, info] of entries) {
+      expect({
+        chainId,
+        entryPoint: info.entryPoint,
+        factory: info.factory,
+      }).toEqual({ chainId, ...pairing[info.version] });
+    }
   });
 
   describe("isAASupported", () => {
