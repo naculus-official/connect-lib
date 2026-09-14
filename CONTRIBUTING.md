@@ -19,6 +19,22 @@
 - Hardcoded RPC URLs, chain IDs, or address strings → move to the relevant `constants.ts`.
 - Abstractions need at least two consumers or a clear isolation boundary.
 
+### Two TypeScript versions, on purpose
+
+The root declares `typescript@^7.0.2` and every package declares `^5.9.3`. That
+is not drift, and unifying them breaks the build.
+
+TypeScript 7 is the native port. It ships a per-platform binary and no
+JavaScript compiler API, which is exactly what `tsc --noEmit` wants and exactly
+what tsup's declaration build cannot use — bump a package to `^7` and its DTS
+step fails with `Cannot read properties of undefined (reading
+'useCaseSensitiveFileNames')`. So the fast native compiler gates the repository
+and the JavaScript one emits the published `.d.ts`.
+
+The two disagreeing is a manageable risk rather than a silent one: whichever
+side rejects something, it surfaces as a red build or a red CI run, never as a
+`.d.ts` that is quietly wrong.
+
 ## Releasing
 
 **All 14 packages release in lockstep.** They share one version, they move
