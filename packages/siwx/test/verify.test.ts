@@ -555,4 +555,60 @@ describe("createXRPLVerifier", () => {
     const verifier = createXRPLVerifier();
     expect(typeof verifier).toBe("function");
   });
+
+  /**
+   * The two tests above assert that a function is a function. Everything this
+   * verifier actually does — hex-encoding the message, checking the signature
+   * against the public key, and deriving the account address from the key that
+   * verified — went untested, in a file the review rules call an always-review
+   * area. These exercise it against a real keypair, which also makes them the
+   * acceptance gate for any `ripple-keypairs` upgrade: the library's `verify`
+   * and `deriveAddress` are the two calls the verifier depends on.
+   */
+  it("verifies a real signature and returns the address that signed", async () => {
+    const keypairs = await import("ripple-keypairs");
+    const { createXRPLVerifier } = await import("../src/verify");
+
+    const { publicKey, privateKey } = keypairs.deriveKeypair(
+      keypairs.generateSeed(),
+    );
+    const message = "naculus.example wants you to sign in with your XRPL account";
+    const messageHex = Buffer.from(message, "utf8").toString("hex").toUpperCase();
+    const signature = keypairs.sign(messageHex, privateKey);
+
+    const verified = await createXRPLVerifier()({ message, signature, publicKey });
+
+    // Not just truthy: the verifier's contract is to return the address
+    // derived from the key that verified, so the caller can compare it with
+    // the identity the SIWx message claims.
+    expect(verified).toBe(keypairs.deriveAddress(publicKey));
+  });
+
+  it("rejects a signature made over a different message", async () => {
+    const keypairs = await import("ripple-keypairs");
+    const { createXRPLVerifier } = await import("../src/verify");
+
+    const { publicKey, privateKey } = keypairs.deriveKeypair(
+      keypairs.generateSeed(),
+    );
+    const signedHex = Buffer.from("the message that was signed", "utf8")
+      .toString("hex")
+      .toUpperCase();
+    const signature = keypairs.sign(signedHex, privateKey);
+
+    const verified = await createXRPLVerifier()({
+      message: "a different message entirely",
+      signature,
+      publicKey,
+    });
+
+    expect(verified).toBe(false);
+  });
+
+  it("refuses to verify without a public key rather than passing", async () => {
+    const { createXRPLVerifier } = await import("../src/verify");
+    await expect(
+      createXRPLVerifier()({ message: "hello", signature: "00" }),
+    ).rejects.toThrow(/publicKey is required/);
+  });
 });
