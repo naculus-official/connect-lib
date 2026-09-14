@@ -1,11 +1,15 @@
-# Multi-namespace embedded wallet — design draft
+# Multi-namespace embedded wallet
 
-**Status: draft for review. No code has changed.**
+**Status: shipped in 0.2.0.** This began as a proposal and the sections below
+are kept as the record of why the design is shaped the way it is. Where it once
+described work to be done it now describes code that exists; the questions it
+left open are answered at the end.
 
-The embedded wallet holds one secp256k1 keypair and can therefore hold funds on
-EVM chains only. Solana derivation exists (`deriveSolanaKeypair`) and an
-ed25519 signer exists (`Ed25519Signer`), but `PocketWallet` calls neither,
-because `WalletData` has room for exactly one key.
+Before this, the embedded wallet held one secp256k1 keypair and could therefore
+hold funds on EVM chains only. Solana derivation existed
+(`deriveSolanaKeypair`) and an ed25519 signer existed (`Ed25519Signer`), but
+`PocketWallet` called neither, because `WalletData` had room for exactly one
+key.
 
 The model this describes is the one Phantom uses and the one a card wallet on a
 phone uses: one thing the user calls "my wallet", holding several accounts.
@@ -43,7 +47,7 @@ second phrase is a more likely loss than a leaked single derived key. Every
 major wallet has made the same trade; this should too, and should say so rather
 than implying an isolation it does not provide.
 
-## Proposed shape
+## The shape
 
 ```ts
 export type WalletNamespace = "eip155" | "solana";
@@ -173,12 +177,24 @@ Not included, and the reason is not maturity of the chain.
 Recommendation: take the sidechain, leave native XRPL until there is a user
 asking for it.
 
-## Open questions for review
+## The questions this left open, and how they were answered
 
-1. Is the breaking change to `WalletData` acceptable now, before 0.2.0 is
-   published? It is far cheaper here than after.
-2. For the ambiguous 32-byte import: ask the user, or refuse and require a
-   prefixed or 64-byte form?
-3. Should a Solana account appear for a wallet created before this change, once
-   migrated? It is derivable from the stored mnemonic, but it would appear
-   without the user asking for it.
+1. **Is the breaking change to `WalletData` acceptable before 0.2.0 ships?**
+   Yes, and it went out in 0.2.0. A stored record without `version` is treated
+   as version 1 and migrated on read, so an existing wallet keeps working
+   without the user doing anything.
+
+2. **For the ambiguous 32-byte import: ask, or refuse?**
+   Refuse. `detectPrivateKey` rejects a bare 32-byte value and names both
+   accepted forms instead — `0x` followed by 64 hex characters for EVM, or the
+   base58 / JSON-array form Phantom and `solana-keygen` export for Solana. A
+   Solana *address* is also 32 bytes in base58, so guessing could have imported
+   an address as a key. The Solana forms carry their own proof: the trailing 32
+   bytes must be the ed25519 public key of the leading 32.
+
+3. **Should migrating a version 1 wallet add a Solana account?**
+   No. `migrateWalletData` wraps the existing key in an account list and
+   derives nothing, even when a mnemonic is present. Deriving needs async work
+   in what has to stay a pure function, and an account the user never asked for
+   would appear with funds it cannot have and no explanation for being empty.
+   The account is added when the user asks for it.
