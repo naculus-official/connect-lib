@@ -52,6 +52,54 @@ authentication and key-engine APIs.
 You can still install individual packages when bundle size or dependency
 surface matters more than the single-package convenience.
 
+## Standards
+
+<!-- Kept in step with the table in the repository README. This file is the one
+     published to npm, and it is the only description most people will read. -->
+
+| Standard | Status | Package |
+|------|------|------|
+| EIP-1193 (Provider API) | ✅ | connector-evm-injected |
+| EIP-6963 (Multi Injected Provider Discovery) | ✅ | connector-evm-injected |
+| EIP-4361 / CAIP-122 (SIWx) | ✅ | siwx |
+| ERC-1271 (contract-account signatures) | ✅ | siwx |
+| ERC-6492 (pre-deployment signatures) | ✅ | siwx |
+| EIP-5792 (wallet calls) | ✅ | core, connector-evm-injected, connector-walletconnect, connector-coinbase |
+| ERC-4337 (smart accounts) | ✅ | core |
+| EIP-7702 (delegation, read) | ✅ | core |
+| Solana Wallet Standard | ✅ | connector-solana |
+| WalletConnect v2 (CAIP-25) | ✅ | connector-walletconnect |
+
+### Decide how to execute before you send
+
+EIP-5792 is implemented in full — `wallet_getCapabilities`, `wallet_sendCalls`,
+`wallet_getCallsStatus`, `wallet_showCallsStatus` — so an application can ask
+what a wallet can do rather than learn it from a rejection.
+
+```ts
+import { readAtomicSupport, planExecution } from "@naculus/connect";
+
+const atomic = readAtomicSupport(capabilities, "eip155:1");
+
+if (atomic === "supported") {
+  // one batch, all or nothing
+} else if (atomic === "unsupported") {
+  // sequential: an approve can land and the swap it was for can still fail
+} else {
+  // "unknown" — the wallet was never asked, or the query failed or is in
+  // flight. EIP-5792 is explicit that absence is not a denial, so this is a
+  // third answer rather than a second "no".
+}
+```
+
+`planExecution` turns that, plus a sponsorship requirement, into a route — and
+returns `"refuse"` when nothing available can satisfy what was asked for,
+instead of picking the closest thing and hoping.
+
+EIP-7702 delegation is readable through `readDelegation`, which answers
+`true`, `false` or `null`: an account whose code was never fetched is not the
+same as an account with no delegation.
+
 ## License
 
 MIT
