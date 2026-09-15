@@ -1,6 +1,6 @@
 {
   "name": "@naculus/wallet-engine",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "Embedded wallet engine (BIP39, HD keys, signing)",
   "main": "./dist/index.cjs",
