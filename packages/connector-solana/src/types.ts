@@ -4,6 +4,7 @@ import {
   SOLANA_MAINNET,
   SOLANA_TESTNET,
 } from "@naculus/connect-core";
+import type { SolanaWalletFeatures } from "./roles";
 export interface SolanaPublicKey {
   toBytes(): Uint8Array;
   toString(): string;
@@ -42,6 +43,14 @@ export interface DiscoveredSolanaWallet {
   provider: SolanaProvider;
   /** How the wallet was discovered */
   source: "wallet-standard" | "legacy";
+  /**
+   * What this wallet declared it can do, captured at discovery.
+   *
+   * Recorded here because it cannot be recovered from `provider` afterwards:
+   * the Wallet Standard adapter defines every method and throws at call time
+   * for the ones the wallet lacks. See `roles.ts`.
+   */
+  features: SolanaWalletFeatures;
 }
 
 /**

@@ -67,7 +67,7 @@ surface matters more than the single-package convenience.
 | EIP-5792 (wallet calls) | ✅ | core, connector-evm-injected, connector-walletconnect, connector-coinbase |
 | ERC-4337 (smart accounts) | ✅ | core |
 | EIP-7702 (delegation, read) | ✅ | core |
-| Solana Wallet Standard | ✅ | connector-solana |
+| Solana Wallet Standard (discovery + signer roles) | ✅ | connector-solana |
 | WalletConnect v2 (CAIP-25) | ✅ | connector-walletconnect |
 
 ### Decide how to execute before you send
@@ -99,6 +99,14 @@ instead of picking the closest thing and hoping.
 EIP-7702 delegation is readable through `readDelegation`, which answers
 `true`, `false` or `null`: an account whose code was never fetched is not the
 same as an account with no delegation.
+
+### Ask a Solana wallet which role it can fill
+
+The same idea on the other namespace. `connector.getRoles(session)` splits a
+connected account into `identity`, `signer` and `payer`, and returns `null` for
+a role the wallet declared it cannot fill — so a co-signing flow finds out
+before it opens a dialog, not at the approval prompt. See
+[`@naculus/connector-solana`](https://www.npmjs.com/package/@naculus/connector-solana#signer-roles).
 
 ## License
 

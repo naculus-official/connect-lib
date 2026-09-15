@@ -43,14 +43,29 @@ export function createProviderFromWalletStandard(
     connect: (opts?: unknown) => Promise<unknown>;
   }>("standard:connect");
   const disconnectFeature = f["standard:disconnect"];
-  const signMessageFeature = requireFeature<{
-    signMessage: (message: Uint8Array) => Promise<any>;
-  }>("solana:signMessage");
-  const signTxFeature = requireFeature<{
-    signTransaction: (tx: Uint8Array) => Promise<any>;
-  }>("solana:signTransaction");
+  const signMessageFeature = f["solana:signMessage"];
+  const signTxFeature = f["solana:signTransaction"];
   const signAllTxFeature = f["solana:signAllTransactions"];
   const signSendTxFeature = f["solana:signAndSendTransaction"];
+  /**
+   * Every `solana:*` feature is optional individually.
+   *
+   * `signMessage` and `signTransaction` used to be required, which dropped a
+   * send-only wallet — a legitimate Wallet Standard configuration, and the
+   * usual shape behind Mobile Wallet Adapter — out of the picker entirely, so
+   * the user could not connect at all rather than connecting with a narrower
+   * set of roles. `roles.ts` is what keeps an unsupported method from being
+   * called; refusing the whole wallet here is a blunter answer than the one
+   * the caller can now get.
+   *
+   * A wallet offering none of them is still refused: it is not a Solana
+   * wallet, and every role would be empty.
+   */
+  if (!signMessageFeature && !signTxFeature && !signSendTxFeature) {
+    throw new Error(
+      "Wallet Standard wallet declares no solana: signing feature",
+    );
+  }
   const eventsFeature = f["standard:events"] as
     | { on?: (event: string, handler: (...args: unknown[]) => void) => unknown }
     | undefined;
@@ -85,10 +100,14 @@ export function createProviderFromWalletStandard(
       await disconnectFeature?.disconnect();
     },
     async signMessage(message) {
+      if (!signMessageFeature)
+        throw new Error("Wallet does not support solana:signMessage");
       const result = await signMessageFeature.signMessage(message);
       return { signature: result.signature };
     },
     async signTransaction(tx) {
+      if (!signTxFeature)
+        throw new Error("Wallet does not support solana:signTransaction");
       const result = await signTxFeature.signTransaction(tx);
       return result.signedTransaction ?? result;
     },

@@ -68,6 +68,68 @@ describe("SolanaConnector", () => {
     expect(connector.getDiscoveredWallets()).toEqual([]);
   });
 
+  describe("getRoles", () => {
+    async function connectWith(provider: SolanaProvider) {
+      vi.stubGlobal("window", { phantom: { solana: provider } } as any);
+      connector.startDiscovery();
+      return connector.connect("phantom");
+    }
+
+    it("returns null without a live session", () => {
+      expect(connector.getRoles({ namespaces: {} } as never)).toBeNull();
+    });
+
+    it("reports identity, signer and payer for a full wallet", async () => {
+      const session = await connectWith(createMockProvider());
+      const roles = connector.getRoles(session);
+
+      expect(roles?.identity).toEqual({
+        address: "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtPb",
+        chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+      });
+      expect(roles?.signer).not.toBeNull();
+      expect(roles?.payer).not.toBeNull();
+    });
+
+    /**
+     * The address comes from the live session, not the argument, so a role
+     * taken after an in-wallet account switch signs for the account the wallet
+     * will actually use.
+     */
+    it("follows an in-wallet account switch", async () => {
+      let handler: ((...args: unknown[]) => void) | undefined;
+      const provider = createMockProvider({
+        on: vi.fn((event: string, h: (...args: unknown[]) => void) => {
+          if (event === "accountChanged") handler = h;
+        }),
+      });
+      const session = await connectWith(provider);
+      // A caller holding a snapshot from before the switch — a persisted or
+      // deserialized session. Reading the address out of it would sign for an
+      // account the wallet has already moved off.
+      const stale = structuredClone(session);
+      const next = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+      handler?.(next);
+
+      expect(stale.namespaces.solana?.accounts[0]).not.toContain(next);
+      expect(connector.getRoles(stale)?.identity.address).toBe(next);
+    });
+
+    it("gives no signer to a wallet that can only sign-and-send", async () => {
+      const provider = createMockProvider();
+      // A legacy provider's methods are its declaration; removing one is how
+      // such a wallet says it cannot do the job.
+      delete (provider as Partial<SolanaProvider>).signTransaction;
+      delete (provider as Partial<SolanaProvider>).signAllTransactions;
+
+      const session = await connectWith(provider);
+      const roles = connector.getRoles(session);
+
+      expect(roles?.signer).toBeNull();
+      expect(roles?.payer).not.toBeNull();
+    });
+  });
+
   it("clear resets everything", () => {
     const mockProvider = createMockProvider();
     vi.stubGlobal("window", {
@@ -836,7 +898,7 @@ describe("SolanaConnector — Wallet Standard discovery", () => {
     expect(connector.getDiscoveredWallets()[0].source).toBe("wallet-standard");
   });
 
-  it("ignores a registration missing required Solana features", () => {
+  it("ignores a registration with no Solana signing feature at all", () => {
     const dispatched: CustomEvent[] = [];
     vi.stubGlobal("window", {
       addEventListener: () => {},
@@ -856,12 +918,61 @@ describe("SolanaConnector — Wallet Standard discovery", () => {
       }>
     ).detail.register;
 
-    // No solana:signTransaction — cannot be used, so must not be offered.
+    // Nothing it could ever be asked to do — not a Solana wallet.
     const incomplete = walletStandardWallet();
-    delete (incomplete as never as Record<string, Record<string, unknown>>)
-      .features["solana:signTransaction"];
+    const features = (
+      incomplete as never as Record<string, Record<string, unknown>>
+    ).features;
+    delete features["solana:signMessage"];
+    delete features["solana:signTransaction"];
     register(incomplete);
 
     expect(connector.getDiscoveredWallets()).toHaveLength(0);
+  });
+
+  /**
+   * A partially capable wallet is offered, with the limitation recorded rather
+   * than turned into an absence from the picker. Refusing it here meant a
+   * send-only wallet could not connect at all; now `getRoles` is what tells a
+   * caller it has no signer.
+   */
+  it("offers a wallet missing solana:signTransaction, recording the gap", () => {
+    const dispatched: CustomEvent[] = [];
+    vi.stubGlobal("window", {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: (event: CustomEvent) => {
+        dispatched.push(event);
+        return true;
+      },
+    } as never);
+
+    connector.startDiscovery();
+    const register = (
+      dispatched.find(
+        (e) => e.type === "wallet-standard:app-ready",
+      ) as CustomEvent<{
+        register: (...w: unknown[]) => () => void;
+      }>
+    ).detail.register;
+
+    const sendOnly = walletStandardWallet();
+    const features = (
+      sendOnly as never as Record<string, Record<string, unknown>>
+    ).features;
+    delete features["solana:signTransaction"];
+    features["solana:signAndSendTransaction"] = {
+      signAndSendTransaction: vi.fn(),
+    };
+    register(sendOnly);
+
+    const [wallet] = connector.getDiscoveredWallets();
+    expect(wallet).toBeDefined();
+    expect(wallet.features).toEqual({
+      signMessage: true,
+      signTransaction: false,
+      signAllTransactions: false,
+      signAndSendTransaction: true,
+    });
   });
 });

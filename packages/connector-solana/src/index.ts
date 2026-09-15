@@ -15,6 +15,12 @@ import {
   isSolflareInstalled,
   SOLANA_WALLET_META,
 } from "./discovery";
+import type { SolanaRoles } from "./roles";
+import {
+  featuresFromLegacyProvider,
+  featuresFromWalletStandard,
+  solanaRoles,
+} from "./roles";
 import type {
   DiscoveredSolanaWallet,
   SolanaConnectorSession,
@@ -25,6 +31,19 @@ import { SOLANA_CHAINS } from "./types";
 import { GENESIS_HASHES, resolveSolanaChain } from "./utils";
 
 export { isPhantomInstalled, isSolflareInstalled } from "./discovery";
+export type {
+  SolanaIdentity,
+  SolanaPayer,
+  SolanaRoles,
+  SolanaSigner,
+  SolanaWalletFeatures,
+} from "./roles";
+export {
+  featuresFromLegacyProvider,
+  featuresFromWalletStandard,
+  requireRole,
+  solanaRoles,
+} from "./roles";
 export type {
   DiscoveredSolanaWallet,
   SolanaConnectorSession,
@@ -167,6 +186,9 @@ class SolanaConnectorImpl implements UniversalConnector {
       rdns: wallet.rdns,
       provider,
       source: "wallet-standard",
+      // The features record, not the adapter: the adapter defines every
+      // method regardless of what this wallet actually implements.
+      features: featuresFromWalletStandard(wallet.features),
     };
     this.discoveredWallets.set(id, discovered);
     this.notifyListeners();
@@ -263,6 +285,7 @@ class SolanaConnectorImpl implements UniversalConnector {
         rdns: SOLANA_WALLET_META["phantom"].rdns,
         provider: phantomProvider,
         source: "legacy",
+        features: featuresFromLegacyProvider(phantomProvider),
       };
       this.discoveredWallets.set("phantom", wallet);
     }
@@ -287,6 +310,7 @@ class SolanaConnectorImpl implements UniversalConnector {
         rdns: SOLANA_WALLET_META["solflare"].rdns,
         provider: solflareProvider,
         source: "legacy",
+        features: featuresFromLegacyProvider(solflareProvider),
       };
       this.discoveredWallets.set("solflare", wallet);
     }
@@ -309,6 +333,7 @@ class SolanaConnectorImpl implements UniversalConnector {
         rdns: "unknown.generic-solana-wallet",
         provider: genericProvider,
         source: "legacy",
+        features: featuresFromLegacyProvider(genericProvider),
       };
       this.discoveredWallets.set("generic", wallet);
     }
@@ -537,6 +562,30 @@ class SolanaConnectorImpl implements UniversalConnector {
 
   async getAccounts(session: UniversalWalletSession): Promise<string[]> {
     return session.namespaces.solana?.accounts ?? [];
+  }
+
+  /**
+   * Which roles the connected account can actually fill.
+   *
+   * Ask before building a flow: `roles.signer === null` means this wallet will
+   * not hand back a signed-but-unsent transaction, so a co-signing or
+   * relayer-submitted flow has to offer a different wallet rather than
+   * discover it at the approval prompt. `roles.payer === null` means the
+   * opposite — it signs, but something else has to broadcast.
+   *
+   * Returns null when there is no live session, because the roles belong to a
+   * connected account, not to the connector.
+   */
+  getRoles(session: UniversalWalletSession): SolanaRoles | null {
+    const active = this.activeSession;
+    if (!active) return null;
+    // The session argument is the caller's view; the address and chain are
+    // read from the live session so an in-wallet account switch is reflected.
+    const chain =
+      active.session.namespaces.solana?.chains[0] ??
+      session.namespaces.solana?.chains[0] ??
+      this.defaultChain;
+    return solanaRoles(active.wallet, active.publicKey, chain);
   }
 
   async signMessage(
