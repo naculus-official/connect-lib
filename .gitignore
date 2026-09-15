@@ -32,3 +32,9 @@ packages/*/pnpm-lock.yaml
 
 # Turborepo cache
 .turbo/
+
+# Agent workspace — never a git object (lives in the container dir, ignored defensively)
+.ai/
+AGENTS.md
+CLAUDE.md
+.claude/
