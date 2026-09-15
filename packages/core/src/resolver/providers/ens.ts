@@ -1,5 +1,5 @@
-import { keccak_256 } from "@noble/hashes/sha3";
-import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 
 const textEncoder = new TextEncoder();
 function stringToBytes(str: string): Uint8Array {

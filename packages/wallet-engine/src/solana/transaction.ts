@@ -29,7 +29,7 @@
  * decides which slot belongs to this wallet.
  */
 
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { WalletError } from "../errors";
 
 const SIGNATURE_LENGTH = 64;

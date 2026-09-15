@@ -1,5 +1,5 @@
-import { p256 } from "@noble/curves/p256";
-import { sha256 } from "@noble/hashes/sha2";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import type { PasskeyAssertion } from "./index";
 import { verifyPasskeyAssertion } from "./verify";
@@ -67,7 +67,7 @@ function makeAssertion(opts?: {
     ? p256.utils.randomSecretKey()
     : privateKey;
   // sign() returns a Signature object; the authenticator sends DER bytes.
-  const sig = p256.sign(sha256(signed), key, { prehash: false }).toBytes("der");
+  const sig = p256.sign(sha256(signed), key, { prehash: false, format: "der" });
 
   return {
     credentialId: "cred-1",

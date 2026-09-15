@@ -11,7 +11,7 @@
  * The worker is bundled with `noExternal`, so importing from here costs the
  * worker asset nothing at runtime.
  */
-import { concatBytes } from "@noble/hashes/utils";
+import { concatBytes } from "@noble/hashes/utils.js";
 
 export function hexToBytes(hex: string): Uint8Array {
   const raw = hex.startsWith("0x") ? hex.slice(2) : hex;

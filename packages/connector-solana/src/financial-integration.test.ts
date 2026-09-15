@@ -35,22 +35,22 @@ describe("Solana Financial Integration: Address & Signing", () => {
   it("signs with zeroed key produces deterministic signature", async () => {
     const seed = new Uint8Array(32);
     const message = new TextEncoder().encode("hello");
-    const { ed25519 } = await import("@noble/curves/ed25519");
-    const priv = ed25519.utils.randomPrivateKey();
+    const { ed25519 } = await import("@noble/curves/ed25519.js");
+    const priv = ed25519.utils.randomSecretKey();
     const sig = ed25519.sign(message, priv);
     expect(sig.length).toBe(64);
   });
 
   it("signs empty message", async () => {
-    const { ed25519 } = await import("@noble/curves/ed25519");
-    const priv = ed25519.utils.randomPrivateKey();
+    const { ed25519 } = await import("@noble/curves/ed25519.js");
+    const priv = ed25519.utils.randomSecretKey();
     const sig = ed25519.sign(new Uint8Array(0), priv);
     expect(sig.length).toBe(64);
   });
 
   it("verifies ed25519 signature roundtrip", async () => {
-    const { ed25519 } = await import("@noble/curves/ed25519");
-    const priv = ed25519.utils.randomPrivateKey();
+    const { ed25519 } = await import("@noble/curves/ed25519.js");
+    const priv = ed25519.utils.randomSecretKey();
     const pub = ed25519.getPublicKey(priv);
     const msg = new TextEncoder().encode("Solana test message");
     const sig = ed25519.sign(msg, priv);
@@ -59,9 +59,9 @@ describe("Solana Financial Integration: Address & Signing", () => {
   });
 
   it("rejects signature with wrong key", async () => {
-    const { ed25519 } = await import("@noble/curves/ed25519");
-    const priv = ed25519.utils.randomPrivateKey();
-    const wrong = ed25519.utils.randomPrivateKey();
+    const { ed25519 } = await import("@noble/curves/ed25519.js");
+    const priv = ed25519.utils.randomSecretKey();
+    const wrong = ed25519.utils.randomSecretKey();
     const pub = ed25519.getPublicKey(wrong);
     const msg = new TextEncoder().encode("test");
     const sig = ed25519.sign(msg, priv);

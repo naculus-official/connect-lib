@@ -1,4 +1,4 @@
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import type { StorageAdapter } from "@naculus/wallet-engine";
 import type { WalletData } from "@naculus/wallet-engine";
 import { beforeEach, describe, expect, it, vi } from "vitest";

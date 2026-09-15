@@ -21,27 +21,23 @@ vi.mock("@scure/bip39", () => ({
   ),
 }));
 
-vi.mock("@noble/curves/secp256k1", () => ({
+vi.mock("@noble/curves/secp256k1.js", () => ({
   secp256k1: {
-    utils: { isValidPrivateKey: vi.fn(() => true) },
+    utils: { isValidSecretKey: vi.fn(() => true) },
     getPublicKey: vi.fn(() => {
       const pub = new Uint8Array(65);
       pub[0] = 0x04;
       for (let i = 1; i < 65; i++) pub[i] = 0xaa;
       return pub;
     }),
+    // 2.x returns bytes; with `format: "recovered"` the layout is
+    // [recovery, r(32), s(32)].
     sign: vi.fn(() => {
-      const sig = new Uint8Array(64);
-      for (let i = 0; i < 32; i++) sig[i] = 0xbb;
-      for (let i = 32; i < 64; i++) sig[i] = 0xcc;
-      return {
-        r: 0xbbbbbbbbbbbbbbbbn,
-        s: 0xccccccccccccccccn,
-        recovery: 0,
-        toBytes: () => sig,
-        toCompactRawBytes: () => sig,
-        toDERRawBytes: () => new Uint8Array([0x30, ...sig]),
-      };
+      const sig = new Uint8Array(65);
+      sig[0] = 0;
+      for (let i = 1; i < 33; i++) sig[i] = 0xbb;
+      for (let i = 33; i < 65; i++) sig[i] = 0xcc;
+      return sig;
     }),
   },
 }));

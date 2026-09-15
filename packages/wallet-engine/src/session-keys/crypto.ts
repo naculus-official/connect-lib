@@ -1,5 +1,6 @@
 import { WalletError } from "../errors";
 import type { EncryptedKeyPair, SessionKeyPair } from "./types";
+import { signDigest } from "../signers/secp256k1-digest";
 
 /**
  * Session key crypto utilities.
@@ -28,8 +29,8 @@ async function deriveAESKey(
   walletSeed: Uint8Array,
   salt: Uint8Array,
 ): Promise<Uint8Array> {
-  const { pbkdf2 } = await import("@noble/hashes/pbkdf2");
-  const { sha256 } = await import("@noble/hashes/sha2");
+  const { pbkdf2 } = await import("@noble/hashes/pbkdf2.js");
+  const { sha256 } = await import("@noble/hashes/sha2.js");
 
   const key = pbkdf2(sha256, walletSeed, salt, { c: PBKDF2_ITER, dkLen: 32 });
   return key;
@@ -40,10 +41,10 @@ async function deriveAESKey(
  * Uses @noble/curves/secp256k1.
  */
 export async function generateSessionKeyPair(): Promise<SessionKeyPair> {
-  const { secp256k1 } = await import("@noble/curves/secp256k1");
-  const { bytesToHex } = await import("@noble/hashes/utils");
+  const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+  const { bytesToHex } = await import("@noble/hashes/utils.js");
 
-  const privateKey = secp256k1.utils.randomPrivateKey();
+  const privateKey = secp256k1.utils.randomSecretKey();
   const publicKey = secp256k1.getPublicKey(privateKey, true); // compressed
 
   return {
@@ -60,20 +61,20 @@ export async function signWithSessionKey(
   privateKey: `0x${string}`,
   dataHash: Uint8Array,
 ): Promise<{ r: string; s: string; v: number; signature: `0x${string}` }> {
-  const { secp256k1 } = await import("@noble/curves/secp256k1");
-  const { bytesToHex } = await import("@noble/hashes/utils");
+  const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+  const { bytesToHex } = await import("@noble/hashes/utils.js");
 
   const raw = privateKey.replace(/^0x/, "");
   const priv = new Uint8Array(32);
   for (let i = 0; i < 32; i++)
     priv[i] = parseInt(raw.slice(i * 2, i * 2 + 2), 16);
 
-  const sig = secp256k1.sign(dataHash, priv);
-  const compact = sig.toBytes("compact");
+  const sig = signDigest(secp256k1, dataHash, priv);
+  const compact = sig.compact;
 
   const r = bytesToHex(compact.slice(0, 32));
   const s = bytesToHex(compact.slice(32, 64));
-  const v = sig.recovery ?? 0;
+  const v = sig.recovery;
 
   // full compact signature hex
   const rHex = r.padStart(64, "0");
@@ -121,9 +122,9 @@ export async function encryptSessionKey(
   keyPair: SessionKeyPair,
   walletSeed: Uint8Array,
 ): Promise<EncryptedKeyPair> {
-  const { randomBytes } = await import("@noble/hashes/utils");
+  const { randomBytes } = await import("@noble/hashes/utils.js");
   const { gcm } = await import("@noble/ciphers/aes.js");
-  const { bytesToHex, concatBytes } = await import("@noble/hashes/utils");
+  const { bytesToHex, concatBytes } = await import("@noble/hashes/utils.js");
 
   const salt = randomBytes(16);
   const key = await deriveAESKey(walletSeed, salt);
@@ -158,7 +159,7 @@ export async function decryptSessionKey(
   walletSeed: Uint8Array,
 ): Promise<SessionKeyPair> {
   const { gcm } = await import("@noble/ciphers/aes.js");
-  const { hexToBytes, bytesToHex } = await import("@noble/hashes/utils");
+  const { hexToBytes, bytesToHex } = await import("@noble/hashes/utils.js");
 
   const salt = hexToBytes(encrypted.salt);
   const key = await deriveAESKey(walletSeed, salt);

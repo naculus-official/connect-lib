@@ -1,10 +1,10 @@
 import { HDKey } from "@scure/bip32";
 import { base58 } from "@scure/base";
 import { mnemonicToSeed } from "@scure/bip39";
-import { ed25519 } from "@noble/curves/ed25519";
-import { secp256k1 } from "@noble/curves/secp256k1";
-import { keccak_256 } from "@noble/hashes/sha3";
-import { bytesToHex } from "@noble/hashes/utils";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { StorageAdapter } from "../storage/types";
 import type { WalletData } from "../wallet";
@@ -53,7 +53,10 @@ async function independentEvmKey(mnemonic: string): Promise<string> {
 
 /** keccak-256 of the uncompressed public key, last 20 bytes. */
 function independentEvmAddress(privateKeyHex: string): string {
-  const pk = privateKeyHex.replace(/^0x/, "");
+  // 2.x takes bytes only; 1.x also accepted a hex string. Decoding here keeps
+  // this an independent derivation rather than one that borrows the SDK's own
+  // hex handling.
+  const pk = hexToBytes(privateKeyHex.replace(/^0x/, ""));
   const pub = secp256k1.getPublicKey(pk, false).slice(1);
   return `0x${bytesToHex(keccak_256(pub).slice(-20))}`;
 }

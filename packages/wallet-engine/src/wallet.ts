@@ -31,7 +31,7 @@ import type {
 } from "./signers/types";
 import { SimulationManager } from "./simulation/SimulationManager";
 import type { SimulationConfig, SimulationResult } from "./simulation/types";
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   toSolanaKeypairJson,
   toSolanaPrivateKeyBase58,
@@ -421,7 +421,7 @@ async function accountsFromSeed(
   const { deriveSolanaKeypair, SOLANA_DERIVATION_PATH } = await import(
     "./derivation/solana"
   );
-  const { bytesToHex } = await import("@noble/hashes/utils");
+  const { bytesToHex } = await import("@noble/hashes/utils.js");
   const solana = deriveSolanaKeypair(seed);
 
   return [
@@ -447,9 +447,9 @@ async function deriveWallet(
   const [{ HDKey }, { secp256k1 }, { keccak_256 }, { bytesToHex }] =
     await Promise.all([
       import("@scure/bip32"),
-      import("@noble/curves/secp256k1"),
-      import("@noble/hashes/sha3"),
-      import("@noble/hashes/utils"),
+      import("@noble/curves/secp256k1.js"),
+      import("@noble/hashes/sha3.js"),
+      import("@noble/hashes/utils.js"),
     ]);
 
   const root = HDKey.fromMasterSeed(seed);
@@ -797,7 +797,7 @@ export class PocketWallet {
   /** Generate a new random wallet (BIP39 mnemonic) */
   async generate(): Promise<WalletData> {
     const bip39 = await import("@scure/bip39");
-    const wl = await import("@scure/bip39/wordlists/english");
+    const wl = await import("@scure/bip39/wordlists/english.js");
 
     const mnemonic = bip39.generateMnemonic(wl.wordlist, 128);
     const seed = await bip39.mnemonicToSeed(mnemonic);
@@ -820,7 +820,7 @@ export class PocketWallet {
   /** Recover wallet from a BIP39 mnemonic phrase */
   async importMnemonic(mnemonic: string): Promise<WalletData> {
     const bip39 = await import("@scure/bip39");
-    const wl = await import("@scure/bip39/wordlists/english");
+    const wl = await import("@scure/bip39/wordlists/english.js");
 
     if (!bip39.validateMnemonic(mnemonic, wl.wordlist)) {
       throw new WalletError(
@@ -863,8 +863,8 @@ export class PocketWallet {
     const detected = detectPrivateKey(pkHex);
 
     if (detected.namespace === "solana") {
-      const { bytesToHex } = await import("@noble/hashes/utils");
-      const { ed25519 } = await import("@noble/curves/ed25519");
+      const { bytesToHex } = await import("@noble/hashes/utils.js");
+      const { ed25519 } = await import("@noble/curves/ed25519.js");
       const { base58 } = await import("@scure/base");
 
       const address = base58.encode(ed25519.getPublicKey(detected.secret));
@@ -889,12 +889,12 @@ export class PocketWallet {
       return this.data;
     }
 
-    const { keccak_256 } = await import("@noble/hashes/sha3");
-    const { bytesToHex } = await import("@noble/hashes/utils");
+    const { keccak_256 } = await import("@noble/hashes/sha3.js");
+    const { bytesToHex } = await import("@noble/hashes/utils.js");
     const priv = detected.secret;
     pkHex = `0x${bytesToHex(priv)}`;
 
-    const { secp256k1 } = await import("@noble/curves/secp256k1");
+    const { secp256k1 } = await import("@noble/curves/secp256k1.js");
     const pub = secp256k1.getPublicKey(priv, false);
     const hash = keccak_256(pub.slice(1));
     const addr = `0x${bytesToHex(hash.slice(-20))}` as `0x${string}`;
@@ -957,11 +957,11 @@ export class PocketWallet {
           "Stored wallet data is malformed.",
         );
       }
-      const { secp256k1 } = await import("@noble/curves/secp256k1");
-      const { keccak_256 } = await import("@noble/hashes/sha3");
-      const { hexToBytes, bytesToHex } = await import("@noble/hashes/utils");
+      const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+      const { keccak_256 } = await import("@noble/hashes/sha3.js");
+      const { hexToBytes, bytesToHex } = await import("@noble/hashes/utils.js");
       const privateKeyBytes = hexToBytes(evm.privateKey.slice(2));
-      if (!secp256k1.utils.isValidPrivateKey(privateKeyBytes)) {
+      if (!secp256k1.utils.isValidSecretKey(privateKeyBytes)) {
         throw new WalletError("invalid_key", "Stored private key is invalid.");
       }
       const publicKey = secp256k1.getPublicKey(privateKeyBytes, false);

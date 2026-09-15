@@ -1,7 +1,8 @@
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { bytesToHex, concatBytes } from "@noble/hashes/utils";
+import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { encodeRlpList, hexToBytes, toRlpBytes, toRlpQuantity } from "./rlp";
+import { signDigest } from "./secp256k1-digest";
 
 interface SignMessageRequest {
   message: string;
@@ -29,7 +30,7 @@ interface EncryptedPayload {
 let privKey: Uint8Array | null = null;
 
 function validatePrivateKey(key: Uint8Array): Uint8Array {
-  if (key.length !== 32 || !secp256k1.utils.isValidPrivateKey(key)) {
+  if (key.length !== 32 || !secp256k1.utils.isValidSecretKey(key)) {
     throw new Error("invalid EVM private key");
   }
   return key;
@@ -57,10 +58,10 @@ function signPersonalMessage(msg: string): {
   combined.set(mb, prefix.length);
   const hash = keccak_256(combined);
 
-  const sig = secp256k1.sign(hash, privKey);
-  const compact = sig.toBytes("compact");
+  const sig = signDigest(secp256k1, hash, privKey);
+  const compact = sig.compact;
   return {
-    signature: `0x${bytesToHex(compact)}${(sig.recovery! + 27).toString(16)}`,
+    signature: `0x${bytesToHex(compact)}${(sig.recovery + 27).toString(16)}`,
     recovery: sig.recovery,
   };
 }
@@ -133,8 +134,8 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
     const unsignedEncoded = encodeRlpList(items);
     const unsignedMsg = concatBytes(new Uint8Array([0x02]), unsignedEncoded);
     const hash = keccak_256(unsignedMsg);
-    const sig = secp256k1.sign(hash, privKey);
-    const compact = sig.toCompactRawBytes();
+    const sig = signDigest(secp256k1, hash, privKey);
+    const compact = sig.compact;
     const itemsSigned = [
       toRlpQuantity("0x" + txChainId.toString(16)),
       toRlpQuantity(tx.nonce ?? "0x0"),
@@ -145,7 +146,7 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
       toRlpQuantity(tx.value ?? "0x0"),
       toRlpBytes(tx.data ?? "0x"),
       new Uint8Array([0xc0]),
-      toRlpQuantity("0x" + (sig.recovery ?? 0).toString(16)),
+      toRlpQuantity("0x" + (sig.recovery).toString(16)),
       toRlpQuantity("0x" + bytesToHex(compact.slice(0, 32))),
       toRlpQuantity("0x" + bytesToHex(compact.slice(32, 64))),
     ];
@@ -175,10 +176,10 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
   ];
   const encoded = encodeRlpList(unsignedTx);
   const hash = keccak_256(encoded);
-  const sig = secp256k1.sign(hash, privKey);
-  const compact = sig.toBytes("compact");
+  const sig = signDigest(secp256k1, hash, privKey);
+  const compact = sig.compact;
   // Compact signatures are 64 bytes; recovery is not stored at compact[64].
-  const vAdj = BigInt(sig.recovery ?? 0) + 35n + txChainId * 2n;
+  const vAdj = BigInt(sig.recovery) + 35n + txChainId * 2n;
 
   const signedTxList = [
     nonce,

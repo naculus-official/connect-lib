@@ -7,8 +7,8 @@
  * @see docs/features/account-abstraction.md
  */
 
-import { keccak_256 } from "@noble/hashes/sha3";
-import { bytesToHex } from "@noble/hashes/utils";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { AccountAbstractionError } from "./errors";
 import {
   type Address,

@@ -21,9 +21,9 @@
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
-    "@noble/curves": "^1.9.7",
-    "@noble/hashes": "^1.8.0",
-    "@scure/base": "^1.2.6"
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@scure/base": "^2.4.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

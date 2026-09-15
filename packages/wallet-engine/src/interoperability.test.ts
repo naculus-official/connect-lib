@@ -38,11 +38,11 @@ const VECTORS: ReadonlyArray<{ mnemonic: string; address: string }> = [
  */
 async function deriveIndependently(mnemonic: string): Promise<string> {
   const bip39 = await import("@scure/bip39");
-  const { wordlist } = await import("@scure/bip39/wordlists/english");
+  const { wordlist } = await import("@scure/bip39/wordlists/english.js");
   const { HDKey } = await import("@scure/bip32");
-  const { secp256k1 } = await import("@noble/curves/secp256k1");
-  const { keccak_256 } = await import("@noble/hashes/sha3");
-  const { bytesToHex } = await import("@noble/hashes/utils");
+  const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { bytesToHex } = await import("@noble/hashes/utils.js");
 
   if (!bip39.validateMnemonic(mnemonic, wordlist)) {
     throw new Error("not a valid BIP-39 mnemonic");

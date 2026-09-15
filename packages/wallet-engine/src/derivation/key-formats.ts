@@ -17,9 +17,9 @@
  * everything this wallet emits can be pasted into MetaMask or Phantom, and
  * everything those emit can be pasted back.
  */
-import { ed25519 } from "@noble/curves/ed25519";
-import { secp256k1 } from "@noble/curves/secp256k1";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { base58 } from "@scure/base";
 import { WalletError } from "../errors";
 
@@ -40,7 +40,7 @@ export function toEvmPrivateKeyHex(secret: Uint8Array): `0x${string}` {
   if (secret.length !== 32) {
     throw new WalletError("invalid_key", "An EVM private key is 32 bytes.");
   }
-  if (!secp256k1.utils.isValidPrivateKey(secret)) {
+  if (!secp256k1.utils.isValidSecretKey(secret)) {
     throw new WalletError(
       "invalid_key",
       "Value is outside the secp256k1 order and cannot be an EVM key.",
@@ -100,7 +100,7 @@ export function detectPrivateKey(input: string): DetectedKey {
   // Prefixed hex: unambiguous, and the prefix is what every EVM tool emits.
   if (/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
     const secret = hexToBytes(trimmed.slice(2));
-    if (!secp256k1.utils.isValidPrivateKey(secret)) {
+    if (!secp256k1.utils.isValidSecretKey(secret)) {
       throw new WalletError(
         "invalid_key",
         "That value is outside the secp256k1 order, so it is not a valid EVM key.",

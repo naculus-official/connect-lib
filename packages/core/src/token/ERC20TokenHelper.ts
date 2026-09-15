@@ -93,8 +93,8 @@ function normalizeRawAmount(
  * Uses dynamic import of @noble/hashes to keep no direct import side-effect.
  */
 async function keccak256Hex(data: Uint8Array): Promise<string> {
-  const { keccak_256 } = await import("@noble/hashes/sha3");
-  const { bytesToHex } = await import("@noble/hashes/utils");
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { bytesToHex } = await import("@noble/hashes/utils.js");
   return bytesToHex(keccak_256(data));
 }
 

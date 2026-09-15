@@ -37,8 +37,8 @@ export function abiEncodeUint256(value: bigint): string {
 }
 
 export async function getSelector(signature: string): Promise<string> {
-  const { keccak_256 } = await import("@noble/hashes/sha3");
-  const { bytesToHex } = await import("@noble/hashes/utils");
+  const { keccak_256 } = await import("@noble/hashes/sha3.js");
+  const { bytesToHex } = await import("@noble/hashes/utils.js");
   return `0x${bytesToHex(keccak_256(new TextEncoder().encode(signature))).slice(0, 8)}`;
 }
 

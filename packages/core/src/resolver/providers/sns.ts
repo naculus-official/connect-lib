@@ -4,10 +4,10 @@
 // those bytes are hashed into a program-derived address, so a wrong length
 // resolves a name to a different account entirely.
 
-import { ed25519 } from "@noble/curves/ed25519";
-import { keccak_256 } from "@noble/hashes/sha3";
-import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { base58 } from "@scure/base";
 
 const textEncoder = new TextEncoder();
@@ -73,7 +73,11 @@ function findProgramAddress(
     // A Solana PDA must be off the Ed25519 curve. A bit test is not an
     // equivalent curve-membership check and can derive runtime-invalid PDAs.
     try {
-      ed25519.Point.fromHex(hash);
+      // 2.x split fromHex (string) from fromBytes (Uint8Array); 1.x accepted
+      // both through fromHex. The check itself is unchanged — construction
+      // throws for a point that is not on the curve, which is what makes this
+      // a real membership test rather than a bit inspection.
+      ed25519.Point.fromBytes(hash);
     } catch {
       return [hash, bump];
     }

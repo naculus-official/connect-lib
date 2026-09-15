@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@noble/hashes": "^1.8.0",
+    "@noble/hashes": "^2.4.0",
     "bs58": "^6.0.0",
     "ripple-keypairs": "^3.1.0",
     "tweetnacl": "^1.0.3",

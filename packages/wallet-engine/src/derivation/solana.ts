@@ -12,7 +12,7 @@
  * the workspace already trusts `@scure`/`@noble` for exactly this class of
  * work.
  */
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { base58 } from "@scure/base";
 import { WalletError } from "../errors";
 import { deriveEd25519 } from "./slip10";

@@ -13,8 +13,8 @@
  *   public key as an input — so `recovery` is deliberately absent rather than
  *   filled with a placeholder.
  */
-import { ed25519 } from "@noble/curves/ed25519";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { WalletError } from "../errors";
 import type {
   Signer,

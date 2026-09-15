@@ -12,8 +12,8 @@
  * address a user's funds live at. A mistake there is unrecoverable, so it is
  * worth being able to read the whole thing.
  */
-import { hmac } from "@noble/hashes/hmac";
-import { sha512 } from "@noble/hashes/sha2";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha512 } from "@noble/hashes/sha2.js";
 import { WalletError } from "../errors";
 
 /** SLIP-0010 marks hardened indices by setting the high bit. */

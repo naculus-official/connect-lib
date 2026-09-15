@@ -15,9 +15,9 @@
  * @see docs/features/session-keys.md
  */
 
-import { secp256k1 } from "@noble/curves/secp256k1";
-import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils.js";
 import { isValidAddress, isZeroAddress } from "../address-validation";
 import type { StorageAdapter } from "../storage";
 import { createSessionKeyError } from "./errors";
@@ -77,7 +77,14 @@ function deriveEncryptionPassword(config: SessionKeyManagerConfig): string {
   const base = config.encryptionSalt
     ? `${prefix}::${config.encryptionSalt}::session_key_encryption_v1`
     : `${prefix}::session_key_encryption_v1`;
-  return sha256(base).reduce((s, b) => s + b.toString(16).padStart(2, "0"), "");
+  // @noble/hashes 2.x takes bytes only. 1.x accepted a string and UTF-8
+  // encoded it internally, so encoding here explicitly produces the identical
+  // digest — which it must: this salt derives the key that existing encrypted
+  // session records were sealed with.
+  return sha256(new TextEncoder().encode(base)).reduce(
+    (s, b) => s + b.toString(16).padStart(2, "0"),
+    "",
+  );
 }
 
 // ─── SessionKeyManager ─────────────────────────────────────────────────
@@ -147,7 +154,7 @@ export class SessionKeyManager {
     }
 
     // Generate secp256k1 key pair
-    const privateKeyBytes = secp256k1.utils.randomPrivateKey();
+    const privateKeyBytes = secp256k1.utils.randomSecretKey();
     const publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes);
     const publicKeyHex = `0x${bytesToHex(publicKeyBytes)}` as `0x${string}`;
     const privateKeyHex = `0x${bytesToHex(privateKeyBytes)}` as `0x${string}`;
@@ -521,12 +528,19 @@ export class SessionKeyManager {
       authorization: stored.authorization,
       signerAddress: stored.authorization.signerAddress,
     };
+    // `prehash: false` because messageHash is already a hash; on 2.x's default
+    // the curve would hash it again and sign bytes no verifier expects.
+    // `format: "recovered"` returns 65 bytes laid out [recovery, r, s] — 1.x
+    // carried it on a Signature object that 2.x no longer returns.
     const sig = secp256k1.sign(
       hexToBytes(messageHash.slice(2)),
       hexToBytes(privateKey.slice(2)),
+      { prehash: false, format: "recovered" },
     );
-    const compact = sig.toCompactHex();
-    const v = sig.recovery !== null ? sig.recovery + 27 : 27;
+    const compact = Array.from(sig.subarray(1))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    const v = sig[0]! + 27;
     const signature =
       `0x${compact}${v.toString(16).padStart(2, "0")}` as `0x${string}`;
 

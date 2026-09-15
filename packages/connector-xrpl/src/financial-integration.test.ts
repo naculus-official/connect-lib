@@ -14,8 +14,8 @@ describe("XRPL Crypto: Address & Key Format", () => {
   });
 
   it("derives secp256k1 key for XRPL", async () => {
-    const { secp256k1 } = await import("@noble/curves/secp256k1");
-    const priv = secp256k1.utils.randomPrivateKey();
+    const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+    const priv = secp256k1.utils.randomSecretKey();
     const pub = secp256k1.getPublicKey(priv, true);
     expect(pub.length).toBe(33);
   });

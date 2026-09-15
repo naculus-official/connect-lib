@@ -1,6 +1,6 @@
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
-import { sha256 } from "@noble/hashes/sha256";
-import { bytesToHex } from "@noble/hashes/utils";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorageAdapter } from "../../storage";
 import { SessionKeyManager } from "../SessionKeyManager";
@@ -156,7 +156,11 @@ describe("SessionKeyManager", () => {
       );
       const stored = await new SessionKeyStorage(adapter).get(info.id);
       const legacyPassword = bytesToHex(
-        sha256(`${storagePrefix}::session_key_encryption_v1`),
+        // @noble/hashes 2.x takes bytes only. 1.x UTF-8 encoded a string
+        // internally, so this is the same digest — which is the point of the
+        // test: the legacy password must not move, or records sealed with it
+        // stop opening.
+        sha256(new TextEncoder().encode(`${storagePrefix}::session_key_encryption_v1`)),
       );
 
       expect(stored).not.toBeNull();

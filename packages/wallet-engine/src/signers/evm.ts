@@ -6,6 +6,7 @@ import type {
   SignResult,
   TransactionRequest,
 } from "./types";
+import { type Secp256k1Like, signDigest } from "./secp256k1-digest";
 
 /**
  * Validate a private key and return its 32 bytes.
@@ -16,7 +17,7 @@ import type {
  * experiment twice.
  */
 async function privateKeyBytes(privateKey: `0x${string}`): Promise<Uint8Array> {
-  const { secp256k1 } = await import("@noble/curves/secp256k1");
+  const { secp256k1 } = await import("@noble/curves/secp256k1.js");
   if (!/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
     throw new WalletError(
       "invalid_key",
@@ -24,7 +25,7 @@ async function privateKeyBytes(privateKey: `0x${string}`): Promise<Uint8Array> {
     );
   }
   const priv = hexToBytes(privateKey);
-  if (!secp256k1.utils.isValidPrivateKey(priv)) {
+  if (!secp256k1.utils.isValidSecretKey(priv)) {
     throw new WalletError(
       "invalid_key",
       "EVM private key is outside secp256k1 range.",
@@ -59,9 +60,9 @@ export class EVMSigner implements Signer {
     hash: `0x${string}`,
     privateKey: `0x${string}`,
   ): Promise<SignResult> {
-    const { secp256k1 } = await import("@noble/curves/secp256k1");
-    const { keccak_256 } = await import("@noble/hashes/sha3");
-    const { bytesToHex } = await import("@noble/hashes/utils");
+    const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+    const { keccak_256 } = await import("@noble/hashes/sha3.js");
+    const { bytesToHex } = await import("@noble/hashes/utils.js");
 
     if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) {
       throw new WalletError(
@@ -79,11 +80,11 @@ export class EVMSigner implements Signer {
     const signed = keccak_256(payload);
 
     const priv = await privateKeyBytes(privateKey);
-    const sig = secp256k1.sign(signed, priv);
-    const compact = sig.toBytes("compact");
+    const sig = signDigest(secp256k1, signed, priv);
+    const compact = sig.compact;
     const rHex = bytesToHex(compact.slice(0, 32));
     const sHex = bytesToHex(compact.slice(32, 64));
-    const vHex = (sig.recovery! + 27).toString(16).padStart(2, "0");
+    const vHex = (sig.recovery + 27).toString(16).padStart(2, "0");
 
     return {
       signature: `0x${rHex}${sHex}${vHex}` as `0x${string}`,
@@ -95,9 +96,9 @@ export class EVMSigner implements Signer {
     req: SignRequest,
     privateKey: `0x${string}`,
   ): Promise<SignResult> {
-    const { secp256k1 } = await import("@noble/curves/secp256k1");
-    const { keccak_256 } = await import("@noble/hashes/sha3");
-    const { bytesToHex } = await import("@noble/hashes/utils");
+    const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+    const { keccak_256 } = await import("@noble/hashes/sha3.js");
+    const { bytesToHex } = await import("@noble/hashes/utils.js");
 
     const mb = new TextEncoder().encode(req.message);
     const prefix = new TextEncoder().encode(
@@ -110,12 +111,12 @@ export class EVMSigner implements Signer {
 
     const priv = await privateKeyBytes(privateKey);
 
-    const sig = secp256k1.sign(hash, priv);
-    const compact = sig.toBytes("compact");
+    const sig = signDigest(secp256k1, hash, priv);
+    const compact = sig.compact;
 
     const rHex = bytesToHex(compact.slice(0, 32));
     const sHex = bytesToHex(compact.slice(32, 64));
-    const vHex = (sig.recovery! + 27).toString(16);
+    const vHex = (sig.recovery + 27).toString(16);
 
     return {
       signature: `0x${rHex}${sHex}${vHex}` as `0x${string}`,
@@ -127,9 +128,9 @@ export class EVMSigner implements Signer {
     req: TransactionRequest,
     privateKey: `0x${string}`,
   ): Promise<SignResult> {
-    const { secp256k1 } = await import("@noble/curves/secp256k1");
-    const { keccak_256 } = await import("@noble/hashes/sha3");
-    const { concatBytes, bytesToHex } = await import("@noble/hashes/utils");
+    const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+    const { keccak_256 } = await import("@noble/hashes/sha3.js");
+    const { concatBytes, bytesToHex } = await import("@noble/hashes/utils.js");
 
     if (typeof req.to !== "string" || !req.to)
       throw new WalletError(
@@ -284,14 +285,14 @@ export class EVMSigner implements Signer {
 
     const encoded = encodeRlpList(unsignedTx);
     const hash = keccak_256(encoded);
-    const sig = secp256k1.sign(hash, priv);
-    const compact = sig.toBytes("compact");
+    const sig = signDigest(secp256k1, hash, priv);
+    const compact = sig.compact;
 
     const rBytes = compact.slice(0, 32);
     const sBytes = compact.slice(32, 64);
     // Noble's compact signature is exactly 64 bytes (r || s); recovery is a
     // separate field and must be used for the EIP-155 y-parity value.
-    const vAdj = BigInt(sig.recovery ?? 0) + 35n + txChainId * 2n;
+    const vAdj = BigInt(sig.recovery) + 35n + txChainId * 2n;
 
     const signedTxList = [
       nonce,
@@ -325,12 +326,7 @@ export class EVMSigner implements Signer {
     encodeRlpList: (items: Uint8Array[]) => Uint8Array,
     concatBytes: (...arrays: Uint8Array[]) => Uint8Array,
     keccak_256: (data: Uint8Array) => Uint8Array,
-    secp256k1: {
-      sign: (
-        hash: Uint8Array,
-        key: Uint8Array,
-      ) => { toCompactRawBytes: () => Uint8Array; recovery?: number };
-    },
+    secp256k1: Secp256k1Like,
     bytesToHex: (bytes: Uint8Array) => string,
   ): Promise<SignResult> {
     const chainIdRlp = toRlpQuantity("0x" + txChainId.toString(16));
@@ -362,12 +358,12 @@ export class EVMSigner implements Signer {
     const unsignedMsg = concatBytes(typePrefix, unsignedEncoded);
 
     const hash = keccak_256(unsignedMsg);
-    const sig = secp256k1.sign(hash, priv);
-    const compact = sig.toCompactRawBytes();
+    const sig = signDigest(secp256k1, hash, priv);
+    const compact = sig.compact;
 
     const rBytes = compact.slice(0, 32);
     const sBytes = compact.slice(32, 64);
-    const yParity = sig.recovery ?? 0;
+    const yParity = sig.recovery;
 
     // Signed tx: rlp([chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, data, [], yParity, r, s])
     const signedItems = [
@@ -405,9 +401,9 @@ export class EVMSigner implements Signer {
     typedData: string,
     privateKey: `0x${string}`,
   ): Promise<SignResult> {
-    const { secp256k1 } = await import("@noble/curves/secp256k1");
-    const { keccak_256 } = await import("@noble/hashes/sha3");
-    const { bytesToHex } = await import("@noble/hashes/utils");
+    const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+    const { keccak_256 } = await import("@noble/hashes/sha3.js");
+    const { bytesToHex } = await import("@noble/hashes/utils.js");
 
     const data = JSON.parse(typedData) as {
       domain?: Record<string, unknown>;
@@ -576,12 +572,12 @@ export class EVMSigner implements Signer {
 
     const priv = await privateKeyBytes(privateKey);
 
-    const sig = secp256k1.sign(digest, priv);
-    const compact = sig.toBytes("compact");
+    const sig = signDigest(secp256k1, digest, priv);
+    const compact = sig.compact;
     return {
       signature: ("0x" +
         bytesToHex(compact) +
-        (sig.recovery! + 27).toString(16)) as `0x${string}`,
+        (sig.recovery + 27).toString(16)) as `0x${string}`,
       recovery: sig.recovery,
     };
   }

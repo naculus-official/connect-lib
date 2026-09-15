@@ -1,5 +1,5 @@
-import { ed25519 } from "@noble/curves/ed25519";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { base58 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import { deriveSolanaKeypair } from "../derivation/solana";
