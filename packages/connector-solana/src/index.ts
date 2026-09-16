@@ -280,9 +280,9 @@ class SolanaConnectorImpl implements UniversalConnector {
       );
       const wallet: DiscoveredSolanaWallet = {
         id: "phantom",
-        name: SOLANA_WALLET_META["phantom"].name,
-        icon: SOLANA_WALLET_META["phantom"].icon,
-        rdns: SOLANA_WALLET_META["phantom"].rdns,
+        name: SOLANA_WALLET_META.phantom.name,
+        icon: SOLANA_WALLET_META.phantom.icon,
+        rdns: SOLANA_WALLET_META.phantom.rdns,
         provider: phantomProvider,
         source: "legacy",
         features: featuresFromLegacyProvider(phantomProvider),
@@ -305,9 +305,9 @@ class SolanaConnectorImpl implements UniversalConnector {
       );
       const wallet: DiscoveredSolanaWallet = {
         id: "solflare",
-        name: SOLANA_WALLET_META["solflare"].name,
-        icon: SOLANA_WALLET_META["solflare"].icon,
-        rdns: SOLANA_WALLET_META["solflare"].rdns,
+        name: SOLANA_WALLET_META.solflare.name,
+        icon: SOLANA_WALLET_META.solflare.icon,
+        rdns: SOLANA_WALLET_META.solflare.rdns,
         provider: solflareProvider,
         source: "legacy",
         features: featuresFromLegacyProvider(solflareProvider),

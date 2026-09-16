@@ -171,7 +171,7 @@ export class E2EWalletAdapter {
 
           // Determine which param is the address
           const addrParam =
-            address && address.startsWith("0x") && address.length === 42
+            address?.startsWith("0x") && address.length === 42
               ? address
               : data.startsWith("0x") && data.length === 42
                 ? data

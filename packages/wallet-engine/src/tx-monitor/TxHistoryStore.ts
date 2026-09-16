@@ -62,7 +62,7 @@ export class TxHistoryStore {
     if (parts.length < 3) return null;
     // parts[0] = "naculus_tx_history", parts[1] = chainId, parts[2] = hash
     const chainId = Number(parts[1]);
-    if (isNaN(chainId)) return null;
+    if (Number.isNaN(chainId)) return null;
     const hash = parts.slice(2).join(":"); // hash may contain colons? unlikely but safe
     return { chainId, hash };
   }

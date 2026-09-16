@@ -355,7 +355,6 @@ export function createStorageAdapter(
       return new SessionStorageAdapter(prefix);
     case "memory":
       return new MemoryStorageAdapter();
-    case "none":
     default:
       return new NoopStorageAdapter();
   }

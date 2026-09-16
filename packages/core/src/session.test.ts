@@ -166,7 +166,6 @@ function createMockStorage(): Storage {
     },
     key: (index: number) => Object.keys(store)[index] ?? null,
   };
-  mock.__proto__ = { setItem: mock.setItem };
   return mock as Storage;
 }
 
@@ -329,14 +328,15 @@ describe("LocalStorageSessionStorage", () => {
       updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
-    const orig = (globalThis as any).localStorage.__proto__.setItem;
-    (globalThis as any).localStorage.__proto__.setItem = vi.fn(() => {
+    const localStorage = globalThis.localStorage;
+    const originalSetItem = localStorage.setItem;
+    localStorage.setItem = vi.fn(() => {
       throw new DOMException("QuotaExceededError", "QuotaExceededError");
     });
 
     await expect(storage.save(session)).resolves.toBeUndefined();
 
-    (globalThis as any).localStorage.__proto__.setItem = orig;
+    localStorage.setItem = originalSetItem;
   });
 
   it("should persist across different instances with same key", async () => {

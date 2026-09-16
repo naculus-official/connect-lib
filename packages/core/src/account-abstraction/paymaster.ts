@@ -177,7 +177,7 @@ export class PaymasterService implements PaymasterInterface {
       "Content-Type": "application/json",
     };
     if (this.config.apiKey) {
-      headers["Authorization"] = `Bearer ${this.config.apiKey}`;
+      headers.Authorization = `Bearer ${this.config.apiKey}`;
     }
 
     const controller = new AbortController();
@@ -322,7 +322,7 @@ export class PaymasterService implements PaymasterInterface {
       "Content-Type": "application/json",
     };
     if (this.config.apiKey) {
-      headers["Authorization"] = `Bearer ${this.config.apiKey}`;
+      headers.Authorization = `Bearer ${this.config.apiKey}`;
     }
 
     // If a specific token is configured, pass it as an extra param

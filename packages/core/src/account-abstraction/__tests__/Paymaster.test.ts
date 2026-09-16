@@ -187,7 +187,7 @@ describe("verifying paymaster data", () => {
     const service = new PaymasterService(createServiceConfig({ type: "verifying", apiKey: "sk-test" }));
     await service.getPaymasterData(buildUserOperation({ sender: TEST_SENDER }));
     const headers = (spy.mock.calls[0][1] as Record<string, unknown>).headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer sk-test");
+    expect(headers.Authorization).toBe("Bearer sk-test");
   });
 
   it("serializes userOp bigint fields as hex in request", async () => {
@@ -334,7 +334,7 @@ describe("token paymaster data", () => {
     const service = new PaymasterService(createServiceConfig({ type: "token", apiKey: "sk-token" }));
     await service.getPaymasterData(buildUserOperation({ sender: TEST_SENDER }));
     const headers = (spy.mock.calls[0][1] as Record<string, unknown>).headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer sk-token");
+    expect(headers.Authorization).toBe("Bearer sk-token");
   });
 
   it("sends token address as extra param when configured", async () => {

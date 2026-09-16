@@ -474,7 +474,7 @@ export class Notifier {
     const results = await Promise.allSettled(
       channelIds.map(async (channelId) => {
         const channel = this.channels.get(channelId);
-        if (!channel || !channel.isAvailable()) return;
+        if (!channel?.isAvailable()) return;
         await channel.send(payload);
       }),
     );

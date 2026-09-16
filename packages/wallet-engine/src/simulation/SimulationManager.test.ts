@@ -275,7 +275,7 @@ describe("SimulationManager — _parseUnits private", () => {
 
   // test private methods via prototype
   it("_parseUnits valid amount", () => {
-    const fn = (SimulationManager.prototype as any)["_parseUnits"];
+    const fn = (SimulationManager.prototype as any)._parseUnits;
     expect(fn("1.5", 18)).toBe(BigInt("1500000000000000000"));
     expect(fn("0", 18)).toBe(0n);
     expect(fn("1", 0)).toBe(1n);
@@ -283,7 +283,7 @@ describe("SimulationManager — _parseUnits private", () => {
   });
 
   it("_parseUnits rejects invalid", () => {
-    const fn = (SimulationManager.prototype as any)["_parseUnits"];
+    const fn = (SimulationManager.prototype as any)._parseUnits;
     expect(() => fn("abc", 18)).toThrow("Invalid amount");
     expect(() => fn("", 18)).toThrow("Invalid amount");
     expect(() => fn(".", 18)).toThrow("Invalid amount");
@@ -291,18 +291,18 @@ describe("SimulationManager — _parseUnits private", () => {
   });
 
   it("_parseUnits truncates leading zeros", () => {
-    const fn = (SimulationManager.prototype as any)["_parseUnits"];
+    const fn = (SimulationManager.prototype as any)._parseUnits;
     expect(fn("001.5", 18)).toBe(BigInt("1500000000000000000"));
   });
 
   it("_parseUnits pads fractional part", () => {
-    const fn = (SimulationManager.prototype as any)["_parseUnits"];
+    const fn = (SimulationManager.prototype as any)._parseUnits;
     expect(fn("1.5", 18)).toBe(BigInt("1500000000000000000"));
     expect(fn("1", 18)).toBe(BigInt("1000000000000000000"));
   });
 
   it("_abiEncodeAddress pads to 32 bytes", () => {
-    const fn = (SimulationManager.prototype as any)["_abiEncodeAddress"];
+    const fn = (SimulationManager.prototype as any)._abiEncodeAddress;
     const addr = "0x1234567890123456789012345678901234567890" as `0x${string}`;
     const encoded = fn(addr);
     expect(encoded).toHaveLength(64);
@@ -312,7 +312,7 @@ describe("SimulationManager — _parseUnits private", () => {
   });
 
   it("_abiEncodeUint256 encodes bigint", () => {
-    const fn = (SimulationManager.prototype as any)["_abiEncodeUint256"];
+    const fn = (SimulationManager.prototype as any)._abiEncodeUint256;
     expect(fn(0n)).toBe("0".repeat(64));
     expect(fn(1n)).toBe("0".repeat(63) + "1");
     expect(fn(255n)).toBe("0".repeat(62) + "ff");
@@ -364,9 +364,7 @@ describe("SimulationManager — erc20 static call via RPC", () => {
         }),
       ok: true,
     });
-    const decimalsFn = (SimulationManager.prototype as any)[
-      "_getERC20Decimals"
-    ].bind(manager);
+    const decimalsFn = (SimulationManager.prototype as any)._getERC20Decimals.bind(manager);
     const result = await decimalsFn(
       "0x1234567890123456789012345678901234567890",
       1,
@@ -390,7 +388,7 @@ describe("SimulationManager — erc20 static call via RPC", () => {
       } as unknown as Response;
     }) as unknown as typeof fetch;
 
-    const fn = (SimulationManager.prototype as any)["_erc20StaticCall"].bind(
+    const fn = (SimulationManager.prototype as any)._erc20StaticCall.bind(
       manager,
     );
     await fn("0x1234", "0xaabb", "", 1, undefined);
@@ -399,7 +397,7 @@ describe("SimulationManager — erc20 static call via RPC", () => {
 
   it("throws only when no RPC URL exists anywhere", async () => {
     const bare = new SimulationManager({});
-    const fn = (SimulationManager.prototype as any)["_erc20StaticCall"].bind(
+    const fn = (SimulationManager.prototype as any)._erc20StaticCall.bind(
       bare,
     );
     await expect(fn("0x1234", "0xaabb", "", 1, undefined)).rejects.toThrow(

@@ -235,7 +235,7 @@ function bigintReviver(_key: string, value: unknown): unknown {
     typeof value === "object" &&
     "__bigint__" in (value as Record<string, unknown>)
   ) {
-    return BigInt((value as Record<string, string>)["__bigint__"]);
+    return BigInt((value as Record<string, string>).__bigint__);
   }
   return value;
 }

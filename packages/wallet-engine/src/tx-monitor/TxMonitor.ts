@@ -110,7 +110,7 @@ export class TxMonitor {
     if (set) {
       for (const listener of set) {
         try {
-          (listener as Function)(...args);
+          (listener as Listener<EventMap[E]>)(...args);
         } catch {
           // Silently ignore listener errors
         }

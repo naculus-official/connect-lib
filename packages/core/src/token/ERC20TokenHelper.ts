@@ -346,6 +346,7 @@ async function getSelector(signature: string): Promise<`0x${string}`> {
 
 // ── ERC20TokenHelper ──────────────────────────────────────────────
 
+// biome-ignore lint/complexity/noStaticOnlyClass: Preserve the published class API used by existing consumers.
 export class ERC20TokenHelper {
   /**
    * Build a raw ERC-20 transfer TransactionRequest.

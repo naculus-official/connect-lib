@@ -329,7 +329,7 @@ export class SimulationManager {
     // Named provider mode: return the specific provider if registered
     if (this._defaultProvider !== "auto") {
       const specific = this.providers.get(this._defaultProvider);
-      if (specific && specific.isAvailable(chainId)) {
+      if (specific?.isAvailable(chainId)) {
         return specific;
       }
     }
@@ -349,7 +349,7 @@ export class SimulationManager {
 
     // eth_call is available on all EVM chains
     const ethCall = this.providers.get("eth_call");
-    if (ethCall && ethCall.isAvailable(chainId)) {
+    if (ethCall?.isAvailable(chainId)) {
       return ethCall;
     }
 

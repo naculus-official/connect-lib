@@ -6,7 +6,6 @@ import { IsolatedSigner } from "./isolated-signer";
 class MockWorker {
   onmessage: ((e: any) => void) | null = null;
   onerror: ((e: any) => void) | null = null;
-  constructor(_url: URL, _opts?: any) {}
   postMessage(msg: any): void {
     const id = msg.id ?? String(Math.random());
     setTimeout(() => {
@@ -34,7 +33,6 @@ class MockWorker {
 class ErrorWorker {
   onmessage: ((e: any) => void) | null = null;
   onerror: ((e: ErrorEvent) => void) | null = null;
-  constructor(_url: URL, _opts?: any) {}
   postMessage(msg: any): void {
     const id = msg.id ?? "0";
     setTimeout(() => {
@@ -57,7 +55,6 @@ class NoIdWorker {
   onmessage: ((e: any) => void) | null = null;
   onerror: ((e: any) => void) | null = null;
   onmessageerror: ((e: any) => void) | null = null;
-  constructor(_url: URL, _opts?: any) {}
   postMessage(_msg: any): void {
     setTimeout(() => {
       this.onmessage?.({ data: { type: "ready" } });
@@ -297,7 +294,6 @@ describe("IsolatedSigner", () => {
     class SilentWorker {
       onmessage: ((e: any) => void) | null = null;
       onerror: ((e: any) => void) | null = null;
-      constructor(_url: URL, _opts?: any) {}
       postMessage(_msg: any): void {}
       terminate(): void {}
     }

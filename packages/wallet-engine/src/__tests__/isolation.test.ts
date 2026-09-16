@@ -27,7 +27,6 @@ class MockStorage implements StorageAdapter {
 class MockWorker {
   private onmessageFn: ((e: any) => void) | null = null;
   onmessage: ((e: any) => void) | null = null;
-  constructor(_url: URL, _opts?: any) {}
   postMessage(msg: any) {
     const id = msg.id ?? "0";
     setTimeout(() => {
