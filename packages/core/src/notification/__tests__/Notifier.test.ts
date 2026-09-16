@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InAppChannel, NoopChannel, TelegramChannel } from "../channels";
 import { Notifier } from "../Notifier";
-import { NoopChannel, InAppChannel, TelegramChannel } from "../channels";
 import type {
+  MuteRule,
   NotificationPayload,
   NotificationWatch,
-  TxStatus,
   TxMetadata,
-  MuteRule,
+  TxStatus,
 } from "../types";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
@@ -172,7 +172,9 @@ describe("Notifier", () => {
   describe("handleTxStatus", () => {
     it("should dispatch notification for confirmed status (final-only)", async () => {
       notifier.watchTx("0xconfirmed", "eip155:1", { userId: "u1" });
-      await notifier.handleTxStatus("0xconfirmed", "confirmed", { confirmations: 12 });
+      await notifier.handleTxStatus("0xconfirmed", "confirmed", {
+        confirmations: 12,
+      });
 
       expect(spyChannel.send).toHaveBeenCalledTimes(1);
       const payload = (spyChannel.send as ReturnType<typeof vi.fn>).mock
@@ -212,6 +214,43 @@ describe("Notifier", () => {
       const payload = (spyChannel.send as ReturnType<typeof vi.fn>).mock
         .calls[0][0] as NotificationPayload;
       expect(payload.status).toBe("pending");
+    });
+
+    it("notifies per-confirm only at each new interval and keeps the watch active", async () => {
+      notifier.setPreferences("u1", { confirmInterval: 3 });
+      notifier.watchTx("0xinterval", "eip155:1", {
+        userId: "u1",
+        frequency: "per-confirm",
+      });
+      for (const confirmations of [1, 2, 3, 3, 4, 6]) {
+        await notifier.handleTxStatus("0xinterval", "confirming", {
+          confirmations,
+        });
+      }
+      expect(spyChannel.send).toHaveBeenCalledTimes(2);
+      expect(
+        (spyChannel.send as ReturnType<typeof vi.fn>).mock.calls.map(
+          ([payload]) => (payload as NotificationPayload).confirmations,
+        ),
+      ).toEqual([3, 6]);
+      expect(notifier.getWatch("0xinterval")).toBeDefined();
+      await notifier.handleTxStatus("0xinterval", "confirmed", {
+        confirmations: 7,
+      });
+      expect(spyChannel.send).toHaveBeenCalledTimes(3);
+      expect(notifier.getWatch("0xinterval")).toBeUndefined();
+    });
+
+    it("does not divide by an invalid confirmation interval", async () => {
+      notifier.setPreferences("u1", { confirmInterval: 0 });
+      notifier.watchTx("0xinvalid", "eip155:1", {
+        userId: "u1",
+        frequency: "per-confirm",
+      });
+      await notifier.handleTxStatus("0xinvalid", "confirming", {
+        confirmations: 3,
+      });
+      expect(spyChannel.send).not.toHaveBeenCalled();
     });
 
     it("should reorg always fire regardless of frequency", async () => {

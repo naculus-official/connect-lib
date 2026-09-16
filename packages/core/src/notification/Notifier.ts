@@ -51,6 +51,7 @@ export class Notifier {
   private preferences: Map<string, UserNotificationPreferences> = new Map(); // userId -> prefs
   private muteRules: Map<string, MuteRule[]> = new Map(); // userId -> rules
   private statusCallbacks: Map<string, Set<TxStatusCallback>> = new Map(); // txHash -> callbacks
+  private lastNotifiedConfirmation: Map<string, number> = new Map();
   private defaultPreferences: UserNotificationPreferences;
   private storage?: NotifierOptions["storage"];
 
@@ -120,6 +121,7 @@ export class Notifier {
     };
 
     this.watches.set(hash, watch);
+    this.lastNotifiedConfirmation.delete(hash);
     void this.persistWatches();
   }
 
@@ -133,6 +135,7 @@ export class Notifier {
     }
     this.watches.delete(hash);
     this.statusCallbacks.delete(hash);
+    this.lastNotifiedConfirmation.delete(hash);
     void this.persistWatches();
   }
 
@@ -195,9 +198,14 @@ export class Notifier {
       watch.frequency,
       status,
       receipt?.confirmations,
+      watch.confirmInterval,
+      this.lastNotifiedConfirmation.get(hash),
     );
 
     if (shouldNotify) {
+      if (status === "confirming" && receipt?.confirmations !== undefined) {
+        this.lastNotifiedConfirmation.set(hash, receipt.confirmations);
+      }
       const payload = this.buildPayload(watch, status, receipt);
       await this.dispatchToChannels(payload, watch.channels);
     }
@@ -393,6 +401,8 @@ export class Notifier {
     frequency: NotificationFrequency,
     status: TxStatus,
     confirmations?: number,
+    confirmInterval?: number,
+    lastNotifiedConfirmation?: number,
   ): boolean {
     if (frequency === "muted") return false;
 
@@ -406,6 +416,20 @@ export class Notifier {
     // Pending only fires in per-tx mode
     if (status === "pending") {
       return frequency === "per-tx";
+    }
+
+    if (status === "confirming") {
+      if (frequency === "per-tx") return true;
+      if (frequency !== "per-confirm") return false;
+      const interval = confirmInterval ?? 6;
+      if (!Number.isSafeInteger(interval) || interval <= 0) return false;
+      if (confirmations === undefined || !Number.isSafeInteger(confirmations))
+        return false;
+      return (
+        confirmations > 0 &&
+        confirmations % interval === 0 &&
+        confirmations > (lastNotifiedConfirmation ?? 0)
+      );
     }
 
     return false;
@@ -425,6 +449,10 @@ export class Notifier {
       pending: {
         title: "Transaction Pending",
         body: "Your transaction has been broadcast and is waiting for confirmation.",
+      },
+      confirming: {
+        title: "Transaction Confirming",
+        body: "Your transaction is accumulating confirmations.",
       },
       confirmed: {
         title: "Transaction Confirmed",
