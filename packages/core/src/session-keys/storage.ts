@@ -415,14 +415,18 @@ export class SessionKeyStorage {
   async incrementUsage(
     id: string,
     tx?: { value?: string; gas?: string },
+    tokenSpend?: { tokenAddress: `0x${string}`; amount: bigint },
   ): Promise<void> {
-    await this.withKeyLock(id, () => this.incrementUsageUnlocked(id, tx));
+    await this.withKeyLock(id, () =>
+      this.incrementUsageUnlocked(id, tx, tokenSpend),
+    );
   }
 
   /** @internal Call only while holding withKeyLock for the same ID. */
   async incrementUsageUnlocked(
     id: string,
     tx?: { value?: string; gas?: string },
+    tokenSpend?: { tokenAddress: `0x${string}`; amount: bigint },
   ): Promise<void> {
     await this.withStorageLock(async () => {
       const keys = await this.loadAllStrict();
@@ -437,6 +441,18 @@ export class SessionKeyStorage {
       }
       if (tx?.gas) {
         key.accumulatedGas = (key.accumulatedGas ?? 0n) + BigInt(tx.gas);
+      }
+      if (tokenSpend) {
+        key.accumulatedTokenSpends ??= {};
+        const existingAddress = Object.keys(key.accumulatedTokenSpends).find(
+          (address) =>
+            address.toLowerCase() === tokenSpend.tokenAddress.toLowerCase(),
+        );
+        const tokenAddress =
+          (existingAddress as `0x${string}` | undefined) ??
+          tokenSpend.tokenAddress;
+        key.accumulatedTokenSpends[tokenAddress] =
+          (key.accumulatedTokenSpends[tokenAddress] ?? 0n) + tokenSpend.amount;
       }
       await this.persistAll(keys);
     });

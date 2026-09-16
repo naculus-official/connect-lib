@@ -61,12 +61,43 @@ function makeScope(overrides?: Partial<SessionKeyScope>): SessionKeyScope {
 
 const signerAddress =
   "0x742D35CC6634C0532925a3B844Bc9E7595F2bD18" as `0x${string}`;
+const tokenAddress =
+  "0xdAC17F958D2ee523a2206206994597C13D831ec7" as `0x${string}`;
+const rawAuthorization = `0x${"12".repeat(65)}` as `0x${string}`;
 const testTx = {
-  to: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+  to: tokenAddress,
   value: "0x2386f26fc10000", // 0.01 ETH in wei (10^16 = 0.01 * 10^18)
   data: "0xa9059cbb" + "0".repeat(120), // transfer(address,uint256)
   chainId: 1,
 };
+
+async function authorize(
+  manager: SessionKeyManager,
+  sessionId: string,
+): Promise<void> {
+  await manager.setAuthorization(sessionId, {
+    signerAddress,
+    type: "offchain",
+    rawSignature: rawAuthorization,
+    message: "test authorization",
+  });
+}
+
+function erc20Transfer(amount: bigint) {
+  return {
+    ...testTx,
+    value: "0x0",
+    data: `0xa9059cbb${"0".repeat(24)}${"11".repeat(20)}${amount.toString(16).padStart(64, "0")}`,
+  };
+}
+
+function erc20TransferFrom(amount: bigint) {
+  return {
+    ...testTx,
+    value: "0x0",
+    data: `0x23b872dd${"0".repeat(24)}${"22".repeat(20)}${"0".repeat(24)}${"11".repeat(20)}${amount.toString(16).padStart(64, "0")}`,
+  };
+}
 
 // ─── Tests ─────────────────────────────────────────────────────────────
 
@@ -134,6 +165,25 @@ describe("SessionKeyManager", () => {
       ).rejects.toMatchObject({ code: "session_key_invalid_input" });
     });
 
+    it("should reject sessions beyond the configured expiry ceiling", async () => {
+      const nowSec = Math.floor(Date.now() / 1000);
+      await expect(
+        manager.createSessionKey(
+          makeScope({ expiry: nowSec + 31 * 24 * 60 * 60 }),
+          signerAddress,
+        ),
+      ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+
+      const shortLivedManager = createManager({ maxExpiryMs: 5 * 60_000 });
+      await expect(
+        shortLivedManager.createSessionKey(
+          makeScope({ expiry: nowSec + 6 * 60 }),
+          signerAddress,
+        ),
+      ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+      await shortLivedManager.clearAll();
+    });
+
     it("should preserve the legacy fallback password when no encryption salt is set", async () => {
       const adapter = new MemoryStorageAdapter();
       const storagePrefix = "legacy-session-prefix";
@@ -160,7 +210,11 @@ describe("SessionKeyManager", () => {
         // internally, so this is the same digest — which is the point of the
         // test: the legacy password must not move, or records sealed with it
         // stop opening.
-        sha256(new TextEncoder().encode(`${storagePrefix}::session_key_encryption_v1`)),
+        sha256(
+          new TextEncoder().encode(
+            `${storagePrefix}::session_key_encryption_v1`,
+          ),
+        ),
       );
 
       expect(stored).not.toBeNull();
@@ -298,6 +352,67 @@ describe("SessionKeyManager", () => {
       expect(result.reason).toContain("forbidden");
     });
 
+    it("should reject increaseAllowance even when explicitly allowed by scope", async () => {
+      const increaseAllowanceTx = {
+        ...testTx,
+        data: ("0x39509351" + "0".repeat(128)) as `0x${string}`,
+      };
+      const info = await manager.createSessionKey(
+        makeScope({ allowedMethods: ["0x39509351"] }),
+        signerAddress,
+      );
+      const result = await manager.checkSessionScope(
+        info.id,
+        increaseAllowanceTx,
+      );
+
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain("forbidden");
+    });
+
+    it("should enforce transfer and transferFrom token allowances", async () => {
+      const info = await manager.createSessionKey(
+        makeScope({
+          allowedMethods: ["0xa9059cbb", "0x23b872dd"],
+          tokenAllowances: { [tokenAddress]: 100n },
+        }),
+        signerAddress,
+      );
+
+      await expect(
+        manager.checkSessionScope(info.id, erc20Transfer(100n)),
+      ).resolves.toMatchObject({ valid: true });
+      await expect(
+        manager.checkSessionScope(info.id, erc20TransferFrom(100n)),
+      ).resolves.toMatchObject({ valid: true });
+      await expect(
+        manager.checkSessionScope(info.id, erc20Transfer(101n)),
+      ).resolves.toMatchObject({ valid: false });
+    });
+
+    it("should reject unknown or malformed calls to an allowance-scoped token", async () => {
+      const info = await manager.createSessionKey(
+        makeScope({
+          allowedMethods: ["0x12345678", "0xa9059cbb"],
+          tokenAllowances: { [tokenAddress]: 100n },
+        }),
+        signerAddress,
+      );
+
+      await expect(
+        manager.checkSessionScope(info.id, {
+          ...testTx,
+          data: `0x12345678${"0".repeat(128)}`,
+        }),
+      ).resolves.toMatchObject({ valid: false });
+      await expect(
+        manager.checkSessionScope(info.id, {
+          ...testTx,
+          data: "0xa9059cbb00",
+        }),
+      ).resolves.toMatchObject({ valid: false });
+    });
+
     it("should return remaining budgets for valid transactions", async () => {
       const scope = makeScope({
         maxTotalValue: BigInt("200000000000000000"), // 0.2 ETH
@@ -348,6 +463,7 @@ describe("SessionKeyManager", () => {
     it("should produce a valid secp256k1 signature", async () => {
       const info = await manager.createSessionKey(makeScope(), signerAddress);
       const messageHash = ("0x" + "ab".repeat(32)) as `0x${string}`;
+      await authorize(manager, info.id);
 
       const signature = await manager.signWithSessionKey(
         info.id,
@@ -355,6 +471,121 @@ describe("SessionKeyManager", () => {
         testTx,
       );
       expect(signature).toMatch(/^0x[a-f0-9]{130}$/i); // 65 bytes (r=32, s=32, v=1)
+    });
+
+    it("should reject direct signing before owner authorization", async () => {
+      const info = await manager.createSessionKey(makeScope(), signerAddress);
+
+      await expect(
+        manager.signWithSessionKey(info.id, `0x${"ab".repeat(32)}`, testTx),
+      ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+      expect(
+        (await manager.listSessions()).find((item) => item.id === info.id)
+          ?.useCount,
+      ).toBe(0);
+    });
+
+    it("should allow explicitly opted-in legacy unauthorized signing", async () => {
+      const unsafeManager = createManager({
+        unsafeAllowUnauthorizedSigning: true,
+      });
+      const info = await unsafeManager.createSessionKey(
+        makeScope(),
+        signerAddress,
+      );
+
+      await expect(
+        unsafeManager.signWithSessionKey(
+          info.id,
+          `0x${"ab".repeat(32)}`,
+          testTx,
+        ),
+      ).resolves.toMatch(/^0x[a-f0-9]{130}$/i);
+      await unsafeManager.clearAll();
+    });
+
+    it("should enforce cumulative token allowance across signatures", async () => {
+      const info = await manager.createSessionKey(
+        makeScope({
+          allowedMethods: ["0xa9059cbb", "0x23b872dd"],
+          tokenAllowances: { [tokenAddress]: 100n },
+        }),
+        signerAddress,
+      );
+      const messageHash = `0x${"ab".repeat(32)}` as `0x${string}`;
+      await authorize(manager, info.id);
+
+      await expect(
+        manager.signWithSessionKey(info.id, messageHash, erc20Transfer(60n)),
+      ).resolves.toMatch(/^0x[a-f0-9]{130}$/i);
+      await expect(
+        manager.signWithSessionKey(
+          info.id,
+          messageHash,
+          erc20TransferFrom(41n),
+        ),
+      ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+      await expect(
+        manager.signWithSessionKey(
+          info.id,
+          messageHash,
+          erc20TransferFrom(40n),
+        ),
+      ).resolves.toMatch(/^0x[a-f0-9]{130}$/i);
+    });
+
+    it("should serialize token allowance consumption across managers", async () => {
+      const adapter = new MemoryStorageAdapter();
+      const first = createManagerWithAdapter(adapter);
+      const second = createManagerWithAdapter(adapter);
+      const info = await first.createSessionKey(
+        makeScope({ tokenAllowances: { [tokenAddress]: 100n } }),
+        signerAddress,
+      );
+      const messageHash = `0x${"ab".repeat(32)}` as `0x${string}`;
+      await authorize(first, info.id);
+
+      const results = await Promise.allSettled([
+        first.signWithSessionKey(info.id, messageHash, erc20Transfer(60n)),
+        second.signWithSessionKey(info.id, messageHash, erc20Transfer(60n)),
+      ]);
+
+      expect(
+        results.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      expect(
+        results.filter((result) => result.status === "rejected"),
+      ).toHaveLength(1);
+      await first.clearAll();
+    });
+
+    it("should withhold a signature when clearAll removes the key during accounting", async () => {
+      const adapter = new MemoryStorageAdapter();
+      const first = createManagerWithAdapter(adapter);
+      const second = createManagerWithAdapter(adapter);
+      const info = await first.createSessionKey(makeScope(), signerAddress);
+      const messageHash = `0x${"ab".repeat(32)}` as `0x${string}`;
+      await authorize(first, info.id);
+
+      const incrementUsageUnlocked =
+        SessionKeyStorage.prototype.incrementUsageUnlocked;
+      vi.spyOn(
+        SessionKeyStorage.prototype,
+        "incrementUsageUnlocked",
+      ).mockImplementationOnce(async function (
+        this: SessionKeyStorage,
+        id,
+        tx,
+        tokenSpend,
+      ) {
+        await second.clearAll();
+        return incrementUsageUnlocked.call(this, id, tx, tokenSpend);
+      });
+
+      await expect(
+        first.signWithSessionKey(info.id, messageHash, testTx),
+      ).rejects.toMatchObject({ code: "session_key_not_found" });
+      expect(await first.listSessions()).toEqual([]);
     });
 
     it("should enforce a transaction budget across managers", async () => {
@@ -368,6 +599,7 @@ describe("SessionKeyManager", () => {
         signerAddress,
       );
       const hash = ("0x" + "ab".repeat(32)) as `0x${string}`;
+      await authorize(first, info.id);
 
       const results = await Promise.allSettled([
         first.signWithSessionKey(info.id, hash, testTx),
@@ -584,6 +816,7 @@ describe("SessionKeyManager", () => {
       // Create
       const info = await manager.createSessionKey(makeScope(), signerAddress);
       expect(info.useCount).toBe(0);
+      await authorize(manager, info.id);
 
       // Check scope
       const scopeCheck = await manager.checkSessionScope(info.id, testTx);

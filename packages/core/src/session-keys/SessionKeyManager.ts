@@ -45,6 +45,20 @@ type OffchainAuthorizationVerifier = (input: {
   signerAddress: `0x${string}`;
 }) => boolean | Promise<boolean>;
 
+type TokenSpend = {
+  tokenAddress: `0x${string}`;
+  amount: bigint;
+  allowance: bigint;
+};
+
+type TokenSpendDecodeResult =
+  | { spend: TokenSpend; reason?: never }
+  | { spend?: never; reason: string }
+  | { spend?: never; reason?: never };
+
+const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
+const ERC20_TRANSFER_FROM_SELECTOR = "0x23b872dd";
+
 // ─── Helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -87,6 +101,66 @@ function deriveEncryptionPassword(config: SessionKeyManagerConfig): string {
   );
 }
 
+function decodeScopedTokenSpend(
+  scope: SessionKeyScope,
+  tx: SessionKeyTransaction,
+): TokenSpendDecodeResult {
+  if (!tx.to || !scope.tokenAllowances) return {};
+
+  const allowanceEntry = Object.entries(scope.tokenAllowances).find(
+    ([tokenAddress]) => tokenAddress.toLowerCase() === tx.to?.toLowerCase(),
+  );
+  if (!allowanceEntry) return {};
+
+  const [tokenAddress, allowance] = allowanceEntry as [`0x${string}`, bigint];
+  const data = tx.data;
+  if (!data || !/^0x[0-9a-fA-F]+$/.test(data)) {
+    return {
+      reason: `ERC-20 calldata is required for token allowance ${tokenAddress}`,
+    };
+  }
+
+  const selector = data.slice(0, 10).toLowerCase();
+  let amountStart: number;
+  let expectedLength: number;
+  if (selector === ERC20_TRANSFER_SELECTOR) {
+    amountStart = 74;
+    expectedLength = 138;
+  } else if (selector === ERC20_TRANSFER_FROM_SELECTOR) {
+    amountStart = 138;
+    expectedLength = 202;
+  } else {
+    return {
+      reason: `Method ${selector} is not permitted for token allowance ${tokenAddress}`,
+    };
+  }
+
+  if (data.length !== expectedLength) {
+    return {
+      reason: `ERC-20 ${selector} calldata must use the exact ABI length`,
+    };
+  }
+
+  return {
+    spend: {
+      tokenAddress,
+      amount: BigInt(`0x${data.slice(amountStart, amountStart + 64)}`),
+      allowance,
+    },
+  };
+}
+
+function accumulatedTokenSpend(
+  spends: StoredSessionKey["accumulatedTokenSpends"],
+  tokenAddress: string,
+): bigint {
+  if (!spends) return 0n;
+  const entry = Object.entries(spends).find(
+    ([address]) => address.toLowerCase() === tokenAddress.toLowerCase(),
+  );
+  return entry?.[1] ?? 0n;
+}
+
 // ─── SessionKeyManager ─────────────────────────────────────────────────
 
 export class SessionKeyManager {
@@ -102,6 +176,18 @@ export class SessionKeyManager {
     storageAdapter?: StorageAdapter,
   ) {
     this.config = { ...DEFAULT_SESSION_KEY_CONFIG, ...config };
+    if (
+      !Number.isSafeInteger(this.config.maxExpiryMs) ||
+      this.config.maxExpiryMs <= 0 ||
+      !Number.isSafeInteger(this.config.defaultExpiryMs) ||
+      this.config.defaultExpiryMs <= 0 ||
+      this.config.defaultExpiryMs > this.config.maxExpiryMs
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "defaultExpiryMs and maxExpiryMs must be positive safe integers, and defaultExpiryMs cannot exceed maxExpiryMs",
+      );
+    }
     this.storage = new SessionKeyStorage(storageAdapter);
     this.encryptionPassword = deriveEncryptionPassword(this.config);
   }
@@ -380,6 +466,7 @@ export class SessionKeyManager {
       tx,
       stored.accumulatedValue,
       stored.accumulatedGas,
+      stored.accumulatedTokenSpends,
     );
   }
 
@@ -502,12 +589,23 @@ export class SessionKeyManager {
   ): Promise<`0x${string}`> {
     this.assertMessageHash(messageHash);
     this.validateSessionStatus(stored);
+    if (
+      !this.config.unsafeAllowUnauthorizedSigning &&
+      !stored.authorization.rawSignature &&
+      !stored.authorization.authorization
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "Owner authorization must be attached before signing",
+      );
+    }
     const check = this.checkScopeAgainstTx(
       stored.scope,
       stored.useCount,
       tx,
       stored.accumulatedValue,
       stored.accumulatedGas,
+      stored.accumulatedTokenSpends,
     );
     if (!check.valid) {
       throw createSessionKeyError(
@@ -546,7 +644,8 @@ export class SessionKeyManager {
 
     // Usage accounting is part of authorization, not best-effort telemetry.
     // If it cannot be persisted, do not return a usable signature.
-    await this.storage.incrementUsageUnlocked(stored.id, tx);
+    const tokenSpend = decodeScopedTokenSpend(stored.scope, tx).spend;
+    await this.storage.incrementUsageUnlocked(stored.id, tx, tokenSpend);
     this.cache.delete(stored.id);
     return signature;
   }
@@ -612,6 +711,15 @@ export class SessionKeyManager {
         "Session expiry must be a future Unix timestamp",
       );
     }
+    const maxExpirySec = Math.floor(
+      (Date.now() + this.config.maxExpiryMs) / 1000,
+    );
+    if (scope.expiry > maxExpirySec) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        `Session expiry cannot exceed ${this.config.maxExpiryMs}ms from creation`,
+      );
+    }
     if (
       scope.maxTxCount !== undefined &&
       (!Number.isSafeInteger(scope.maxTxCount) || scope.maxTxCount <= 0)
@@ -666,6 +774,7 @@ export class SessionKeyManager {
       );
     }
     if (scope.tokenAllowances) {
+      const normalizedAddresses = new Set<string>();
       for (const [address, amount] of Object.entries(scope.tokenAllowances)) {
         if (
           !isValidAddress(address, "eip155") ||
@@ -677,6 +786,14 @@ export class SessionKeyManager {
             "tokenAllowances must contain non-negative values keyed by non-zero EVM addresses",
           );
         }
+        const normalizedAddress = address.toLowerCase();
+        if (normalizedAddresses.has(normalizedAddress)) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "tokenAllowances cannot contain duplicate token addresses",
+          );
+        }
+        normalizedAddresses.add(normalizedAddress);
       }
     }
   }
@@ -722,6 +839,7 @@ export class SessionKeyManager {
     tx: SessionKeyTransaction,
     accumulatedValue = 0n,
     accumulatedGas = 0n,
+    accumulatedTokenSpends?: StoredSessionKey["accumulatedTokenSpends"],
   ): ScopeCheckResult {
     const result: ScopeCheckResult = { valid: true };
     let txValue = 0n;
@@ -812,6 +930,21 @@ export class SessionKeyManager {
         return {
           valid: false,
           reason: `Method ${methodId} is forbidden for session keys`,
+        };
+      }
+    }
+
+    const tokenSpendResult = decodeScopedTokenSpend(scope, tx);
+    if (tokenSpendResult.reason) {
+      return { valid: false, reason: tokenSpendResult.reason };
+    }
+    if (tokenSpendResult.spend) {
+      const { tokenAddress, amount, allowance } = tokenSpendResult.spend;
+      const spent = accumulatedTokenSpend(accumulatedTokenSpends, tokenAddress);
+      if (spent + amount > allowance) {
+        return {
+          valid: false,
+          reason: `Cumulative token spend ${spent + amount} exceeds allowance ${allowance} for ${tokenAddress}`,
         };
       }
     }

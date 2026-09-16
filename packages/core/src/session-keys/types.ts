@@ -130,6 +130,8 @@ export interface StoredSessionKey {
   accumulatedValue?: bigint;
   /** Cumulative gas budget consumed by this key, when tracked */
   accumulatedGas?: bigint;
+  /** Cumulative ERC-20 amount spent per token address, when tracked */
+  accumulatedTokenSpends?: Record<`0x${string}`, bigint>;
 }
 
 // ─── Public Info (no private key exposure) ─────────────────────────────
@@ -190,9 +192,11 @@ export interface SessionKeyManagerConfig {
   defaultMaxTxCount?: number;
   /** Default max session duration in ms (default: 24h) */
   defaultExpiryMs?: number;
+  /** Maximum permitted session duration in ms (default: 30 days) */
+  maxExpiryMs?: number;
   /** Whether to require allowedContracts (default: true) */
   requireAllowedContracts?: boolean;
-  /** Forbidden method selectors (default: approve, permit) */
+  /** Forbidden selectors (default: approve, increaseAllowance, allowance, setApprovalForAll) */
   forbiddenMethods?: string[];
   /** Additional salt component for the key derivation fallback. */
   encryptionSalt?: string;
@@ -218,6 +222,16 @@ export interface SessionKeyManagerConfig {
    * codebase audit.
    */
   unsafeAllowWeakKdf?: boolean;
+
+  /**
+   * Permit direct signing before owner authorization is attached.
+   *
+   * This exists only for explicitly accepted legacy/test flows. Production
+   * callers should leave it false so an unapproved key fails closed. An
+   * `aa_module` key currently has no authorization artifact and therefore
+   * cannot sign under the default.
+   */
+  unsafeAllowUnauthorizedSigning?: boolean;
 }
 
 // ─── Defaults ──────────────────────────────────────────────────────────
@@ -227,9 +241,11 @@ export const DEFAULT_SESSION_KEY_CONFIG: Required<SessionKeyManagerConfig> = {
   defaultMaxTotalValue: BigInt("100000000000000000"), // 0.1 ETH
   defaultMaxTxCount: 50,
   defaultExpiryMs: 24 * 60 * 60 * 1000, // 24 hours
+  maxExpiryMs: 30 * 24 * 60 * 60 * 1000, // 30 days
   requireAllowedContracts: true,
   forbiddenMethods: [
     "0x095ea7b3", // approve(address,uint256)
+    "0x39509351", // increaseAllowance(address,uint256)
     "0xdd62ed3e", // allowance(address,address)
     "0xa22cb465", // setApprovalForAll(address,bool)
   ],
@@ -237,4 +253,5 @@ export const DEFAULT_SESSION_KEY_CONFIG: Required<SessionKeyManagerConfig> = {
   encryptionKey: "",
   pbkdf2Iterations: 600_000,
   unsafeAllowWeakKdf: false,
+  unsafeAllowUnauthorizedSigning: false,
 };
