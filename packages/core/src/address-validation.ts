@@ -1,4 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 
 /** Address validation helpers used at transfer/route boundaries. */
 
@@ -9,6 +10,33 @@ const XRPL_BASE58 =
   "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz";
 const SOLANA_BASE58 =
   "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/** Canonical EIP-55 mixed-case form of a 20-byte EVM address. */
+export function toChecksumAddress(address: string): `0x${string}` {
+  if (typeof address !== "string" || !EVM_ADDR_RE.test(address)) {
+    throw new Error("Invalid EVM address");
+  }
+
+  const lower = address.slice(2).toLowerCase();
+  // EIP-55 hashes the lowercase hex characters as ASCII, not the 20 address bytes.
+  const hash = keccak_256(new TextEncoder().encode(lower));
+  let result = "0x";
+  for (let i = 0; i < lower.length; i++) {
+    const byte = hash[i >> 1];
+    const nibble = i % 2 === 0 ? byte >> 4 : byte & 0x0f;
+    result += nibble >= 8 ? lower[i].toUpperCase() : lower[i];
+  }
+  return result as `0x${string}`;
+}
+
+/** True only when an EVM address already has its canonical EIP-55 casing. */
+export function isChecksumAddress(address: string): boolean {
+  return (
+    typeof address === "string" &&
+    EVM_ADDR_RE.test(address) &&
+    toChecksumAddress(address) === address
+  );
+}
 
 function isValidSolanaAddress(address: string): boolean {
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return false;
