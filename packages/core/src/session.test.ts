@@ -87,6 +87,51 @@ describe("updateSession", () => {
 });
 
 describe("isSessionExpired", () => {
+  it("checks top-level expiry in both Unix seconds and milliseconds", () => {
+    const now = new Date("2026-09-17T00:00:00.000Z");
+    const session = createEmptySession({
+      id: "expiry-test",
+      walletId: "wallet-1",
+      walletType: "walletconnect",
+      namespaces: {},
+      platform: "desktop-web",
+    });
+    expect(
+      isSessionExpired({ ...session, expiry: now.getTime() - 1 }, now),
+    ).toBe(true);
+    expect(
+      isSessionExpired(
+        { ...session, expiry: Math.floor(now.getTime() / 1000) - 1 },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      isSessionExpired({ ...session, expiry: now.getTime() + 1 }, now),
+    ).toBe(false);
+  });
+
+  it("fails closed on malformed expiry and when either expiry has passed", () => {
+    const now = new Date("2026-09-17T00:00:00.000Z");
+    const session = createEmptySession({
+      id: "expiry-test",
+      walletId: "wallet-1",
+      walletType: "walletconnect",
+      namespaces: {},
+      platform: "desktop-web",
+      auth: { method: "siwe", expiresAt: "2026-09-18T00:00:00.000Z" },
+    });
+    expect(isSessionExpired({ ...session, expiry: "invalid" }, now)).toBe(true);
+    expect(
+      isSessionExpired({ ...session, expiry: "2026-09-16T00:00:00.000Z" }, now),
+    ).toBe(true);
+    expect(
+      isSessionExpired(
+        { ...session, auth: { method: "siwe", expiresAt: "invalid" } },
+        now,
+      ),
+    ).toBe(true);
+  });
+
   it("should return false when session has no expiry", () => {
     const session: UniversalWalletSession = {
       id: "test-id",

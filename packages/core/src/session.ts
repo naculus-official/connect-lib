@@ -92,11 +92,22 @@ export function isSessionExpired(
   session: UniversalWalletSession,
   now: Date,
 ): boolean {
-  if (!session.auth?.expiresAt) {
-    return false;
+  const nowMs = now.getTime();
+  if (session.auth?.expiresAt) {
+    const authExpiryMs = Date.parse(session.auth.expiresAt);
+    if (!Number.isFinite(authExpiryMs) || authExpiryMs <= nowMs) return true;
   }
-
-  return new Date(session.auth.expiresAt).getTime() <= now.getTime();
+  if (session.expiry !== undefined) {
+    // Session-key scopes use Unix seconds; wallet sessions also use millis.
+    const expiryMs =
+      typeof session.expiry === "number"
+        ? session.expiry < 1e12
+          ? session.expiry * 1000
+          : session.expiry
+        : Date.parse(session.expiry);
+    if (!Number.isFinite(expiryMs) || expiryMs <= nowMs) return true;
+  }
+  return false;
 }
 
 /**
