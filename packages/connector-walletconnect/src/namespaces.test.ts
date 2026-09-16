@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { buildCAIP10, parseCAIP10, resolveCAIP10 } from "./namespaces";
+import {
+  buildCAIP10,
+  DEFAULT_EVM_METHODS,
+  parseCAIP10,
+  resolveCAIP10,
+} from "./namespaces";
+
+it("does not request blind eth_sign by default", () => {
+  expect(DEFAULT_EVM_METHODS).not.toContain("eth_sign");
+  expect(DEFAULT_EVM_METHODS).toContain("personal_sign");
+});
 
 describe("CAIP-10 helpers", () => {
   it("keeps the EIP-155 0x address prefix", () => {

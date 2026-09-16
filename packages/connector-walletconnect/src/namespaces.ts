@@ -46,7 +46,6 @@ export const DEFAULT_EVM_METHODS = [
   "eth_accounts",
   "eth_requestAccounts",
   "personal_sign",
-  "eth_sign",
   "eth_signTypedData",
   "eth_signTransaction",
   "eth_sendTransaction",
