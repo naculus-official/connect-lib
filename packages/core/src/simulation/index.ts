@@ -24,6 +24,7 @@ export type {
   RiskWarningCategory,
   RiskWarningSeverity,
   SimulationConfig,
+  SimulationCoverage,
   SimulationProviderName,
   SimulationResult,
   SimulationStatus,

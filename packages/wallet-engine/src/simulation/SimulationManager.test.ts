@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  EthCallProvider as CoreEthCallProvider,
+  SimulationManager as CoreSimulationManager,
+} from "@naculus/connect-core";
+import { EthCallProvider } from "./providers/eth-call";
 import type { SimulationProvider, SimulationResult } from "./index";
 import { SimulationManager } from "./SimulationManager";
+
+const TOKEN = `0x${"11".repeat(20)}` as const;
+const FROM = `0x${"22".repeat(20)}` as const;
+const TO = `0x${"33".repeat(20)}` as const;
 
 class MockProvider implements SimulationProvider {
   name = "tenderly" as const;
@@ -30,6 +39,11 @@ class MockProvider implements SimulationProvider {
 
 describe("SimulationManager", () => {
   let manager: SimulationManager;
+
+  it("re-exports the canonical connect-core implementation", () => {
+    expect(SimulationManager).toBe(CoreSimulationManager);
+    expect(EthCallProvider).toBe(CoreEthCallProvider);
+  });
 
   beforeEach(() => {
     manager = new SimulationManager();
@@ -185,9 +199,9 @@ describe("SimulationManager", () => {
 
   it("simulateERC20Transfer with decimals provided", async () => {
     const result = await manager.simulateERC20Transfer(
-      "0x1234567890123456789012345678901234567890",
-      "0xabcd",
-      "0xdead",
+      TOKEN,
+      FROM,
+      TO,
       "1.5",
       1,
       18,
@@ -198,9 +212,9 @@ describe("SimulationManager", () => {
 
   it("simulateERC20Transfer with invalid amount triggers error", async () => {
     const result = await manager.simulateERC20Transfer(
-      "0x1234567890123456789012345678901234567890",
-      "0xabcd",
-      "0xdead",
+      TOKEN,
+      FROM,
+      TO,
       "not_a_number",
       1,
       18,
@@ -211,9 +225,9 @@ describe("SimulationManager", () => {
 
   it("simulateERC20Transfer with too many decimal places", async () => {
     const result = await manager.simulateERC20Transfer(
-      "0x1234567890123456789012345678901234567890",
-      "0xabcd",
-      "0xdead",
+      TOKEN,
+      FROM,
+      TO,
       "1.1234567890123456789",
       1,
       18,
@@ -266,142 +280,79 @@ describe("SimulationManager — provider selection", () => {
   });
 });
 
-describe("SimulationManager — _parseUnits private", () => {
-  let manager: SimulationManager;
+describe("SimulationManager — ERC-20 public transfer behavior", () => {
+  afterEach(() => vi.unstubAllGlobals());
 
-  beforeEach(() => {
-    manager = new SimulationManager();
-  });
-
-  // test private methods via prototype
-  it("_parseUnits valid amount", () => {
-    const fn = (SimulationManager.prototype as any)._parseUnits;
-    expect(fn("1.5", 18)).toBe(BigInt("1500000000000000000"));
-    expect(fn("0", 18)).toBe(0n);
-    expect(fn("1", 0)).toBe(1n);
-    expect(fn("100.0", 2)).toBe(10000n);
-  });
-
-  it("_parseUnits rejects invalid", () => {
-    const fn = (SimulationManager.prototype as any)._parseUnits;
-    expect(() => fn("abc", 18)).toThrow("Invalid amount");
-    expect(() => fn("", 18)).toThrow("Invalid amount");
-    expect(() => fn(".", 18)).toThrow("Invalid amount");
-    expect(() => fn(42 as any, 18)).toThrow("Amount must be a string");
-  });
-
-  it("_parseUnits truncates leading zeros", () => {
-    const fn = (SimulationManager.prototype as any)._parseUnits;
-    expect(fn("001.5", 18)).toBe(BigInt("1500000000000000000"));
-  });
-
-  it("_parseUnits pads fractional part", () => {
-    const fn = (SimulationManager.prototype as any)._parseUnits;
-    expect(fn("1.5", 18)).toBe(BigInt("1500000000000000000"));
-    expect(fn("1", 18)).toBe(BigInt("1000000000000000000"));
-  });
-
-  it("_abiEncodeAddress pads to 32 bytes", () => {
-    const fn = (SimulationManager.prototype as any)._abiEncodeAddress;
-    const addr = "0x1234567890123456789012345678901234567890" as `0x${string}`;
-    const encoded = fn(addr);
-    expect(encoded).toHaveLength(64);
-    expect(encoded.endsWith("1234567890123456789012345678901234567890")).toBe(
-      true,
-    );
-  });
-
-  it("_abiEncodeUint256 encodes bigint", () => {
-    const fn = (SimulationManager.prototype as any)._abiEncodeUint256;
-    expect(fn(0n)).toBe("0".repeat(64));
-    expect(fn(1n)).toBe("0".repeat(63) + "1");
-    expect(fn(255n)).toBe("0".repeat(62) + "ff");
-  });
-});
-
-describe("SimulationManager — erc20 static call via RPC", () => {
-  let manager: SimulationManager;
-  let originalFetch: typeof globalThis.fetch;
-
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    manager = new SimulationManager({ rpcUrl: "https://rpc.test" });
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  it("simulateERC20Transfer with decimals (fetch needed for selector only, not decimals lookup)", async () => {
-    // Since decimals is provided, _getERC20Decimals is skipped.
-    // But _getSelector("transfer(address,uint256)") is called via dynamic import.
-    // This should work with @noble/hashes dependency.
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      json: () => Promise.resolve({ jsonrpc: "2.0", id: 1, result: "0x" }),
+  it.each([
+    ["1.5", 18, 1500000000000000000n],
+    ["001.5", 18, 1500000000000000000n],
+    ["1", 0, 1n],
+    ["100.0", 2, 10000n],
+  ])("encodes %s at %i decimals", async (amount, decimals, raw) => {
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
+      json: async () => ({ result: "0x" }),
     });
+    vi.stubGlobal("fetch", fetchMock);
+    const manager = new SimulationManager({ rpcUrl: "https://rpc.test" });
+
     const result = await manager.simulateERC20Transfer(
-      "0x1234567890123456789012345678901234567890",
-      "0xabcd",
-      "0xdead",
-      "1.5",
+      TOKEN,
+      FROM,
+      TO,
+      amount,
       1,
-      18,
+      decimals,
     );
-    // eth_call simulate returns "success" even with dummy RPC if fetch succeeds
-    // But the eth_call response needs to be a valid structured result
+
     expect(result.status).toBe("success");
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(request.params[0].data).toBe(
+      `0xa9059cbb${TO.slice(2).padStart(64, "0")}${raw.toString(16).padStart(64, "0")}`,
+    );
   });
 
-  it("_getERC20Decimals directly with rpcUrl", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      json: () =>
-        Promise.resolve({
-          jsonrpc: "2.0",
-          id: 1,
-          result:
-            "0x0000000000000000000000000000000000000000000000000000000000000012",
-        }),
-      ok: true,
-    });
-    const decimalsFn = (SimulationManager.prototype as any)._getERC20Decimals.bind(manager);
-    const result = await decimalsFn(
-      "0x1234567890123456789012345678901234567890",
+  it.each(["abc", "", ".", "-1", "1.123"])(
+    "rejects invalid amount %s before RPC",
+    async (amount) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const manager = new SimulationManager({ rpcUrl: "https://rpc.test" });
+      const result = await manager.simulateERC20Transfer(
+        TOKEN,
+        FROM,
+        TO,
+        amount,
+        1,
+        2,
+      );
+      expect(result.summary).toBe("Failed to prepare simulation");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects malformed recipient and uint256 overflow before RPC", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const manager = new SimulationManager({ rpcUrl: "https://rpc.test" });
+    const badAddress = await manager.simulateERC20Transfer(
+      TOKEN,
+      FROM,
+      "0xdead",
+      "1",
       1,
-      "https://rpc.test",
+      0,
     );
-    expect(result).toBe(18);
-    expect(fetch).toHaveBeenCalled();
-  });
-
-  it("falls back to the manager's configured RPC when the caller gives none", async () => {
-    // This previously asserted that it throws here, which encoded the bug:
-    // the manager was built with an endpoint and the lookup refused to use
-    // it, so every simulateERC20Transfer without explicit decimals failed.
-    const calls: unknown[] = [];
-    globalThis.fetch = vi.fn(async (url: unknown) => {
-      calls.push(url);
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ result: `0x${"0".repeat(63)}6` }),
-      } as unknown as Response;
-    }) as unknown as typeof fetch;
-
-    const fn = (SimulationManager.prototype as any)._erc20StaticCall.bind(
-      manager,
+    const overflow = await manager.simulateERC20Transfer(
+      TOKEN,
+      FROM,
+      TO,
+      (1n << 256n).toString(),
+      1,
+      0,
     );
-    await fn("0x1234", "0xaabb", "", 1, undefined);
-    expect(calls[0]).toBe("https://rpc.test");
-  });
-
-  it("throws only when no RPC URL exists anywhere", async () => {
-    const bare = new SimulationManager({});
-    const fn = (SimulationManager.prototype as any)._erc20StaticCall.bind(
-      bare,
-    );
-    await expect(fn("0x1234", "0xaabb", "", 1, undefined)).rejects.toThrow(
-      "No RPC URL available",
-    );
+    expect(badAddress.summary).toBe("Failed to prepare simulation");
+    expect(overflow.summary).toBe("Failed to prepare simulation");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

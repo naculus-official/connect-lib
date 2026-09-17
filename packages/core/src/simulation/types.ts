@@ -13,14 +13,18 @@
 
 // ── Provider Enum ─────────────────────────────────────────────────
 
-export type SimulationProviderName =
-  | "eth_call"
-  | "tenderly"
-  | "auto";
+export type SimulationProviderName = "eth_call" | "tenderly" | "auto";
 
 // ── Core Result ───────────────────────────────────────────────────
 
 export type SimulationStatus = "success" | "reverted" | "unavailable";
+
+/** What the provider actually examined; missing coverage means unknown. */
+export interface SimulationCoverage {
+  balanceChanges: boolean;
+  approvalChanges: boolean;
+  risk: boolean;
+}
 
 export interface SimulationResult {
   /** Whether the simulation completed, reverted, or was unavailable */
@@ -31,6 +35,8 @@ export interface SimulationResult {
   balanceChanges: BalanceChange[];
   /** Predicted approval changes from the simulation */
   approvalChanges: ApprovalChange[];
+  /** Empty changes are not proof of no changes unless coverage says so. */
+  coverage?: SimulationCoverage;
   /** Risk assessment of the simulated transaction */
   riskAssessment: RiskAssessment;
   /** Gas estimation details */
@@ -162,4 +168,6 @@ export interface SimulationConfig {
   enabled?: boolean;
   /** Custom RPC URL for eth_call provider */
   rpcUrl?: string;
+  /** Whether to simulate before wallet-engine sends a transaction. */
+  autoSimulate?: boolean;
 }

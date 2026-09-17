@@ -109,6 +109,7 @@ function buildSuccessResult(
   const nativeSymbol = getNativeSymbol(chainId);
   return {
     status: "success",
+    coverage: { balanceChanges: false, approvalChanges: false, risk: false },
     balanceChanges: [],
     approvalChanges: [],
     riskAssessment: {
@@ -131,6 +132,7 @@ function buildRevertedResult(
 ): SimulationResult {
   return {
     status: "reverted",
+    coverage: { balanceChanges: false, approvalChanges: false, risk: false },
     revertReason,
     balanceChanges: [],
     approvalChanges: [],
@@ -167,6 +169,10 @@ export class EthCallProvider implements SimulationProvider {
     this.defaultRpcUrl = defaultRpcUrl;
   }
 
+  get rpcUrl(): string | undefined {
+    return this.defaultRpcUrl;
+  }
+
   /**
    * Simulate a transaction via eth_call.
    *
@@ -189,6 +195,11 @@ export class EthCallProvider implements SimulationProvider {
     if (!rpcUrl) {
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {
@@ -250,6 +261,11 @@ export class EthCallProvider implements SimulationProvider {
       // Network error or unexpected failure
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {

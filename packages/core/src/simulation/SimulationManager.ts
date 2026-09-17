@@ -46,16 +46,16 @@ export class SimulationManager {
     new Map();
   private _defaultProvider: SimulationProviderName;
   private _enabled: boolean;
+  private _autoSimulate: boolean;
 
   constructor(config?: SimulationConfig) {
     this._enabled = config?.enabled ?? true;
     this._defaultProvider = config?.defaultProvider ?? "auto";
+    this._autoSimulate = config?.autoSimulate ?? false;
 
     // Always register eth_call provider
     this.providers.set("eth_call", new EthCallProvider(config?.rpcUrl));
   }
-
-
 
   // ── Public API ──────────────────────────────────────────────────
 
@@ -81,6 +81,11 @@ export class SimulationManager {
     if (!this._enabled) {
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: { ...DEFAULT_UNAVAILABLE_RISK },
@@ -96,6 +101,11 @@ export class SimulationManager {
     if (!provider) {
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {
@@ -145,6 +155,31 @@ export class SimulationManager {
     return result;
   }
 
+  /** Accept a wallet-engine TransactionRequest without changing its call site. */
+  async simulateTransaction(
+    tx: {
+      to: string;
+      data?: string;
+      value?: string;
+      gas?: string;
+      from?: string;
+    },
+    from: `0x${string}`,
+    options?: { chainId?: number; origin?: string; rpcUrl?: string },
+  ): Promise<SimulationResult> {
+    return this.simulate(
+      {
+        to: tx.to as `0x${string}`,
+        data: (tx.data ?? "0x") as `0x${string}`,
+        value: tx.value ?? "0x0",
+        gas: tx.gas,
+        from: tx.from as `0x${string}` | undefined,
+      },
+      from,
+      options,
+    );
+  }
+
   /**
    * Convenience: simulate an ERC-20 token transfer.
    *
@@ -158,19 +193,37 @@ export class SimulationManager {
    * @param chainId - Chain ID
    */
   async simulateERC20Transfer(
-    token: TokenConfig,
+    token: TokenConfig | `0x${string}`,
     from: `0x${string}`,
     to: `0x${string}`,
     amount: string,
     chainId: number,
+    decimals?: number,
+    rpcUrl?: string,
   ): Promise<SimulationResult> {
     try {
-      // Build transfer calldata using ERC20TokenHelper
-      const decimals =
-        token.decimals ?? (await ERC20TokenHelper.getDecimals(token));
+      const tokenConfig: TokenConfig =
+        typeof token === "string"
+          ? { address: token, chainId, decimals }
+          : token;
+      const endpoint =
+        rpcUrl ??
+        (this.providers.get("eth_call") as EthCallProvider | undefined)?.rpcUrl;
+      // The wallet-engine address form historically requires an explicit or
+      // configured endpoint for decimals. Do not silently use a public default.
+      if (typeof token === "string" && decimals === undefined && !endpoint) {
+        throw new Error("No RPC URL available for ERC-20 decimals lookup");
+      }
+      const precision =
+        decimals ??
+        tokenConfig.decimals ??
+        (await ERC20TokenHelper.getDecimals(
+          tokenConfig,
+          endpoint ? { rpcUrl: endpoint } : undefined,
+        ));
       const tx = await ERC20TokenHelper.buildTransferTx(
-        { token, from, to, amount },
-        decimals,
+        { token: tokenConfig, from, to, amount },
+        precision,
       );
 
       // Simulate the transfer
@@ -182,11 +235,16 @@ export class SimulationManager {
           from,
         },
         from,
-        { chainId },
+        { chainId, rpcUrl },
       );
     } catch (err) {
       return {
         status: "unavailable",
+        coverage: {
+          balanceChanges: false,
+          approvalChanges: false,
+          risk: false,
+        },
         balanceChanges: [],
         approvalChanges: [],
         riskAssessment: {
@@ -229,6 +287,14 @@ export class SimulationManager {
     return this._enabled;
   }
 
+  setAutoSimulate(value: boolean): void {
+    this._autoSimulate = value;
+  }
+
+  get autoSimulate(): boolean {
+    return this._autoSimulate;
+  }
+
   // ── Provider Management ─────────────────────────────────────────
 
   /**
@@ -241,8 +307,6 @@ export class SimulationManager {
   ): void {
     this.providers.set(name, provider);
   }
-
-
 
   /**
    * Remove a registered provider.
@@ -262,8 +326,9 @@ export class SimulationManager {
    * - "eth_call": Always available on EVM
    */
   private _selectProvider(chainId: number): SimulationProvider | undefined {
-    if (this._defaultProvider === "eth_call") {
-      return this.providers.get("eth_call");
+    if (this._defaultProvider !== "auto") {
+      const specific = this.providers.get(this._defaultProvider);
+      if (specific?.isAvailable(chainId)) return specific;
     }
 
     // "auto": use a registered provider that supports this chain, otherwise
@@ -274,7 +339,8 @@ export class SimulationManager {
       if (name !== "eth_call" && provider.isAvailable(chainId)) return provider;
     }
 
-    return this.providers.get("eth_call");
+    const ethCall = this.providers.get("eth_call");
+    return ethCall?.isAvailable(chainId) ? ethCall : undefined;
   }
 
   /**

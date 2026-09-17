@@ -5,7 +5,8 @@ import type { WalletData } from "../wallet";
 import { PocketWallet } from "../wallet";
 
 // Mock the core fee estimation module
-vi.mock("@naculus/connect-core", () => ({
+vi.mock("@naculus/connect-core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@naculus/connect-core")>()),
   estimateFees: vi.fn(),
   WalletError: class WalletError extends Error {
     code: string;
