@@ -7,6 +7,27 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.2.5 — 2026-09-17
+
+### Changed
+
+- **Session keys now fail closed** (`@naculus/connect-core`) — `signWithSessionKey` refuses a key with no owner authorization attached; set `unsafeAllowUnauthorizedSigning: true` to restore the previous behaviour. `tokenAllowances` is enforced at signing time: only exact-length ERC-20 `transfer` / `transferFrom` calldata to an allowance-scoped token is accepted and the decoded amount is charged against a per-token cumulative budget. `increaseAllowance` joins the forbidden selectors. `maxExpiryMs` (default 30 days) caps session lifetime; the constructor throws if `defaultExpiryMs` exceeds it. Usage accounting still withholds the signature when the record cannot be persisted.
+- **One simulation implementation** (`@naculus/connect-core`, `@naculus/wallet-engine`) — connect-core is now the only `SimulationManager`; wallet-engine re-exports it, so its public surface and `PocketWallet` auto-simulation are unchanged. Both ERC-20 call forms are kept (`TokenConfig`, or bare address with optional decimals and per-call `rpcUrl`), a decimals lookup no longer falls back to a public RPC, and results carry a `coverage` triple so an empty change list is not mistaken for no changes.
+- **WalletConnect no longer requests `eth_sign` by default** (`@naculus/connector-walletconnect`) — removed from `DEFAULT_EVM_METHODS`. The `personal_sign` → `eth_sign` fallback in `signMessage` remains reachable only when a consumer's own namespace authorises it.
+
+### Added
+
+- **EIP-55 helpers** (`@naculus/connect-core`) — `toChecksumAddress` and `isChecksumAddress` in address validation, tested against the eight official vectors. `isValidAddress` is unchanged.
+- **Per-confirmation notifications** (`@naculus/connect-core`) — a `confirming` status and a `per-confirm` frequency that fires every `confirmInterval` confirmations, never twice for the same count.
+
+### Fixed
+
+- **Session expiry** (`@naculus/connect-core`) — `isSessionExpired` now honours the top-level `expiry` (Unix seconds, milliseconds or ISO string) and treats an unparseable `auth.expiresAt` as expired instead of live.
+
+### Package impact
+
+`@naculus/connect-core`, `@naculus/wallet-engine` and `@naculus/connector-walletconnect` carry functional change. The other 11 packages are version-bump-only releases required by the lockstep release model.
+
 ## 0.2.4 — 2026-09-15
 
 ### Added
