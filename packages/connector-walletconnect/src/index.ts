@@ -6,6 +6,7 @@ import type {
   UniversalConnector,
   UniversalWalletSession,
   WalletCapabilities,
+  SessionChange,
 } from "@naculus/connect-core";
 import {
   CONNECTOR_ERROR_MESSAGES,
@@ -522,6 +523,51 @@ export {
  * });
  * ```
  */
+type WalletConnectNamespaceLike = {
+  accounts?: unknown;
+  chains?: unknown;
+  methods?: unknown;
+  events?: unknown;
+};
+
+const strings = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string" && v.length > 0)
+    : [];
+
+/**
+ * A session_update payload as a CAIP-25 scope. WalletConnect may omit
+ * `chains` on an update (deriving them from account CAIP-10s), so chains
+ * are taken from the payload when present and from the accounts otherwise;
+ * methods and events fall back to what the session already holds, since an
+ * update that omits them did not change them.
+ */
+function scopeFromWalletConnectNamespaces(
+  offered: Record<string, WalletConnectNamespaceLike>,
+  held: UniversalWalletSession["namespaces"],
+): UniversalWalletSession["namespaces"] {
+  const out: UniversalWalletSession["namespaces"] = {};
+  for (const [key, value] of Object.entries(offered)) {
+    const accounts = strings(value?.accounts);
+    const explicitChains = strings(value?.chains);
+    const chains =
+      explicitChains.length > 0
+        ? explicitChains
+        : [...new Set(accounts.map((a) => a.split(":").slice(0, 2).join(":")))];
+    out[key] = {
+      chains,
+      accounts,
+      methods: Array.isArray(value?.methods)
+        ? strings(value.methods)
+        : [...(held[key]?.methods ?? [])],
+      events: Array.isArray(value?.events)
+        ? strings(value.events)
+        : [...(held[key]?.events ?? [])],
+    };
+  }
+  return out;
+}
+
 export class WalletConnectConnector implements UniversalConnector {
   /** Unique connector identifier */
   readonly id = "walletconnect";
@@ -561,6 +607,9 @@ export class WalletConnectConnector implements UniversalConnector {
     (accounts: string[]) => void
   >();
   private readonly chainSubscribers = new Set<(chainId: string) => void>();
+  private readonly sessionSubscribers = new Set<
+    (change: SessionChange) => void
+  >();
 
   constructor(config: WalletConnectConfig) {
     this.config = config;
@@ -1412,13 +1461,29 @@ export class WalletConnectConnector implements UniversalConnector {
     client.on("session_delete", (event: { topic: string }) => {
       if (event.topic === this.lastSession?.topic) {
         this.sessionExpiryHandler?.();
+        this.notifySessionChanged({ type: "revoked", reason: "wallet" });
       }
     });
     client.on("session_expire", (event: { topic: string }) => {
       if (event.topic === this.lastSession?.topic) {
         this.sessionExpiryHandler?.();
+        this.notifySessionChanged({ type: "revoked", reason: "expired" });
       }
     });
+    client.on(
+      "session_extend",
+      (event: { topic: string; params?: { expiry?: unknown } }) => {
+        if (event.topic !== this.lastSession?.topic) return;
+        const expiry = event.params?.expiry;
+        // WalletConnect expiry is Unix seconds.
+        const expiresAt =
+          typeof expiry === "number" && Number.isFinite(expiry)
+            ? new Date(expiry * 1000).toISOString()
+            : null;
+        if (this.lastSession) this.lastSession.expiry = expiresAt ?? undefined;
+        this.notifySessionChanged({ type: "expiry", expiresAt });
+      },
+    );
 
     // A wallet reports an in-wallet account switch either as a session event
     // or as a namespace update, depending on the implementation. Neither was
@@ -1455,7 +1520,7 @@ export class WalletConnectConnector implements UniversalConnector {
       "session_update",
       (event: {
         topic: string;
-        params?: { namespaces?: Record<string, { accounts?: unknown }> };
+        params?: { namespaces?: Record<string, WalletConnectNamespaceLike> };
       }) => {
         if (event.topic !== this.lastSession?.topic) return;
         const namespaces = event.params?.namespaces;
@@ -1479,11 +1544,42 @@ export class WalletConnectConnector implements UniversalConnector {
           target.accounts = accounts;
           changed = true;
         }
+        // The full scope the wallet now grants, for SessionManager to apply
+        // fail-closed. Sent whether or not the accounts changed: a
+        // session_update can also drop chains or methods.
+        this.notifySessionChanged({
+          type: "scope",
+          namespaces: scopeFromWalletConnectNamespaces(
+            namespaces as Record<string, WalletConnectNamespaceLike>,
+            session.namespaces,
+          ),
+        });
         if (!changed) return;
         session.updatedAt = new Date().toISOString();
         this.notifyAccountsChanged(flattenAccounts(session));
       },
     );
+  }
+
+  /** UniversalConnector.onSessionChanged: CAIP-25 lifecycle from the relay. */
+  onSessionChanged(
+    _session: UniversalWalletSession,
+    handler: (change: SessionChange) => void,
+  ): () => void {
+    this.sessionSubscribers.add(handler);
+    return () => {
+      this.sessionSubscribers.delete(handler);
+    };
+  }
+
+  private notifySessionChanged(change: SessionChange): void {
+    for (const subscriber of [...this.sessionSubscribers]) {
+      try {
+        subscriber(change);
+      } catch {
+        // one listener failing must not stop the others
+      }
+    }
   }
 
   /**
