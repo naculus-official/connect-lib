@@ -19,6 +19,7 @@ import {
   normalizeEip5792Capabilities,
   WalletError,
   WC_DISCONNECT_USER,
+  scopeRequestFrom,
 } from "@naculus/connect-core";
 import { base58 } from "@scure/base";
 import SignClient from "@walletconnect/sign-client";
@@ -649,11 +650,18 @@ export class WalletConnectConnector implements UniversalConnector {
       | ProposalTypes.OptionalNamespaces
       | undefined;
 
+    // A connector-neutral scope request maps 1:1 onto WalletConnect's
+    // proposal namespaces; an explicit requiredNamespaces still wins.
+    const scope = scopeRequestFrom(connectInput);
     const requiredNamespaces =
-      requiredNamespacesRaw ?? buildRequiredNamespaces();
+      requiredNamespacesRaw ??
+      (scope?.required as ProposalTypes.RequiredNamespaces | undefined) ??
+      buildRequiredNamespaces();
 
     const optionalNamespaces =
-      optionalNamespacesRaw ?? buildOptionalNamespaces();
+      optionalNamespacesRaw ??
+      (scope?.optional as ProposalTypes.OptionalNamespaces | undefined) ??
+      (scope?.required ? {} : buildOptionalNamespaces());
     const validation = validateCAIP25Proposal({
       requiredNamespaces: requiredNamespaces as Record<
         string,

@@ -73,6 +73,36 @@ export interface CallsStatus {
   capabilities?: Record<string, unknown>;
 }
 
+/** One namespace of a scope request: what the app wants, without accounts. */
+export type SessionScopeNamespaceRequest = Pick<
+  SessionNamespace,
+  "chains" | "methods" | "events"
+>;
+
+/**
+ * Connector-neutral CAIP-25 scope request, carried in `connect(input)` as
+ * `{ scope }`. `required` must be granted in full or the connection fails;
+ * `optional` may be granted in part. Connectors translate it into their own
+ * proposal format (WalletConnect namespaces) or check the wallet's current
+ * state against it (an injected wallet on a chain outside `required` is
+ * refused rather than returned on the wrong chain).
+ */
+export interface SessionScopeRequest {
+  required?: Record<Namespace, SessionScopeNamespaceRequest>;
+  optional?: Record<Namespace, SessionScopeNamespaceRequest>;
+}
+
+/** Read a scope request out of an opaque connect() input, if one is there. */
+export function scopeRequestFrom(
+  input: unknown,
+): SessionScopeRequest | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const scope = (input as { scope?: unknown }).scope;
+  return scope && typeof scope === "object"
+    ? (scope as SessionScopeRequest)
+    : undefined;
+}
+
 /** A wallet-initiated change to a live session (CAIP-25 lifecycle). */
 export type SessionChange =
   | {

@@ -17,6 +17,7 @@ import {
   normalizeEip5792Capabilities,
   requestPermissions,
   WalletError,
+  scopeRequestFrom,
 } from "@naculus/connect-core";
 import { CHAIN_METADATA } from "./chain";
 import {
@@ -498,6 +499,22 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       throw new WalletError(
         "chain_unsupported",
         `Requested ${requestedChain}, but the wallet is currently on ${providerChain}.`,
+      );
+    }
+    // A CAIP-25 required scope is a promise to the app about which chains
+    // the session covers. An injected wallet cannot negotiate, so a wallet
+    // on a chain outside it is refused rather than returned on the wrong
+    // chain and discovered later at signing time.
+    const requiredChains = scopeRequestFrom(input)?.required?.eip155?.chains;
+    if (
+      requiredChains &&
+      requiredChains.length > 0 &&
+      providerChain &&
+      !requiredChains.includes(providerChain)
+    ) {
+      throw new WalletError(
+        "chain_unsupported",
+        `The session requires ${requiredChains.join(", ")}, but the wallet is currently on ${providerChain}.`,
       );
     }
     const activeChain = providerChain;

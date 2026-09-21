@@ -14,7 +14,10 @@ const TOPIC = "topic-1";
 const wcNamespaces = {
   eip155: {
     chains: ["eip155:1", "eip155:137"],
-    accounts: ["eip155:1:0x1234567890123456789012345678901234567890", "eip155:137:0x1234567890123456789012345678901234567890"],
+    accounts: [
+      "eip155:1:0x1234567890123456789012345678901234567890",
+      "eip155:137:0x1234567890123456789012345678901234567890",
+    ],
     methods: [...REQUIRED_EVM_METHODS],
     events: [...REQUIRED_EVM_EVENTS],
   },
@@ -76,7 +79,13 @@ describe("WalletConnect onSessionChanged", () => {
     // Scope update dropping a chain; methods omitted → held ones carried.
     fire("session_update", {
       topic: TOPIC,
-      params: { namespaces: { eip155: { accounts: ["eip155:1:0x1234567890123456789012345678901234567890"] } } },
+      params: {
+        namespaces: {
+          eip155: {
+            accounts: ["eip155:1:0x1234567890123456789012345678901234567890"],
+          },
+        },
+      },
     });
     expect(changes[0]).toEqual({
       type: "scope",
@@ -106,5 +115,42 @@ describe("WalletConnect onSessionChanged", () => {
     off?.();
     fire("session_delete", { topic: TOPIC });
     expect(changes).toHaveLength(4);
+  });
+});
+
+describe("WalletConnect connect with a CAIP-25 scope request", () => {
+  it("proposes the requested namespaces instead of the defaults", async () => {
+    const proposals: unknown[] = [];
+    const client = {
+      init: vi.fn(),
+      connect: vi.fn(async (params: unknown) => {
+        proposals.push(params);
+        // Abort before approval: the proposal is what is under test.
+        throw new Error("stop");
+      }),
+      request: vi.fn(),
+      disconnect: vi.fn(),
+      session: { get: vi.fn(), getAll: vi.fn(() => []) },
+      on: vi.fn(),
+    };
+    const connector = new WalletConnectConnector({
+      projectId: "test",
+      metadata: { name: "t", description: "t", url: "https://t", icons: [] },
+      client: client as never,
+    });
+    const scope = {
+      required: {
+        eip155: {
+          chains: ["eip155:8453"],
+          methods: [...REQUIRED_EVM_METHODS],
+          events: [...REQUIRED_EVM_EVENTS],
+        },
+      },
+    };
+    await expect(connector.connect({ scope })).rejects.toThrow();
+    expect(proposals[0]).toMatchObject({
+      requiredNamespaces: scope.required,
+      optionalNamespaces: {},
+    });
   });
 });
