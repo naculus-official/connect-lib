@@ -227,3 +227,54 @@ describe("SessionManager CAIP-25 lifecycle", () => {
     expect(manager.getActiveBundle()).toBeNull();
   });
 });
+
+describe("SessionManager CAIP-25 lifecycle — second-pass findings", () => {
+  it("re-subscribes after restoreFromPersistence so a post-reload revocation is observed", async () => {
+    const fake = lifecycleConnector();
+    const connectors = createConnectorManager();
+    connectors.register("wc", fake.connector);
+    const first = createSessionManager(connectors);
+    const bundle = await first.connect("wc", "eip155:1");
+
+    // Fresh manager over the same connector, as after a page reload.
+    const second = createSessionManager(connectors);
+    // Share persistence by copying what the first one saved.
+    (second as unknown as { persistence: unknown }).persistence = (
+      first as unknown as { persistence: unknown }
+    ).persistence;
+    expect(await second.restoreFromPersistence()).toBe(true);
+    const revoked = vi.fn();
+    second.on("sessionRevoked", revoked);
+
+    fake.emit(bundle.walletSession.id, { type: "revoked", reason: "wallet" });
+    await vi.waitFor(() => expect(revoked).toHaveBeenCalled());
+    expect(second.getActiveBundle()).toBeNull();
+  });
+
+  it("does not let a change on an inactive session overwrite the persisted active one", async () => {
+    const fake = lifecycleConnector();
+    const connectors = createConnectorManager();
+    connectors.register("wc", fake.connector);
+    const manager = createSessionManager(connectors);
+    const inactive = await manager.connect("wc", "eip155:1");
+    const active = await manager.connect("wc", "eip155:137");
+    expect(manager.getActiveBundle()).toBe(active);
+
+    const expiryChanged = vi.fn();
+    manager.on("sessionExpiryChanged", expiryChanged);
+    fake.emit(inactive.walletSession.id, {
+      type: "expiry",
+      expiresAt: "2031-01-01T00:00:00.000Z",
+    });
+    await vi.waitFor(() => expect(expiryChanged).toHaveBeenCalledOnce());
+
+    const restored = createSessionManager(connectors);
+    (restored as unknown as { persistence: unknown }).persistence = (
+      manager as unknown as { persistence: unknown }
+    ).persistence;
+    expect(await restored.restoreFromPersistence()).toBe(true);
+    expect(restored.getActiveBundle()?.walletSession.id).toBe(
+      active.walletSession.id,
+    );
+  });
+});

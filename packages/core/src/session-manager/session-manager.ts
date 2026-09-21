@@ -123,7 +123,7 @@ function narrowNamespaces(
     const next = offered[key];
     if (!next) continue; // namespace withdrawn entirely
     const heldChains = new Set(held.chains);
-    const chains = next.chains.filter((c) => heldChains.has(c));
+    const chains = [...new Set(next.chains)].filter((c) => heldChains.has(c));
     for (const c of next.chains) if (!heldChains.has(c)) rejectedChains.push(c);
     if (chains.length === 0) continue;
     const chainSet = new Set(chains);
@@ -465,7 +465,7 @@ export class SessionManager extends SessionEventEmitter {
         bundle,
         expiresAt: change.expiresAt,
       });
-      await this.persistBundle(bundle);
+      if (this.activeBundleId === bundleId) await this.persistBundle(bundle);
       return;
     }
     const previousNamespaces = cloneNamespaces(bundle.walletSession.namespaces);
@@ -512,7 +512,14 @@ export class SessionManager extends SessionEventEmitter {
       namespaces: cloneNamespaces(namespaces),
       rejectedChains,
     });
-    if (this.bundles.get(bundleId) === bundle) await this.persistBundle(bundle);
+    // Persistence holds the active session only; an inactive bundle's change
+    // must not overwrite what a reload would restore.
+    if (
+      this.activeBundleId === bundleId &&
+      this.bundles.get(bundleId) === bundle
+    ) {
+      await this.persistBundle(bundle);
+    }
   }
 
   /** Tear a bundle down after the session ended without the app asking. */
@@ -730,7 +737,9 @@ export class SessionManager extends SessionEventEmitter {
     }
     this.bundles.set(bundleId, bundle);
     this.activeBundleId = bundleId;
-
+    // A restored session is as live as a fresh one: the wallet may revoke
+    // or narrow it after reload, and that must still reach the manager.
+    this.subscribeSessionChanges(bundleId, bundle);
     this.emit("sessionConnected", { bundle });
     return true;
   }
