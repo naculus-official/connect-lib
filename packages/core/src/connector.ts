@@ -73,6 +73,23 @@ export interface CallsStatus {
   capabilities?: Record<string, unknown>;
 }
 
+/** A wallet-initiated change to a live session (CAIP-25 lifecycle). */
+export type SessionChange =
+  | {
+      type: "scope";
+      /** The wallet's current view of every namespace it still grants. */
+      namespaces: Record<Namespace, SessionNamespace>;
+    }
+  | {
+      type: "expiry";
+      /** ISO 8601, or null when the wallet removed the expiry. */
+      expiresAt: string | null;
+    }
+  | {
+      type: "revoked";
+      reason: "wallet" | "expired";
+    };
+
 export interface UniversalConnector {
   id: string;
   name: string;
@@ -118,6 +135,22 @@ export interface UniversalConnector {
   onChainChanged?(
     session: UniversalWalletSession,
     handler: (chainId: string) => void,
+  ): () => void;
+  /**
+   * Observe wallet-initiated changes to the session itself (CAIP-25
+   * lifecycle): a narrowed or re-issued scope, a new expiry, or the wallet
+   * ending the session. Connectors whose scope cannot change without a
+   * reconnect (injected, embedded) simply do not implement this.
+   *
+   * The connector reports what the wallet said; it does not decide what the
+   * app accepts. `SessionManager` applies a narrowed scope immediately and
+   * never widens a session beyond what it already held.
+   *
+   * Returns an unsubscribe function.
+   */
+  onSessionChanged?(
+    session: UniversalWalletSession,
+    handler: (change: SessionChange) => void,
   ): () => void;
   signMessage?(
     session: UniversalWalletSession,

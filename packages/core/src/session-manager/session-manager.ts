@@ -8,7 +8,11 @@
  * @see SRS-009 §3-6
  */
 
-import type { UniversalConnector, UniversalWalletSession } from "../connector";
+import type {
+  SessionChange,
+  UniversalConnector,
+  UniversalWalletSession,
+} from "../connector";
 import type { ConnectorManager } from "../connector-manager";
 import type { FeeEstimationConfig, FeeValues } from "../fee-estimation";
 import { estimateFees } from "../fee-estimation";
@@ -87,9 +91,67 @@ const DEFAULT_EXPLORERS: Record<string, string> = {
 
 // ─── SessionManager ────────────────────────────────────────────────────
 
+function cloneNamespaces(
+  namespaces: Record<string, SessionNamespace>,
+): Record<string, SessionNamespace> {
+  const out: Record<string, SessionNamespace> = {};
+  for (const [key, ns] of Object.entries(namespaces)) {
+    out[key] = {
+      chains: [...ns.chains],
+      accounts: [...ns.accounts],
+      methods: [...ns.methods],
+      events: [...ns.events],
+      ...(ns.capabilities ? { capabilities: { ...ns.capabilities } } : {}),
+    };
+  }
+  return out;
+}
+
+/**
+ * Apply a wallet's new scope to what the app already holds. Fail-closed:
+ * anything the wallet dropped is dropped here too; anything the wallet added
+ * that the app never held is not accepted — a session cannot grow permissions
+ * because a wallet event said so. Accounts follow the kept chains.
+ */
+function narrowNamespaces(
+  current: Record<string, SessionNamespace>,
+  offered: Record<string, SessionNamespace>,
+): { namespaces: Record<string, SessionNamespace>; rejectedChains: string[] } {
+  const namespaces: Record<string, SessionNamespace> = {};
+  const rejectedChains: string[] = [];
+  for (const [key, held] of Object.entries(current)) {
+    const next = offered[key];
+    if (!next) continue; // namespace withdrawn entirely
+    const heldChains = new Set(held.chains);
+    const chains = next.chains.filter((c) => heldChains.has(c));
+    for (const c of next.chains) if (!heldChains.has(c)) rejectedChains.push(c);
+    if (chains.length === 0) continue;
+    const chainSet = new Set(chains);
+    const accounts = next.accounts.filter((account) => {
+      const parts = account.split(":");
+      return parts.length === 3 && chainSet.has(`${parts[0]}:${parts[1]}`);
+    });
+    const heldMethods = new Set(held.methods);
+    const heldEvents = new Set(held.events);
+    namespaces[key] = {
+      chains,
+      accounts,
+      methods: next.methods.filter((m) => heldMethods.has(m)),
+      events: next.events.filter((e) => heldEvents.has(e)),
+      ...(held.capabilities ? { capabilities: { ...held.capabilities } } : {}),
+    };
+  }
+  for (const key of Object.keys(offered)) {
+    if (!current[key]) rejectedChains.push(...offered[key].chains);
+  }
+  return { namespaces, rejectedChains };
+}
+
 export class SessionManager extends SessionEventEmitter {
   private bundles: Map<string, ActiveSessionBundle> = new Map();
   private activeBundleId: string | null = null;
+  /** Unsubscribe from a connector's onSessionChanged, keyed by bundle id. */
+  private sessionChangeCleanups: Map<string, () => void> = new Map();
   private userFeeOverrides: UserFeeOverrides = {};
   private config: Required<
     Pick<SessionManagerConfig, "autoRefreshFeeOnSwitch" | "maxActiveSessions">
@@ -158,10 +220,11 @@ export class SessionManager extends SessionEventEmitter {
       const oldest = Array.from(this.bundles.entries()).reduce((a, b) =>
         a[1].lastActiveAt < b[1].lastActiveAt ? a : b,
       );
-      this.bundles.delete(oldest[0]);
+      this.dropBundle(oldest[0]);
     }
     this.bundles.set(bundleId, bundle);
     this.activeBundleId = bundleId;
+    this.subscribeSessionChanges(bundleId, bundle);
     await this.persistBundle(bundle);
     this.emit("sessionConnected", { bundle });
     return bundle;
@@ -184,7 +247,7 @@ export class SessionManager extends SessionEventEmitter {
       const oldest = Array.from(this.bundles.entries()).reduce((a, b) =>
         a[1].lastActiveAt < b[1].lastActiveAt ? a : b,
       );
-      this.bundles.delete(oldest[0]);
+      this.dropBundle(oldest[0]);
     }
 
     const session = await this.connectorManager.connect(walletType, input);
@@ -314,13 +377,176 @@ export class SessionManager extends SessionEventEmitter {
     const bundleId = this.activeBundleId;
 
     if (bundleId) {
-      this.bundles.delete(bundleId);
+      this.dropBundle(bundleId);
     }
     this.activeBundleId = null;
 
     await this.persistence.clear();
 
     this.emit("sessionDisconnected", { connectorId, topic });
+  }
+
+  // ─── CAIP-25 lifecycle ───────────────────────────────────────────────
+
+  /** A session by id (or WalletConnect topic), whether or not it is active. */
+  getSession(sessionId: string): ActiveSessionBundle | null {
+    for (const bundle of this.bundles.values()) {
+      const session = bundle.walletSession;
+      if (session.id === sessionId || session.topic === sessionId) {
+        return bundle;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * End a session by id. Asks the connector to disconnect, then tears the
+   * bundle down the same way a wallet-initiated revocation would.
+   */
+  async revokeSession(sessionId: string): Promise<void> {
+    const bundle = this.getSession(sessionId);
+    if (!bundle) return;
+    try {
+      await this.resolveConnector(bundle.walletSession).disconnect(
+        bundle.walletSession,
+      );
+    } catch (error) {
+      logger.warn("session-manager", "Revoke disconnect error:", error);
+    }
+    await this.teardownRevoked(bundle, "app");
+  }
+
+  private subscribeSessionChanges(
+    bundleId: string,
+    bundle: ActiveSessionBundle,
+  ): void {
+    this.sessionChangeCleanups.get(bundleId)?.();
+    this.sessionChangeCleanups.delete(bundleId);
+    let connector: UniversalConnector;
+    try {
+      connector = this.resolveConnector(bundle.walletSession);
+    } catch {
+      return;
+    }
+    if (!connector.onSessionChanged) return;
+    const unsubscribe = connector.onSessionChanged(
+      bundle.walletSession,
+      (change) => {
+        // Stale guard: the bundle must still be the one this subscription
+        // was made for. A replaced or dropped session's events are ignored.
+        if (this.bundles.get(bundleId) !== bundle) return;
+        void this.applySessionChange(bundleId, bundle, change).catch(
+          (error) => {
+            logger.warn(
+              "session-manager",
+              "Session change not applied:",
+              error,
+            );
+          },
+        );
+      },
+    );
+    this.sessionChangeCleanups.set(bundleId, unsubscribe);
+  }
+
+  private async applySessionChange(
+    bundleId: string,
+    bundle: ActiveSessionBundle,
+    change: SessionChange,
+  ): Promise<void> {
+    if (change.type === "revoked") {
+      await this.teardownRevoked(bundle, change.reason);
+      return;
+    }
+    if (change.type === "expiry") {
+      bundle.walletSession.expiry = change.expiresAt ?? undefined;
+      bundle.walletSession.updatedAt = new Date().toISOString();
+      this.emit("sessionExpiryChanged", {
+        bundle,
+        expiresAt: change.expiresAt,
+      });
+      await this.persistBundle(bundle);
+      return;
+    }
+    const previousNamespaces = cloneNamespaces(bundle.walletSession.namespaces);
+    const { namespaces, rejectedChains } = narrowNamespaces(
+      previousNamespaces,
+      change.namespaces,
+    );
+    const keptChains = new Set(
+      Object.values(namespaces).flatMap((ns) => ns.chains),
+    );
+    if (keptChains.size === 0) {
+      // The wallet left nothing the app held. That is a revocation.
+      await this.teardownRevoked(bundle, "scope_emptied");
+      return;
+    }
+    bundle.walletSession.namespaces = namespaces;
+    bundle.walletSession.updatedAt = new Date().toISOString();
+    for (const chainId of Array.from(bundle.chainSessions.keys())) {
+      if (keptChains.has(chainId)) continue;
+      bundle.chainSessions.delete(chainId);
+      this.emit("chainSessionRemoved", { bundle, chainId });
+    }
+    if (!keptChains.has(bundle.activeChainId)) {
+      const previousChainId = bundle.activeChainId;
+      const next =
+        Array.from(bundle.chainSessions.keys())[0] ?? [...keptChains][0];
+      if (next === undefined) return;
+      if (!bundle.chainSessions.has(next)) {
+        bundle.chainSessions.set(
+          next,
+          this.createChainSession(
+            next,
+            bundle.walletSession.connectorId ?? bundle.walletSession.walletType,
+          ),
+        );
+      }
+      bundle.activeChainId = next;
+      this.emit("chainChanged", { bundle, previousChainId, newChainId: next });
+    }
+    bundle.lastActiveAt = new Date().toISOString();
+    this.emit("sessionScopeChanged", {
+      bundle,
+      previousNamespaces,
+      namespaces: cloneNamespaces(namespaces),
+      rejectedChains,
+    });
+    if (this.bundles.get(bundleId) === bundle) await this.persistBundle(bundle);
+  }
+
+  /** Tear a bundle down after the session ended without the app asking. */
+  private async teardownRevoked(
+    bundle: ActiveSessionBundle,
+    reason: "wallet" | "expired" | "app" | "scope_emptied",
+  ): Promise<void> {
+    const bundleId = this.getBundleId(bundle.walletSession);
+    if (this.bundles.get(bundleId) !== bundle) return;
+    const wasActive = this.activeBundleId === bundleId;
+    this.dropBundle(bundleId);
+    if (wasActive) {
+      this.activeBundleId = null;
+      await this.persistence.clear();
+    }
+    const connectorId =
+      bundle.walletSession.connectorId ?? bundle.walletSession.walletType;
+    const topic = bundle.walletSession.topic;
+    this.emit("sessionRevoked", {
+      connectorId,
+      topic,
+      sessionId: bundle.walletSession.id,
+      reason,
+    });
+    // Existing consumers listen for sessionDisconnected; a revoked session
+    // is a disconnected one from their point of view.
+    if (wasActive) this.emit("sessionDisconnected", { connectorId, topic });
+  }
+
+  /** Remove a bundle and its connector subscription. */
+  private dropBundle(bundleId: string): void {
+    this.sessionChangeCleanups.get(bundleId)?.();
+    this.sessionChangeCleanups.delete(bundleId);
+    this.bundles.delete(bundleId);
   }
 
   /**

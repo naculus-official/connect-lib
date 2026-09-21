@@ -8,6 +8,7 @@
  */
 
 import type { FeeValues } from "../fee-estimation";
+import type { SessionNamespace } from "../session";
 import type { ActiveSessionBundle, ChainSession } from "./types";
 
 // ─── Event Types ───────────────────────────────────────────────────────
@@ -19,7 +20,10 @@ export type SessionEvent =
   | "chainSessionAdded"
   | "chainSessionRemoved"
   | "feesUpdated"
-  | "accountsChanged";
+  | "accountsChanged"
+  | "sessionScopeChanged"
+  | "sessionExpiryChanged"
+  | "sessionRevoked";
 
 export interface SessionEventPayloads {
   sessionConnected: { bundle: ActiveSessionBundle };
@@ -44,6 +48,26 @@ export interface SessionEventPayloads {
   accountsChanged: {
     bundle: ActiveSessionBundle;
     accounts: string[];
+  };
+  /** The wallet narrowed or re-issued the session's scope (CAIP-25). */
+  sessionScopeChanged: {
+    bundle: ActiveSessionBundle;
+    previousNamespaces: Record<string, SessionNamespace>;
+    namespaces: Record<string, SessionNamespace>;
+    /** Chains the wallet offered that the app had never held; not accepted. */
+    rejectedChains: string[];
+  };
+  /** The wallet changed the session's expiry. */
+  sessionExpiryChanged: {
+    bundle: ActiveSessionBundle;
+    expiresAt: string | null;
+  };
+  /** The session ended for a reason other than the app calling disconnect(). */
+  sessionRevoked: {
+    connectorId: string;
+    topic?: string;
+    sessionId: string;
+    reason: "wallet" | "expired" | "app" | "scope_emptied";
   };
 }
 
