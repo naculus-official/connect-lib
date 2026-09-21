@@ -138,3 +138,19 @@ describe("isValidAddress", () => {
     expect(isValidAddress("", "eip155")).toBe(false);
   });
 });
+
+describe("isBurnAddress — unified with appkit-core destination semantics", () => {
+  it("covers sinks, vanity prefixes, and dead anywhere; not an ordinary address", () => {
+    for (const burn of [
+      "0x0000000000000000000000000000000000000001",
+      "0x000000000000000000000000000000000000dEaD",
+      "0xdeaf000000000000000000000000000000000000",
+      "0x00dead000000000000000000000000000000abcd",
+    ]) {
+      expect(isBurnAddress(burn)).toBe(true);
+    }
+    expect(isBurnAddress("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")).toBe(
+      false,
+    );
+  });
+});

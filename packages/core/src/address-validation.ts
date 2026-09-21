@@ -3,7 +3,14 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 
 /** Address validation helpers used at transfer/route boundaries. */
 
-const BURN_PREFIXES = ["dead", "deaf", "deed", "deec", "deed"];
+/** Vanity prefixes conventionally used for addresses that provably cannot spend. */
+const BURN_PREFIXES = ["dead", "deaf", "deed", "deec"];
+/** Well-known sinks that carry no recognizable prefix. */
+const BURN_SINKS = new Set([
+  "0000000000000000000000000000000000000000",
+  "0000000000000000000000000000000000000001",
+  "000000000000000000000000000000000000dead",
+]);
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
 const EVM_ADDR_RE = /^0x[a-fA-F0-9]{40}$/;
 const XRPL_BASE58 =
@@ -112,12 +119,19 @@ export function isZeroAddress(address: string): boolean {
   return address.toLowerCase() === ZERO_ADDR;
 }
 
-/** True if the address contains known burn-indicating hex prefixes */
+/**
+ * True for addresses conventionally used to destroy funds: the zero and
+ * 0x…01 sinks, 0x…dead, the dead/deaf/deed/deec vanity prefixes, and any
+ * address containing "dead". The single definition shared with appkit-core's
+ * destination validation; a heuristic, not proof that funds are lost.
+ */
 export function isBurnAddress(address: string): boolean {
   const clean = address.toLowerCase().replace(/^0x/, "");
   return (
+    BURN_SINKS.has(clean) ||
     BURN_PREFIXES.some((p) => clean.startsWith(p)) ||
-    clean === "0000000000000000000000000000000000000000"
+    // Anywhere, not only as a prefix: 0x00dead…, 0x…dead00 are burns too.
+    clean.includes("dead")
   );
 }
 
