@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { encryptPrivateKey, decryptPrivateKey, SessionKeyStorage } from "../storage";
+import {
+  encryptPrivateKey,
+  decryptPrivateKey,
+  SessionKeyStorage,
+} from "../storage";
 import { MemoryStorageAdapter } from "../../storage";
 
 // Use minimal PBKDF2 iterations for fast tests (default is 600_000)
@@ -37,7 +41,14 @@ describe("PBKDF2 work factor floor", () => {
 
   it("accepts a weak factor only behind the explicit unsafe opt-in", () => {
     expect(() =>
-      encryptPrivateKey(privateKey, password, undefined, 10, undefined, WEAK_KDF),
+      encryptPrivateKey(
+        privateKey,
+        password,
+        undefined,
+        10,
+        undefined,
+        WEAK_KDF,
+      ),
     ).not.toThrow();
   });
 
@@ -56,10 +67,18 @@ describe("PBKDF2 work factor floor", () => {
 
 describe("encryptPrivateKey / decryptPrivateKey", () => {
   const password = "test-encryption-password-123";
-  const privateKey = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as const;
+  const privateKey =
+    "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as const;
 
   it("should encrypt and decrypt a private key correctly", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
     expect(encrypted.encryptedPrivateKey).toBeTruthy();
     expect(encrypted.iv).toBeTruthy();
     expect(encrypted.salt).toBeTruthy();
@@ -70,41 +89,106 @@ describe("encryptPrivateKey / decryptPrivateKey", () => {
   });
 
   it("should produce different ciphertexts for the same key (different IV)", () => {
-    const e1 = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
-    const e2 = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
+    const e1 = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
+    const e2 = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
     expect(e1.iv).not.toBe(e2.iv);
     expect(e1.encryptedPrivateKey).not.toBe(e2.encryptedPrivateKey);
   });
 
   it("should throw on wrong password", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
-    expect(() => decryptPrivateKey(encrypted, "wrong-password", TEST_ITERATIONS)).toThrow();
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
+    expect(() =>
+      decryptPrivateKey(encrypted, "wrong-password", TEST_ITERATIONS),
+    ).toThrow();
   });
 
   it("should handle different key sizes", () => {
     const shortKey = "0xdeadbeef" as `0x${string}`;
-    const encrypted = encryptPrivateKey(shortKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
+    const encrypted = encryptPrivateKey(
+      shortKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
     const decrypted = decryptPrivateKey(encrypted, password, TEST_ITERATIONS);
     expect(decrypted).toBe(shortKey);
   });
 
   it("should accept a fixed salt for deterministic encryption", () => {
     const salt = new Uint8Array(16).fill(42);
-    const e1 = encryptPrivateKey(privateKey, password, salt, TEST_ITERATIONS, undefined, WEAK_KDF);
-    const e2 = encryptPrivateKey(privateKey, password, salt, TEST_ITERATIONS, undefined, WEAK_KDF);
+    const e1 = encryptPrivateKey(
+      privateKey,
+      password,
+      salt,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
+    const e2 = encryptPrivateKey(
+      privateKey,
+      password,
+      salt,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
     expect(e1.salt).toBe(e2.salt);
   });
 
   it("should fail when salt is tampered with", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
-    const tampered = { ...encrypted, salt: "deadbeef" + encrypted.salt.slice(8) };
-    expect(() => decryptPrivateKey(tampered, password, TEST_ITERATIONS)).toThrow();
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
+    const tampered = {
+      ...encrypted,
+      salt: "deadbeef" + encrypted.salt.slice(8),
+    };
+    expect(() =>
+      decryptPrivateKey(tampered, password, TEST_ITERATIONS),
+    ).toThrow();
   });
 
   it("should fail when iv is tampered with", () => {
-    const encrypted = encryptPrivateKey(privateKey, password, undefined, TEST_ITERATIONS, undefined, WEAK_KDF);
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
     const tampered = { ...encrypted, iv: "deadbeef" + encrypted.iv.slice(8) };
-    expect(() => decryptPrivateKey(tampered, password, TEST_ITERATIONS)).toThrow();
+    expect(() =>
+      decryptPrivateKey(tampered, password, TEST_ITERATIONS),
+    ).toThrow();
   });
 });
 
@@ -154,7 +238,9 @@ describe("SessionKeyStorage", () => {
 
   it("should throw on updateStatus for non-existent key", async () => {
     const storage = new SessionKeyStorage(new MemoryStorageAdapter());
-    await expect(storage.updateStatus("nonexistent", "revoked")).rejects.toThrow();
+    await expect(
+      storage.updateStatus("nonexistent", "revoked"),
+    ).rejects.toThrow();
   });
 
   it("should increment usage count", async () => {
@@ -204,7 +290,10 @@ describe("SessionKeyStorage", () => {
 
 // ─── Test Helpers ──────────────────────────────────────────────────────
 
-function createTestKey(id: string, status: "active" | "revoked" | "expired" = "active") {
+function createTestKey(
+  id: string,
+  status: "active" | "revoked" | "expired" = "active",
+) {
   const now = Date.now();
   return {
     id,
@@ -221,7 +310,8 @@ function createTestKey(id: string, status: "active" | "revoked" | "expired" = "a
       maxTotalValue: BigInt("100000000000000000"),
     },
     authorization: {
-      signerAddress: "0x742D35CC6634C0532925a3B844Bc9E7595F2bD18" as `0x${string}`,
+      signerAddress:
+        "0x742D35CC6634C0532925a3B844Bc9E7595F2bD18" as `0x${string}`,
       type: "offchain" as const,
     },
     status,
@@ -230,3 +320,20 @@ function createTestKey(id: string, status: "active" | "revoked" | "expired" = "a
     useCount: 0,
   };
 }
+
+describe("kdfIterations persisted per record", () => {
+  it("decrypts with the record's own work factor after the configured one changes", async () => {
+    const { decryptPrivateKey, encryptPrivateKey } = await import("../storage");
+    const pk = `0x${"11".repeat(32)}` as const;
+    const sealed = encryptPrivateKey(pk, "pw", undefined, 1_000, undefined, {
+      unsafeAllowWeakKdf: true,
+    });
+    expect(sealed.kdfIterations).toBe(1_000);
+    // Caller now configured 2_000: the record still opens.
+    expect(decryptPrivateKey(sealed, "pw", 2_000)).toBe(pk);
+    // A legacy record without the field uses the caller's value.
+    const { kdfIterations: _omit, ...legacy } = sealed;
+    expect(decryptPrivateKey(legacy, "pw", 1_000)).toBe(pk);
+    expect(() => decryptPrivateKey(legacy, "pw", 2_000)).toThrow();
+  });
+});

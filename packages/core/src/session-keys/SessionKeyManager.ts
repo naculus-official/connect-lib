@@ -308,6 +308,13 @@ export class SessionKeyManager {
   /**
    * Revoke a session key by ID.
    * Sets status to "revoked" and invalidates the cached bundle.
+   *
+   * Revocation is device-local: it stops this manager (and any other tab
+   * sharing its storage) from signing with the key. A `SessionKeyBundle`
+   * already handed out by `getSessionBundle()` holds the raw private key and
+   * cannot be recalled; nor can anything the host did with it. For a key that
+   * must be revocable after export, use an on-chain (EIP-7702 / AA module)
+   * policy instead of an off-chain one.
    */
   async revokeSession(sessionId: string): Promise<void> {
     await this.storage.withKeyLock(sessionId, async () => {
@@ -325,6 +332,11 @@ export class SessionKeyManager {
   /**
    * Get a decrypted session key bundle for transaction signing.
    * Validates expiry and status before returning.
+   *
+   * The bundle contains the raw private key. Once returned, `revokeSession()`
+   * can no longer stop its use — only this manager's own signing paths honour
+   * revocation. Prefer `signWithSessionKey()` /
+   * `signWithVerifiedOffchainAuthorization()`, which never release the key.
    *
    * @param sessionId - The session key ID
    * @returns Decrypted SessionKeyBundle or throws

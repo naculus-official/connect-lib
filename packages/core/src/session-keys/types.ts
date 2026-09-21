@@ -77,6 +77,12 @@ export interface EncryptedKeyPair {
   salt: string; // KDF salt (hex)
   /** Storage cipher; omitted only for legacy pre-0.2 records. */
   algorithm?: "aes-256-gcm" | "legacy-ctr-hmac";
+  /**
+   * PBKDF2 work factor the key was sealed with. Persisted so a record stays
+   * decryptable after the manager's configured count changes; omitted only
+   * for records written before 0.2.7, which used the configured count.
+   */
+  kdfIterations?: number;
 }
 
 // ─── Authorization ─────────────────────────────────────────────────────

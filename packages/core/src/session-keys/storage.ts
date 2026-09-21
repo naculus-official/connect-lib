@@ -181,6 +181,7 @@ export function encryptPrivateKey(
     iv: bytesToHex(iv),
     salt: bytesToHex(actualSalt),
     algorithm: "aes-256-gcm",
+    kdfIterations: iterations ?? DEFAULT_PBKDF2_ITERATIONS,
   };
 }
 
@@ -189,7 +190,8 @@ export function encryptPrivateKey(
  *
  * @param encrypted - EncryptedKeyPair from storage
  * @param password - The same password used during encryption
- * @param iterations - Must match the value used during encryption
+ * @param iterations - Fallback work factor for records that predate
+ *   `kdfIterations`; ignored when the record carries its own
  * @returns The raw private key as a 0x-prefixed hex string
  */
 export function decryptPrivateKey(
@@ -200,16 +202,23 @@ export function decryptPrivateKey(
   const combined = hexToBytes(encrypted.encryptedPrivateKey);
   const iv = hexToBytes(encrypted.iv);
   const salt = hexToBytes(encrypted.salt);
-  const key = deriveEncryptionKey(password, salt, iterations);
+  // The record's own work factor wins: it is what the key was sealed with.
+  // Records from before it was persisted fall back to the caller's value.
+  const key = deriveEncryptionKey(
+    password,
+    salt,
+    encrypted.kdfIterations ?? iterations,
+  );
 
-  const plaintext = encrypted.algorithm === "aes-256-gcm"
-    ? gcm(key, iv, hexToBytes(encrypted.publicKey.slice(2))).decrypt(combined)
-    : legacyCtrHmacDecrypt(
-        combined.slice(16),
-        key,
-        iv,
-        combined.slice(0, 16),
-      );
+  const plaintext =
+    encrypted.algorithm === "aes-256-gcm"
+      ? gcm(key, iv, hexToBytes(encrypted.publicKey.slice(2))).decrypt(combined)
+      : legacyCtrHmacDecrypt(
+          combined.slice(16),
+          key,
+          iv,
+          combined.slice(0, 16),
+        );
 
   return `0x${bytesToHex(plaintext)}`;
 }
