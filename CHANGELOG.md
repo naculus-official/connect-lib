@@ -7,6 +7,22 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.2.6 — 2026-09-21
+
+### Added
+
+- **CAIP-25 session lifecycle** (`@naculus/connect-core`) — `UniversalConnector.onSessionChanged?` lets a connector report a wallet-initiated change to a live session: a narrowed or re-issued scope, a new expiry, or the wallet ending it. `SessionManager` applies each change fail-closed and emits `sessionScopeChanged`, `sessionExpiryChanged` and `sessionRevoked`: a scope the wallet narrowed is applied immediately (dropped chains lose their chain sessions and the active chain moves), and a scope the wallet widened is never accepted beyond what the app already held (the excess is reported in `rejectedChains`). A revoked or expired session is torn down without calling the connector's `disconnect` and clears persistence when it was the active one. `getSession(idOrTopic)` and `revokeSession(id)` address a session directly. Design: `docs/design/caip25-session.md`.
+- **Connector-neutral scope request** (`@naculus/connect-core`, `@naculus/connector-walletconnect`, `@naculus/connector-evm-injected`) — `connect({ scope: { required, optional } })` carries a CAIP-25 scope request. WalletConnect proposes it in place of its defaults; the injected connector refuses a wallet whose current chain is outside `required.eip155.chains` instead of returning a session on the wrong chain.
+- **WalletConnect produces session changes** (`@naculus/connector-walletconnect`) — `session_update`, `session_extend`, `session_delete` and `session_expire` from the relay are published through `onSessionChanged`, filtered to the current topic.
+
+### Changed
+
+- **Sessions end when the wallet says so, on every connector** (`@naculus/connect-core`) — previously only WalletConnect's private expiry handler reacted to a wallet ending a session. Consumers listening for `sessionDisconnected` receive it for wallet-initiated revocation as before; `sessionRevoked` adds the reason.
+
+### Package impact
+
+`@naculus/connect-core`, `@naculus/connector-walletconnect` and `@naculus/connector-evm-injected` carry functional change. The other 11 packages are version-bump-only releases required by the lockstep release model.
+
 ## 0.2.5 — 2026-09-17
 
 ### Changed
