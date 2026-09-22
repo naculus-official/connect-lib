@@ -22,6 +22,13 @@ import { isValidAddress, isZeroAddress } from "../address-validation";
 import type { StorageAdapter } from "../storage";
 import { createSessionKeyError } from "./errors";
 import {
+  type SessionKeyTypedDataRequest,
+  sessionKeyAddress,
+  typedDataAsTransaction,
+  typedDataDigest,
+  validateTypedDataRequest,
+} from "./typed-data";
+import {
   decryptPrivateKey,
   encryptPrivateKey,
   SessionKeyStorage,
@@ -49,6 +56,8 @@ type TokenSpend = {
   tokenAddress: `0x${string}`;
   amount: bigint;
   allowance: bigint;
+  /** Decoded transfer destination, for the recipient allowlist. */
+  recipient: `0x${string}`;
 };
 
 type TokenSpendDecodeResult =
@@ -123,10 +132,13 @@ function decodeScopedTokenSpend(
   const selector = data.slice(0, 10).toLowerCase();
   let amountStart: number;
   let expectedLength: number;
+  let recipientStart: number;
   if (selector === ERC20_TRANSFER_SELECTOR) {
+    recipientStart = 10;
     amountStart = 74;
     expectedLength = 138;
   } else if (selector === ERC20_TRANSFER_FROM_SELECTOR) {
+    recipientStart = 74;
     amountStart = 138;
     expectedLength = 202;
   } else {
@@ -146,6 +158,7 @@ function decodeScopedTokenSpend(
       tokenAddress,
       amount: BigInt(`0x${data.slice(amountStart, amountStart + 64)}`),
       allowance,
+      recipient: `0x${data.slice(recipientStart + 24, recipientStart + 64)}`,
     },
   };
 }
@@ -443,6 +456,105 @@ export class SessionKeyManager {
   }
 
   /**
+   * Sign EIP-712 typed data with a session key. Only EIP-3009
+   * `TransferWithAuthorization` is understood; the manager computes the
+   * digest from the request it checked, so nothing else can be signed under
+   * this name. Policy is applied to the equivalent `transfer(to, value)` on
+   * the token, plus: `from` must be the session key's own address,
+   * `validBefore` must fall inside the session's lifetime.
+   */
+  async signTypedDataWithSessionKey(
+    sessionId: string,
+    request: SessionKeyTypedDataRequest,
+  ): Promise<`0x${string}`> {
+    return this.storage.withKeyLock(sessionId, () =>
+      this.withSessionLock(sessionId, async () => {
+        const stored = await this.readStoredSession(sessionId);
+        if (!stored) {
+          throw createSessionKeyError("session_key_not_found", sessionId);
+        }
+        const tx = this.typedDataToScopedTransaction(stored, request);
+        return this.signStoredSessionKey(stored, typedDataDigest(request), tx);
+      }),
+    );
+  }
+
+  /** As signTypedDataWithSessionKey, revalidating the off-chain policy first. */
+  async signTypedDataWithVerifiedOffchainAuthorization(
+    sessionId: string,
+    buildExpectedMessage: (policy: SessionKeyInfo) => string,
+    verify: OffchainAuthorizationVerifier,
+    request: SessionKeyTypedDataRequest,
+  ): Promise<`0x${string}`> {
+    return this.storage.withKeyLock(sessionId, () =>
+      this.withSessionLock(sessionId, async () => {
+        const stored = await this.readStoredSession(sessionId);
+        if (!stored) {
+          throw createSessionKeyError("session_key_not_found", sessionId);
+        }
+        this.validateSessionStatus(stored);
+        const expectedMessage = buildExpectedMessage(
+          this.toSessionKeyInfo(stored),
+        );
+        if (
+          !(await this.verifyStoredOffchainAuthorization(
+            stored,
+            expectedMessage,
+            verify,
+          ))
+        ) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "Off-chain authorization no longer matches the signed policy",
+          );
+        }
+        const tx = this.typedDataToScopedTransaction(stored, request);
+        return this.signStoredSessionKey(stored, typedDataDigest(request), tx);
+      }),
+    );
+  }
+
+  /** Typed-data-specific refusals, then the transaction the scope check sees. */
+  private typedDataToScopedTransaction(
+    stored: StoredSessionKey,
+    request: SessionKeyTypedDataRequest,
+  ): SessionKeyTransaction {
+    const structural = validateTypedDataRequest(request);
+    if (structural) {
+      throw createSessionKeyError("session_key_scope_exceeded", structural);
+    }
+    const selfAddress = sessionKeyAddress(stored.keyPair.publicKey);
+    if (request.message.from.toLowerCase() !== selfAddress.toLowerCase()) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "TransferWithAuthorization.from must be the session key's own address",
+      );
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    const validBefore = Number(request.message.validBefore);
+    const validAfter = Number(request.message.validAfter);
+    if (validBefore <= nowSec) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "TransferWithAuthorization.validBefore is already in the past",
+      );
+    }
+    if (validBefore > stored.scope.expiry) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "TransferWithAuthorization.validBefore outlives the session key",
+      );
+    }
+    if (validAfter >= validBefore) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "TransferWithAuthorization validity window is empty",
+      );
+    }
+    return typedDataAsTransaction(request);
+  }
+
+  /**
    * Check whether a session key's scope allows a given transaction.
    * Reads the authoritative usage counters before returning.
    */
@@ -710,6 +822,7 @@ export class SessionKeyManager {
       allowedMethods: scope?.allowedMethods ?? undefined,
       tokenAllowances: scope?.tokenAllowances ?? undefined,
       allowedChainIds: scope?.allowedChainIds ?? undefined,
+      allowedRecipients: scope?.allowedRecipients ?? undefined,
       mode: scope?.mode ?? "offchain",
     };
   }
@@ -773,6 +886,17 @@ export class SessionKeyManager {
       throw createSessionKeyError(
         "session_key_invalid_input",
         "allowedContracts must contain non-zero EVM addresses",
+      );
+    }
+    if (
+      scope.allowedRecipients?.some(
+        (address) =>
+          !isValidAddress(address, "eip155") || isZeroAddress(address),
+      )
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "allowedRecipients must contain non-zero EVM addresses",
       );
     }
     if (
@@ -957,6 +1081,30 @@ export class SessionKeyManager {
         return {
           valid: false,
           reason: `Cumulative token spend ${spent + amount} exceeds allowance ${allowance} for ${tokenAddress}`,
+        };
+      }
+    }
+    if (scope.allowedRecipients && scope.allowedRecipients.length > 0) {
+      // The recipient is knowable for exactly two shapes; anything else is
+      // refused rather than guessed.
+      const hasCalldata = Boolean(tx.data && tx.data !== "0x");
+      const recipient = tokenSpendResult.spend
+        ? tokenSpendResult.spend.recipient
+        : hasCalldata
+          ? undefined
+          : tx.to;
+      if (!recipient) {
+        return {
+          valid: false,
+          reason:
+            "Recipient allowlist is set but this call has no recognizable recipient",
+        };
+      }
+      const lower = recipient.toLowerCase();
+      if (!scope.allowedRecipients.some((r) => r.toLowerCase() === lower)) {
+        return {
+          valid: false,
+          reason: `Recipient ${recipient} not in allowed list`,
         };
       }
     }

@@ -31,3 +31,9 @@ export type {
 } from "./types";
 
 export { DEFAULT_SESSION_KEY_CONFIG } from "./types";
+export {
+  sessionKeyAddress,
+  typedDataDigest,
+  validateTypedDataRequest,
+} from "./typed-data";
+export type { SessionKeyTypedDataRequest } from "./typed-data";

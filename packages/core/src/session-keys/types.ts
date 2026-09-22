@@ -43,6 +43,15 @@ export interface SessionKeyScope {
   /** Per-token allowances: token address → max amount in token base units */
   tokenAllowances?: Record<`0x${string}`, bigint>;
 
+  /**
+   * Allowed payees (empty = any). Enforced on the *recipient* of a transfer:
+   * `to` of a native transfer, the decoded `to` of an ERC-20
+   * `transfer`/`transferFrom` on an allowance-scoped token, or the `to` of a
+   * `TransferWithAuthorization`. Any other calldata has no recognizable
+   * recipient and is refused while this is set.
+   */
+  allowedRecipients?: `0x${string}`[];
+
   /** Chain IDs this key is valid for (empty = any chain) */
   allowedChainIds?: number[];
 

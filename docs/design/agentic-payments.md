@@ -1,6 +1,6 @@
 # Agentic payments (x402 / MPP) on the session-key policy engine
 
-Status: design, step 1 of STATE.md thread 14. No code change.
+Status: steps 1–2 done (2026-09-22): typed-data awareness and `allowedRecipients` are in core session-keys. Step 3 (`payments-x402` package) pending wire-shape verification.
 Date: 2026-09-21.
 
 Protocol details below are from memory of the public specs as of mid-2026
