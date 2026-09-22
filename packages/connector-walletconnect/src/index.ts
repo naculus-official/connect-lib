@@ -1478,20 +1478,19 @@ export class WalletConnectConnector implements UniversalConnector {
         this.notifySessionChanged({ type: "revoked", reason: "expired" });
       }
     });
-    client.on(
-      "session_extend",
-      (event: { topic: string; params?: { expiry?: unknown } }) => {
-        if (event.topic !== this.lastSession?.topic) return;
-        const expiry = event.params?.expiry;
-        // WalletConnect expiry is Unix seconds.
-        const expiresAt =
-          typeof expiry === "number" && Number.isFinite(expiry)
-            ? new Date(expiry * 1000).toISOString()
-            : null;
-        if (this.lastSession) this.lastSession.expiry = expiresAt ?? undefined;
-        this.notifySessionChanged({ type: "expiry", expiresAt });
-      },
-    );
+    client.on("session_extend", (event: { topic: string }) => {
+      // session_extend carries no params (SignClientTypes.EventArguments);
+      // the new expiry is on the stored session, in Unix seconds.
+      if (event.topic !== this.lastSession?.topic) return;
+      const expiry = client.session.get(event.topic)?.expiry;
+      const expiresAt =
+        typeof expiry === "number" && Number.isFinite(expiry)
+          ? new Date(expiry * 1000).toISOString()
+          : null;
+      if (expiresAt === null) return; // nothing readable: do not clear ours
+      if (this.lastSession) this.lastSession.expiry = expiresAt;
+      this.notifySessionChanged({ type: "expiry", expiresAt });
+    });
 
     // A wallet reports an in-wallet account switch either as a session event
     // or as a namespace update, depending on the implementation. Neither was

@@ -1,4 +1,5 @@
 import type { SessionChange } from "@naculus/connect-core";
+import type { SignClientTypes } from "@walletconnect/types";
 import { createEmptySession } from "@naculus/connect-core";
 import { describe, expect, it, vi } from "vitest";
 import { WalletConnectConnector } from "./index";
@@ -34,6 +35,7 @@ function harness() {
       get: vi.fn(() => ({
         topic: TOPIC,
         namespaces: wcNamespaces,
+        expiry: 1_900_000_000,
         peer: { metadata: { name: "Mock" } },
       })),
       getAll: vi.fn(() => []),
@@ -47,7 +49,12 @@ function harness() {
     metadata: { name: "t", description: "t", url: "https://t", icons: [] },
     client: client as never,
   });
-  const fire = (name: string, event: unknown) => listeners.get(name)?.(event);
+  // Typed against WalletConnect's own event arguments so a payload shape the
+  // relay does not send cannot be asserted here.
+  const fire = <E extends SignClientTypes.Event>(
+    name: E,
+    event: SignClientTypes.EventArguments[E],
+  ) => listeners.get(name)?.(event);
   return { connector, fire };
 }
 
@@ -71,18 +78,24 @@ describe("WalletConnect onSessionChanged", () => {
 
     // Another topic: ignored.
     fire("session_update", {
+      id: 1,
       topic: "other",
       params: { namespaces: wcNamespaces },
     });
     expect(changes).toHaveLength(0);
 
-    // Scope update dropping a chain; methods omitted → held ones carried.
+    // Scope update dropping a chain. WalletConnect always sends methods and
+    // events (BaseNamespace); chains may be absent and are derived from the
+    // accounts.
     fire("session_update", {
+      id: 2,
       topic: TOPIC,
       params: {
         namespaces: {
           eip155: {
             accounts: ["eip155:1:0x1234567890123456789012345678901234567890"],
+            methods: [...REQUIRED_EVM_METHODS],
+            events: [...REQUIRED_EVM_EVENTS],
           },
         },
       },
@@ -99,21 +112,21 @@ describe("WalletConnect onSessionChanged", () => {
       },
     });
 
-    fire("session_extend", { topic: TOPIC, params: { expiry: 1_900_000_000 } });
+    fire("session_extend", { id: 1, topic: TOPIC });
     expect(changes[1]).toEqual({
       type: "expiry",
       expiresAt: new Date(1_900_000_000 * 1000).toISOString(),
     });
 
     fire("session_expire", { topic: TOPIC });
-    fire("session_delete", { topic: TOPIC });
+    fire("session_delete", { id: 3, topic: TOPIC });
     expect(changes.slice(2)).toEqual([
       { type: "revoked", reason: "expired" },
       { type: "revoked", reason: "wallet" },
     ]);
 
     off?.();
-    fire("session_delete", { topic: TOPIC });
+    fire("session_delete", { id: 4, topic: TOPIC });
     expect(changes).toHaveLength(4);
   });
 });
