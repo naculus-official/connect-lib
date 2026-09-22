@@ -311,87 +311,32 @@ describe("WalletConnectConnector Integration Tests", () => {
       ).rejects.toThrow("WalletConnect session missing topic.");
     });
 
-    it("should fall back to eth_sign when personal_sign is not authorized", async () => {
+    it("does not fall back to eth_sign when personal_sign is not authorized", async () => {
       const mockClient = createMockSignClient();
-      // Track calls and simulate: first personal_sign fails with "not authorized",
-      // then eth_sign succeeds
-      let callCount = 0;
-      mockClient.request.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          // personal_sign fails — return a rejected promise so makeRequest's catch sees it
-          return Promise.reject(
-            new Error(
-              "The requested method and/or account has not been authorized by the user.",
-            ),
-          );
-        }
-        // eth_sign succeeds
-        return Promise.resolve("0xfallback-signature");
-      });
-
+      // eth_sign signs an arbitrary digest; a wallet that refuses
+      // personal_sign gets a signature_rejected error, not a blind-sign prompt.
+      mockClient.request.mockRejectedValue(
+        new Error(
+          "The requested method and/or account has not been authorized by the user.",
+        ),
+      );
       const connector = new WalletConnectConnector({
         projectId: TEST_PROJECT_ID,
         metadata: TEST_METADATA,
         client: mockClient as any,
       });
-
       const session = createMockSession();
-      const signature = await connector.signMessage(session, {
-        message: "Hello, World!",
-        address: "0x1234567890123456789012345678901234567890",
-      });
-
-      // Should return the fallback signature from eth_sign
-      expect(signature).toBe("0xfallback-signature");
-
-      // Should have tried personal_sign first, then eth_sign
-      const calls = mockClient.request.mock.calls;
-      expect(calls[0][0].request.method).toBe("personal_sign");
-      expect(calls[1][0].request.method).toBe("eth_sign");
-    });
-
-    it("should propagate error when both personal_sign and eth_sign are not authorized", async () => {
-      const mockClient = createMockSignClient();
-      mockClient.request.mockImplementation(() => {
-        return Promise.reject(
-          new Error(
-            "The requested method and/or account has not been authorized by the user.",
-          ),
-        );
-      });
-
-      const connector = new WalletConnectConnector({
-        projectId: TEST_PROJECT_ID,
-        metadata: TEST_METADATA,
-        client: mockClient as any,
-      });
-
-      const session = createMockSession();
-
-      let thrown: unknown;
-      try {
-        await connector.signMessage(session, {
-          message: "Hello",
+      await expect(
+        connector.signMessage(session, {
+          message: "Hello, World!",
           address: "0x1234567890123456789012345678901234567890",
-        });
-      } catch (e) {
-        thrown = e;
-      }
-
-      expect(thrown).toBeDefined();
-      expect(thrown).toBeInstanceOf(WalletError);
-      const walletErr = thrown as WalletError;
-      expect(walletErr.message).toContain("not been authorized");
-
-      // Both methods should have been attempted
-      const calls = mockClient.request.mock.calls;
-      expect(calls[0][0].request.method).toBe("personal_sign");
-      expect(calls[1][0].request.method).toBe("eth_sign");
+        }),
+      ).rejects.toMatchObject({ code: "signature_rejected" });
+      expect(mockClient.request).toHaveBeenCalledTimes(1);
+      expect(mockClient.request.mock.calls[0][0]).toMatchObject({
+        request: { method: "personal_sign" },
+      });
     });
-  });
-
-  describe("switchChain", () => {
     it("should switch to Polygon mainnet", async () => {
       const mockClient = createMockSignClient();
       const connector = new WalletConnectConnector({

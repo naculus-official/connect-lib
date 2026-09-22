@@ -559,17 +559,18 @@ export class CoinbaseConnector implements UniversalConnector {
 
     // Determine signing method based on message content
     const isStructured = message.trimStart().startsWith("{");
+    // eth_sign is deliberately absent: it signs an arbitrary 32-byte digest,
+    // which can be a transaction hash, and no current wallet needs it as a
+    // personal_sign fallback. A wallet that refuses personal_sign fails here.
     const tryMethods = isStructured
       ? ["eth_signTypedData_v4"]
-      : ["personal_sign", "eth_sign"];
+      : ["personal_sign"];
 
     let lastError: unknown;
     for (const tryMethod of tryMethods) {
       let params: unknown[];
       if (tryMethod === "personal_sign") {
         params = [hexEncode(message), address];
-      } else if (tryMethod === "eth_sign") {
-        params = [address, hexEncode(message)];
       } else {
         // eth_signTypedData_v4
         params = [address, message];

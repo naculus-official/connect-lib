@@ -885,10 +885,14 @@ export class WalletConnectConnector implements UniversalConnector {
 
     // EVM signing method fallback chain:
     //   JSON messages → eth_signTypedData_v4 → eth_signTypedData
-    //   Plain messages → personal_sign → eth_sign (fallback on method rejection)
+    //   Plain messages → personal_sign only (eth_sign is blind signing; removed)
+    // eth_sign is deliberately absent: it signs an arbitrary 32-byte digest,
+    // which can be a transaction hash. It left the default namespace in 0.2.5;
+    // a consumer authorizing it in a custom namespace no longer reaches it
+    // through signMessage either.
     const tryMethods = message.trimStart().startsWith("{")
       ? ["eth_signTypedData_v4", "eth_signTypedData"]
-      : ["personal_sign", "eth_sign"];
+      : ["personal_sign"];
 
     let lastError: unknown;
     for (const tryMethod of tryMethods) {
@@ -896,10 +900,6 @@ export class WalletConnectConnector implements UniversalConnector {
       if (tryMethod === "personal_sign") {
         // Ethereum JSON-RPC personal_sign is [message, account].
         tryParams = [hexEncode(message), address];
-      } else if (tryMethod === "eth_sign") {
-        // eth_sign takes [address, messageToSign]
-        // Use the raw hex-encoded message; wallets will show a hash
-        tryParams = [address, hexEncode(message)];
       } else {
         // eth_signTypedData(_v4) takes [address, typedData].
         // Keep the caller's serialized EIP-712 payload; WalletConnect
