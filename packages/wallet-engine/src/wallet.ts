@@ -24,6 +24,7 @@ import { EVMSigner } from "./signers/evm";
 import { snapshotAuthorization } from "./signers/evm-tx";
 import { IsolatedSigner } from "./signers/isolated-signer";
 import type {
+  DelegationTransactionResult,
   Eip7702AuthorizationRequest,
   Eip7702AuthorizationOptions,
   SignedEip7702Authorization,
@@ -476,9 +477,10 @@ async function deriveWallet(
  * (buildTransaction, cloneForBumping) and would drop `type` and
  * `authorizationList`, quietly broadcasting a type-2 transaction with no
  * delegation. sendWithSession must refuse it for a second reason: a session
- * key never signs anything that changes the account's code. Until the send
- * paths carry type 4 end to end, refuse it there; signTransaction signs it
- * as given.
+ * key never signs anything that changes the account's code. They also take
+ * their input from dapps, and an `authorizationList` is not something a dapp
+ * gets to hand this wallet. sendDelegation is the one type-4 send path;
+ * signTransaction signs one as given.
  */
 function refuseSetCodeTransaction(
   tx: TransactionRequest,
@@ -489,7 +491,7 @@ function refuseSetCodeTransaction(
   if (tx.type === "eip7702" || tx.authorizationList !== undefined) {
     throw new WalletError(
       "method_unsupported",
-      "EIP-7702 transactions cannot be sent or fee-bumped yet; use signTransaction and broadcast the result.",
+      "EIP-7702 transactions are not sent or fee-bumped here; delegate with sendDelegation.",
     );
   }
 }
@@ -514,6 +516,12 @@ export class PocketWallet {
   };
   private data: WalletData | null = null;
   private _signer: Signer;
+  /**
+   * Bumped whenever the isolated signer may be given a different key. The
+   * worker signs with whatever key it holds and ignores the key argument, so
+   * a multi-await signing flow checks this instead of trusting a captured key.
+   */
+  private signerEpoch = 0;
   private _ed25519Signer?: Ed25519Signer;
   private _storage: StorageAdapter;
 
@@ -826,6 +834,7 @@ export class PocketWallet {
    * recovered to an address this wallet does not hold.
    */
   private async initSignerWithKey(): Promise<void> {
+    this.signerEpoch++;
     if (!(this._signer instanceof IsolatedSigner)) return;
     const evm = this.account("eip155");
     if (!evm) {
@@ -1586,6 +1595,182 @@ export class PocketWallet {
             maxPriorityFeePerGas: resolvedFees.maxPriorityFeePerGas,
           }
         : { gasPrice: resolvedFees.gasPrice }),
+    };
+  }
+
+  /**
+   * Delegate the active EVM account's code to `auth.address` (0x000…0
+   * revokes) by signing the authorization and sending the type-4 transaction
+   * that carries it, from and to the account itself.
+   *
+   * The only send path for type 4. `sendTransaction` keeps refusing it, so a
+   * dapp's `eth_sendTransaction` cannot smuggle an `authorizationList` in:
+   * here the list is exactly one authorization this wallet signed a moment
+   * ago, never one supplied by the caller.
+   *
+   * `transactionNonce` is the nonce the transaction uses and `auth.nonce` must
+   * be one above it — the account's own transaction consumes a nonce before
+   * the authorization is processed, and an authorization one short is
+   * skipped by the chain while the transaction still succeeds. Both come from
+   * one read (core's `prepareDelegationAuthorization`, `sender: "self"`) and
+   * are never re-read here. Fees are EIP-1559 only: a type-4 transaction has
+   * no legacy form, so a failed estimate throws instead of downgrading.
+   */
+  async sendDelegation(
+    auth: Eip7702AuthorizationRequest,
+    options: { transactionNonce: string },
+    feeOptions?: FeeOptions,
+  ): Promise<DelegationTransactionResult> {
+    if (!this.data) throw new WalletError("no_wallet", "No wallet loaded.");
+    if (!auth || typeof auth !== "object" || !options) {
+      throw new WalletError(
+        "invalid_input",
+        "Authorization and transactionNonce are required.",
+      );
+    }
+    const authorization = snapshotAuthorization(auth);
+    const { transactionNonce } = options;
+    if (
+      typeof transactionNonce !== "string" ||
+      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(transactionNonce) ||
+      typeof authorization.nonce !== "string" ||
+      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(authorization.nonce) ||
+      BigInt(authorization.nonce) !== BigInt(transactionNonce) + 1n
+    ) {
+      throw new WalletError(
+        "invalid_input",
+        "A self-sent delegation needs authorization nonce = transaction nonce + 1.",
+      );
+    }
+    if (feeOptions?.type === "legacy") {
+      throw new WalletError(
+        "invalid_fee",
+        "EIP-7702 transactions have no legacy fee form.",
+      );
+    }
+    if (this.data.activeNamespace !== "eip155") {
+      throw new WalletError(
+        "namespace_mismatch",
+        "EIP-7702 delegations are sent by the EVM account; switch to eip155 first.",
+      );
+    }
+    const chainId = this.assertConfiguredChain({ to: "" });
+    if (authorization.chainId !== chainId) {
+      // Also rules out chainId 0: no unsafe option is passed on this path.
+      throw new WalletError(
+        "chain_mismatch",
+        `Authorization chain ID ${authorization.chainId} does not match configured chain ${this.cfg.chainId}.`,
+      );
+    }
+
+    // Captured before the first await: signAuthorization reads the same
+    // active account synchronously, and a namespace switch while it signs
+    // must not change who signs or pays for the transaction. The worker
+    // ignores the key argument, so an import that re-keys it mid-flow is
+    // caught by the epoch check instead: both signatures must come from the
+    // key `from` names, or nothing is broadcast.
+    const account = this.activeAccount();
+    const signer = this.activeSigner();
+    const from = account.address;
+    const epoch = this.signerEpoch;
+    const assertSameKey = () => {
+      if (this.signerEpoch !== epoch) {
+        throw new WalletError(
+          "tx_failed",
+          "The wallet changed while the delegation was being signed; nothing was sent.",
+        );
+      }
+    };
+    const signed = await this.signAuthorization(authorization);
+    assertSameKey();
+    const authorizationList = [signed];
+
+    // Nodes estimate a type-4 transaction only when they see the list; each
+    // authorization adds intrinsic gas the plain self-call does not have.
+    // Every field is a JSON quantity here, r and s included: geth parses them
+    // as U256 and rejects the 32-byte padded form when it has a leading zero.
+    const gas = (await this.rpcCall("eth_estimateGas", [
+      {
+        from,
+        to: from,
+        value: "0x0",
+        data: "0x",
+        authorizationList: authorizationList.map((a) => ({
+          chainId: `0x${a.chainId.toString(16)}`,
+          address: a.address,
+          nonce: a.nonce,
+          yParity: `0x${a.yParity.toString(16)}`,
+          r: `0x${BigInt(a.r).toString(16)}`,
+          s: `0x${BigInt(a.s).toString(16)}`,
+        })),
+      },
+    ])) as string;
+
+    const fees = await resolveFeeOptions(
+      { type: "eip1559" },
+      this.cfg.rpcUrl!,
+      this.cfg.chainId,
+      { ...feeOptions, type: "eip1559" },
+    );
+    if (fees.type !== "eip1559") {
+      throw new WalletError(
+        "fee_estimation_failed",
+        "EIP-7702 transactions need EIP-1559 fees.",
+      );
+    }
+    validateFeeParams(fees);
+
+    const tx: TransactionRequest = {
+      to: from,
+      value: "0x0",
+      data: "0x",
+      gas,
+      nonce: transactionNonce,
+      chainId,
+      type: "eip7702",
+      maxFeePerGas: fees.maxFeePerGas,
+      maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+      authorizationList,
+    };
+    const { signature } = await signer.signTransaction(
+      tx,
+      account.privateKey as `0x${string}`,
+    );
+    assertSameKey();
+    const hash = (await this.rpcCall("eth_sendRawTransaction", [
+      signature,
+    ])) as string;
+    if (!hash)
+      throw new WalletError("tx_failed", "Failed to broadcast transaction.");
+
+    if (this._txMonitor) {
+      this._txMonitor
+        .watchTx(hash, chainId, {
+          initialEntry: {
+            from,
+            to: from,
+            value: "0x0",
+            data: "0x",
+            nonce: Number(BigInt(transactionNonce)),
+            gasUsed: gas,
+            effectiveGasPrice: fees.maxFeePerGas,
+          },
+        })
+        .catch(() => {
+          /* non-critical: monitor best-effort */
+        });
+    }
+
+    return {
+      hash,
+      from,
+      to: from,
+      value: "0x0",
+      data: "0x",
+      chainId: this.cfg.chainId,
+      maxFeePerGas: fees.maxFeePerGas,
+      maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+      authorization: signed,
     };
   }
 

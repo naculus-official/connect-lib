@@ -11,6 +11,8 @@
 import type {
   ConnectorSupport,
   DelegationAuthorizationRequest,
+  SelfDelegationRequest,
+  SentDelegation,
   SendCallsOptions,
   SignedDelegationAuthorization,
   UniversalConnector,
@@ -24,6 +26,7 @@ import {
 } from "@naculus/connect-core";
 import type {
   PocketConfig,
+  SignedEip7702Authorization,
   StorageSecurityFinding,
   StorageSecurityReport,
   WalletAccount,
@@ -604,6 +607,45 @@ class PocketConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
     request: DelegationAuthorizationRequest,
   ): Promise<SignedDelegationAuthorization> {
+    const { w, account, chainId, chainNumber, address, nonce } =
+      await this.ownAuthorization(session, request);
+    const signed = await w.signAuthorization({
+      chainId: chainNumber,
+      address,
+      nonce,
+    });
+    return toSignedDelegation(account, chainId, signed);
+  }
+
+  /**
+   * Delegate (or revoke) this wallet's EVM account: sign the authorization
+   * and send the type-4 transaction carrying it, paid by the account.
+   *
+   * Same checks as `signAuthorization`; wallet-engine additionally requires
+   * `nonce` = `transactionNonce` + 1. Build `request` with core's
+   * `delegateAccount`.
+   */
+  async sendDelegation(
+    session: UniversalWalletSession,
+    request: SelfDelegationRequest,
+  ): Promise<SentDelegation> {
+    const { w, account, chainId, chainNumber, address, nonce } =
+      await this.ownAuthorization(session, request);
+    const result = await w.sendDelegation(
+      { chainId: chainNumber, address, nonce },
+      { transactionNonce: request.transactionNonce },
+    );
+    return {
+      hash: result.hash as `0x${string}`,
+      authorization: toSignedDelegation(account, chainId, result.authorization),
+    };
+  }
+
+  /** One read of each field: check and sign the same values. */
+  private async ownAuthorization(
+    session: UniversalWalletSession,
+    request: DelegationAuthorizationRequest,
+  ) {
     this.requireActiveSession(session);
     const w = await this.ensureWallet();
     if (!request || typeof request !== "object") {
@@ -612,7 +654,6 @@ class PocketConnectorImpl implements UniversalConnector {
         "Authorization request is required.",
       );
     }
-    // One read of each field: check and sign the same values.
     const { account, chainId, address, nonce } = request;
     if (w.getWalletData()?.activeNamespace !== "eip155") {
       throw new WalletError(
@@ -639,20 +680,7 @@ class PocketConnectorImpl implements UniversalConnector {
         `EIP-7702 authorization needs a single EIP-155 chain, got ${String(chainId)}.`,
       );
     }
-    const signed = await w.signAuthorization({
-      chainId: chainNumber,
-      address,
-      nonce,
-    });
-    return {
-      account,
-      chainId,
-      address: signed.address as `0x${string}`,
-      nonce: signed.nonce as `0x${string}`,
-      yParity: signed.yParity,
-      r: signed.r,
-      s: signed.s,
-    };
+    return { w, account, chainId, chainNumber, address, nonce };
   }
 
   async signMessage(
@@ -774,6 +802,22 @@ class PocketConnectorImpl implements UniversalConnector {
   ): Promise<Record<string, any>> {
     return {};
   }
+}
+
+function toSignedDelegation(
+  account: `0x${string}`,
+  chainId: string,
+  signed: SignedEip7702Authorization,
+): SignedDelegationAuthorization {
+  return {
+    account,
+    chainId,
+    address: signed.address as `0x${string}`,
+    nonce: signed.nonce as `0x${string}`,
+    yParity: signed.yParity,
+    r: signed.r,
+    s: signed.s,
+  };
 }
 
 // ── Exports (New API) ─────────────────────────────────────────

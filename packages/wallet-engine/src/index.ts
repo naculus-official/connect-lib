@@ -65,6 +65,7 @@ export type {
 } from "./session-keys/types";
 export { EVMSigner } from "./signers/evm";
 export type {
+  DelegationTransactionResult,
   Eip7702AuthorizationOptions,
   Eip7702AuthorizationRequest,
   Signer,

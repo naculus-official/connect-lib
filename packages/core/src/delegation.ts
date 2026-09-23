@@ -11,7 +11,9 @@
  */
 
 import { eip155Reference, isEvmAddress } from "./caip";
+import type { UniversalConnector } from "./connector";
 import { WalletError } from "./errors";
+import type { UniversalWalletSession } from "./session";
 
 /** `0xef0100`, the delegation designator EIP-7702 fixes. */
 export const DELEGATION_PREFIX = "0xef0100";
@@ -207,6 +209,72 @@ export async function prepareDelegationAuthorization(
       ? { transactionNonce: `0x${count.toString(16)}` as const }
       : {}),
   };
+}
+
+/** A self-sent delegation: `prepareDelegationAuthorization` with `sender: "self"`. */
+export interface SelfDelegationRequest extends DelegationAuthorizationRequest {
+  /** The type-4 transaction's own nonce; `nonce` is this + 1. */
+  transactionNonce: `0x${string}`;
+}
+
+/** What `delegateAccount` / `UniversalConnector.sendDelegation` return. */
+export interface SentDelegation {
+  /** Hash of the type-4 transaction. Delegation takes effect on inclusion. */
+  hash: `0x${string}`;
+  authorization: SignedDelegationAuthorization;
+}
+
+export interface DelegateAccountInput
+  extends Omit<PrepareDelegationInput, "sender"> {
+  connector: Pick<UniversalConnector, "sendDelegation">;
+  session: UniversalWalletSession;
+}
+
+/**
+ * Delegate the connected account to `delegate` — prepare, sign and send, the
+ * account paying for its own type-4 transaction.
+ *
+ * Owner path only: the connector must hold the account's key (the embedded
+ * wallet). Browser and WalletConnect wallets upgrade accounts through
+ * `wallet_sendCalls` instead, so a connector without `sendDelegation` is
+ * refused before anything is read. The allowlist applies as in
+ * `prepareDelegationAuthorization`.
+ */
+export async function delegateAccount(
+  input: DelegateAccountInput,
+): Promise<SentDelegation> {
+  const { connector, session, ...prepare } = input;
+  if (typeof connector?.sendDelegation !== "function") {
+    throw new WalletError(
+      "method_unsupported",
+      "This wallet cannot send an EIP-7702 delegation from the app; only the embedded wallet can.",
+    );
+  }
+  const prepared = await prepareDelegationAuthorization({
+    ...prepare,
+    sender: "self",
+  });
+  const { transactionNonce } = prepared;
+  if (!transactionNonce) {
+    // prepareDelegationAuthorization always sets it for "self".
+    throw new WalletError("invalid_input", "Missing transaction nonce.");
+  }
+  return connector.sendDelegation(session, { ...prepared, transactionNonce });
+}
+
+/**
+ * Clear the account's delegation (delegate to `REVOKE_DELEGATE`). Always
+ * allowed, whatever the app's allowlist: an account must be able to leave any
+ * delegation.
+ */
+export function revokeDelegation(
+  input: Omit<DelegateAccountInput, "delegate" | "allowlist">,
+): Promise<SentDelegation> {
+  return delegateAccount({
+    ...input,
+    delegate: REVOKE_DELEGATE,
+    allowlist: [],
+  });
 }
 
 /** EIP-7702: an authorization nonce must be below 2^64 - 1. */

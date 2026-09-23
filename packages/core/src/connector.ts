@@ -1,5 +1,7 @@
 import type {
   DelegationAuthorizationRequest,
+  SelfDelegationRequest,
+  SentDelegation,
   SignedDelegationAuthorization,
 } from "./delegation";
 import type {
@@ -213,6 +215,19 @@ export interface UniversalConnector {
     session: UniversalWalletSession,
     request: DelegationAuthorizationRequest,
   ): Promise<SignedDelegationAuthorization>;
+  /**
+   * Delegate (or revoke) the session's own account: sign the authorization
+   * and send the type-4 transaction carrying it, from the account itself.
+   *
+   * Same audience as `signAuthorization` — only a connector holding the key.
+   * `request` comes from `prepareDelegationAuthorization` with
+   * `sender: "self"`, so it carries `transactionNonce` and a nonce one above
+   * it; refuse anything else. Use `delegateAccount`, not this hook directly.
+   */
+  sendDelegation?(
+    session: UniversalWalletSession,
+    request: SelfDelegationRequest,
+  ): Promise<SentDelegation>;
   switchChain?(session: UniversalWalletSession, chainId: string): Promise<void>;
   deepLink?(target: string): Promise<void>;
   sendCalls?(

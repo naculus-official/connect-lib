@@ -84,6 +84,11 @@ export interface TransactionResult {
   maxPriorityFeePerGas?: string;
 }
 
+/** `PocketWallet.sendDelegation`: the type-4 transaction and what it carried. */
+export interface DelegationTransactionResult extends TransactionResult {
+  authorization: SignedEip7702Authorization;
+}
+
 /** Abstract signer interface for blockchain-specific signing */
 export interface Signer {
   readonly chainType: string;

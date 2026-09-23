@@ -1,12 +1,22 @@
-import { prepareDelegationAuthorization } from "@naculus/connect-core";
+import {
+  delegateAccount,
+  estimateFees,
+  prepareDelegationAuthorization,
+} from "@naculus/connect-core";
 import type { StorageAdapter, WalletData } from "@naculus/wallet-engine";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPocketConnector } from "./index";
 
 /**
  * EIP-7702 authorization signing through the embedded connector, with real
  * keys (index.test.ts mocks secp256k1, which would make these vacuous).
  */
+
+// Fee estimation is the only thing faked; wallet-engine imports it from core.
+vi.mock("@naculus/connect-core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@naculus/connect-core")>()),
+  estimateFees: vi.fn(),
+}));
 
 class MemoryStorage implements StorageAdapter {
   private d: WalletData | null = null;
@@ -35,6 +45,7 @@ async function connected() {
   const connector = createPocketConnector({
     storage: new MemoryStorage(),
     chainId: "eip155:1",
+    rpcUrl: "https://rpc.invalid",
   });
   const session = await connector.connect();
   await connector.importFromPrivateKey(PK);
@@ -124,5 +135,103 @@ describe("PocketConnector.signAuthorization", () => {
     await expect(
       connector.signAuthorization(session, request),
     ).rejects.toMatchObject({ code: "session_expired" });
+  });
+});
+
+describe("PocketConnector.sendDelegation", () => {
+  const TX_HASH = `0x${"ff".repeat(32)}`;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockRpc() {
+    const methods: string[] = [];
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (_url, opts) => {
+        const body = JSON.parse((opts as RequestInit).body as string);
+        methods.push(body.method);
+        const result =
+          (
+            {
+              eth_getTransactionCount: "0x6",
+              eth_estimateGas: "0xb3b0",
+              eth_sendRawTransaction: TX_HASH,
+            } as Record<string, string>
+          )[body.method] ?? null;
+        return {
+          ok: true,
+          json: async () => ({ jsonrpc: "2.0", id: body.id, result }),
+        } as Response;
+      });
+    return { methods, spy };
+  }
+
+  it("delegates its own account through core's delegateAccount", async () => {
+    const { connector, session } = await connected();
+    vi.mocked(estimateFees).mockResolvedValue({
+      type: "eip1559",
+      maxFeePerGas: 30_000_000_000n,
+      maxPriorityFeePerGas: 1_000_000_000n,
+    });
+    const { methods } = mockRpc();
+
+    const sent = await delegateAccount({
+      connector,
+      session,
+      account: ACCOUNT,
+      chainId: "eip155:1",
+      delegate: DELEGATE,
+      allowlist: [DELEGATE],
+      getTransactionCount: async () => "0x6",
+    });
+
+    expect(sent).toEqual({
+      hash: TX_HASH,
+      // Pending count 6: the transaction takes 6, the authorization 7 — the
+      // same viem-checked signature as above.
+      authorization: {
+        account: ACCOUNT,
+        chainId: "eip155:1",
+        address: DELEGATE,
+        nonce: "0x7",
+        yParity: 1,
+        r: "0x8590d30e098d3e27cd8e83b30b6965999605a2129f77b170dec7af1762a9e1c5",
+        s: "0x41f93e1aa5100e4ff37f1cf8c61d39d289b93cb994cbd27bc62db429919c149b",
+      },
+    });
+    expect(methods).toEqual(["eth_estimateGas", "eth_sendRawTransaction"]);
+  });
+
+  it("refuses a request for another account before any RPC call", async () => {
+    const { connector, session } = await connected();
+    const { spy } = mockRpc();
+    await expect(
+      connector.sendDelegation(session, {
+        account: "0x1111111111111111111111111111111111111111",
+        chainId: "eip155:1",
+        address: DELEGATE,
+        nonce: "0x7",
+        transactionNonce: "0x6",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("refuses after disconnect", async () => {
+    const { connector, session } = await connected();
+    await connector.disconnect(session);
+    const { spy } = mockRpc();
+    await expect(
+      connector.sendDelegation(session, {
+        account: ACCOUNT,
+        chainId: "eip155:1",
+        address: DELEGATE,
+        nonce: "0x7",
+        transactionNonce: "0x6",
+      }),
+    ).rejects.toMatchObject({ code: "session_expired" });
+    expect(spy).not.toHaveBeenCalled();
   });
 });
