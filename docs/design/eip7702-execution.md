@@ -1,7 +1,39 @@
 # EIP-7702 end-to-end execution
 
-Status: design, step 1 of STATE.md thread 1. No code change.
+Status: design (2026-09-22), amended by the decision below; the owner path
+is being implemented package by package.
 Date: 2026-09-22.
+
+## Decision 2026-09-23 — owner-only 7702; session keys stay on ERC-4337
+
+Checked before building piece (C): the audited minimal delegation target,
+eth-infinitism's `Simple7702Account`, executes only when called by the
+account itself or the EntryPoint, and validates signatures against the
+EOA's own key. It has no session-key path, so "the session key signs the
+call, dispatched to the EOA's implementation" cannot work against it. Browser
+and WalletConnect wallets also expose no dapp-callable method to sign an
+arbitrary authorization (they upgrade accounts through `wallet_sendCalls`).
+
+The user chose **option (a)**:
+
+- 7702 is an **owner** feature: the account delegates to an allowlisted
+  implementation (batching, sponsorship) and can always revoke to
+  `address(0)`. Shipped so far: wallet-engine signing and type-4 encoding
+  (`b715444`), core `prepareDelegationAuthorization` and the
+  `UniversalConnector.signAuthorization` hook (`ee94092`), the embedded
+  connector's implementation (package 3).
+- Session-key execution without a wallet prompt stays on the **ERC-4337**
+  route. appkit's delegation-policy flow keeps refusing to create an
+  `eip7702`-mode policy (core's `SessionKeyManager` accepts the mode value,
+  but nothing executes it); piece (C) as drawn below and piece (D) are
+  withdrawn.
+- **Option (b)**, deferred: adopt a permission framework — MetaMask
+  Delegation Framework (`EIP7702StatelessDeleGator` + caveat enforcers) or an
+  ERC-7579 account with a session-key module — and map `SessionKeyScope`
+  onto its on-chain caveats. That is a new design, not an amendment of (C).
+
+Package (4) becomes `useDelegate()`: prepare → sign → send the type-4
+transaction, and revoke, for the owner only.
 
 ## Why
 
