@@ -1,4 +1,8 @@
 import type {
+  DelegationAuthorizationRequest,
+  SignedDelegationAuthorization,
+} from "./delegation";
+import type {
   Namespace,
   SessionNamespace,
   UniversalWalletSession,
@@ -194,6 +198,21 @@ export interface UniversalConnector {
     session: UniversalWalletSession,
     input: unknown,
   ): Promise<unknown>;
+  /**
+   * Sign an EIP-7702 authorization with the session's own account key.
+   *
+   * Only a connector that holds the key (the embedded wallet) implements
+   * this. Browser and WalletConnect wallets expose no dapp-callable method
+   * for arbitrary delegations — they upgrade accounts through
+   * `wallet_sendCalls` — so an absent hook is the expected answer there, not
+   * a gap to paper over. Build the request with
+   * `prepareDelegationAuthorization`, never by hand, and refuse it when
+   * `request.account` is not the address this connector signs for.
+   */
+  signAuthorization?(
+    session: UniversalWalletSession,
+    request: DelegationAuthorizationRequest,
+  ): Promise<SignedDelegationAuthorization>;
   switchChain?(session: UniversalWalletSession, chainId: string): Promise<void>;
   deepLink?(target: string): Promise<void>;
   sendCalls?(
