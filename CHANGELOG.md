@@ -7,6 +7,29 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.2.7 — 2026-09-23
+
+### Added
+
+- **EIP-7702 owner delegation** (`@naculus/wallet-engine`, `@naculus/connect-core`, `@naculus/connector-embedded`) — an embedded-wallet account can delegate its code to an allowlisted implementation and revoke it. wallet-engine: `authorizationHash`, `PocketWallet.signAuthorization`, type-4 (`0x04`) transaction encoding in one shared EVM encoder used by `EVMSigner` and the crypto worker, and `PocketWallet.sendDelegation` — the only type-4 send path, which signs its own single authorization and sends it from and to the account (nonce = authorization nonce − 1, EIP-1559 fees only). `chainId: 0` authorizations are refused unless `unsafeAllowAnyChainAuthorization` is set. connect-core: `prepareDelegationAuthorization` (explicit allowlist, empty by default; `REVOKE_DELEGATE` always allowed; nonce computed from the pending count), `delegateAccount` / `revokeDelegation`, and optional `UniversalConnector.signAuthorization?` / `sendDelegation?` hooks. connector-embedded implements both for its own EVM account only. Browser and WalletConnect wallets do not implement them by design (they upgrade accounts through `wallet_sendCalls`). Design: `docs/design/eip7702-execution.md`.
+- **Session keys sign EIP-3009 `TransferWithAuthorization` under policy** (`@naculus/connect-core`) — `signTypedDataWithSessionKey` / `signTypedDataWithVerifiedOffchainAuthorization` accept only that primary type, compute the digest from the checked request, and apply policy to the equivalent `transfer(to, value)` plus from-is-self and a `validBefore` inside the session lifetime. `SessionKeyScope` gains a recipient allowlist (`allowedRecipients`). Design: `docs/design/agentic-payments.md`.
+
+### Changed
+
+- **`signMessage` never falls back to `eth_sign`** (`@naculus/connector-walletconnect`, `@naculus/connector-coinbase`) — a wallet that refuses `personal_sign` now fails with `signature_rejected` after one request instead of being asked for a blind digest signature.
+- **One burn-address definition** (`@naculus/connect-core`) — `isBurnAddress` is the union of known sinks, vanity prefixes and "dead" anywhere in the address.
+- **`sendTransaction`, `bumpFee` and `sendWithSession` refuse type-4 transactions** (`@naculus/wallet-engine`) — their input comes from dapps; delegation goes through `sendDelegation`.
+
+### Fixed
+
+- **Worker isolation signed with the wrong key after a reload** (`@naculus/wallet-engine`) — with `isolation: "worker"`, a wallet saved while Solana was active reloaded with the Solana seed in the EVM worker, so EVM signatures recovered to an address the wallet does not hold. The worker is now always started with the eip155 key and cleared when there is none.
+- **WalletConnect `session_extend` cleared the local expiry** (`@naculus/connector-walletconnect`) — the event carries no params; the new expiry is read from the stored session.
+- **Session keys keep their PBKDF2 work factor** (`@naculus/connect-core`) — records persist `kdfIterations`, so changing the configured count no longer makes existing keys undecryptable. Revocation is documented as device-local.
+
+### Package impact
+
+`@naculus/connect-core`, `@naculus/wallet-engine`, `@naculus/connector-embedded`, `@naculus/connector-walletconnect` and `@naculus/connector-coinbase` carry functional change. The other 9 packages are version-bump-only releases required by the lockstep release model.
+
 ## 0.2.6 — 2026-09-21
 
 ### Added
