@@ -1,0 +1,128 @@
+import { prepareDelegationAuthorization } from "@naculus/connect-core";
+import type { StorageAdapter, WalletData } from "@naculus/wallet-engine";
+import { describe, expect, it } from "vitest";
+import { createPocketConnector } from "./index";
+
+/**
+ * EIP-7702 authorization signing through the embedded connector, with real
+ * keys (index.test.ts mocks secp256k1, which would make these vacuous).
+ */
+
+class MemoryStorage implements StorageAdapter {
+  private d: WalletData | null = null;
+  readonly type = "memory" as const;
+  isAvailable() {
+    return true;
+  }
+  async load() {
+    return this.d;
+  }
+  async save(x: WalletData) {
+    this.d = x;
+  }
+  async clear() {
+    this.d = null;
+  }
+}
+
+const PK = `0x${"ab".repeat(32)}`;
+const ACCOUNT = "0xe239cdc5fbe977a8a141B72194D3CF8c41bC5BC6";
+const DELEGATE = "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B";
+const MNEMONIC =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+
+async function connected() {
+  const connector = createPocketConnector({
+    storage: new MemoryStorage(),
+    chainId: "eip155:1",
+  });
+  const session = await connector.connect();
+  await connector.importFromPrivateKey(PK);
+  return { connector, session };
+}
+
+function prepare(
+  overrides: { chainId?: string; account?: `0x${string}` } = {},
+) {
+  return prepareDelegationAuthorization({
+    account: overrides.account ?? ACCOUNT,
+    chainId: overrides.chainId ?? "eip155:1",
+    delegate: DELEGATE,
+    allowlist: [DELEGATE],
+    sender: "relayer",
+    getTransactionCount: async () => "0x7",
+  });
+}
+
+describe("PocketConnector.signAuthorization", () => {
+  it("signs a prepared authorization for its own account", async () => {
+    const { connector, session } = await connected();
+    // viem 2.56.5 signature for this key and authorization; see
+    // wallet-engine signers/evm-tx.test.ts.
+    await expect(
+      connector.signAuthorization(session, await prepare()),
+    ).resolves.toEqual({
+      account: ACCOUNT,
+      chainId: "eip155:1",
+      address: DELEGATE,
+      nonce: "0x7",
+      yParity: 1,
+      r: "0x8590d30e098d3e27cd8e83b30b6965999605a2129f77b170dec7af1762a9e1c5",
+      s: "0x41f93e1aa5100e4ff37f1cf8c61d39d289b93cb994cbd27bc62db429919c149b",
+    });
+  });
+
+  it("refuses an authorization prepared for another account", async () => {
+    const { connector, session } = await connected();
+    const request = await prepare({
+      account: "0x1111111111111111111111111111111111111111",
+    });
+    await expect(
+      connector.signAuthorization(session, request),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+  });
+
+  it("refuses a chain the wallet is not configured for", async () => {
+    const { connector, session } = await connected();
+    await expect(
+      connector.signAuthorization(
+        session,
+        await prepare({ chainId: "eip155:10" }),
+      ),
+    ).rejects.toMatchObject({ code: "chain_mismatch" });
+  });
+
+  it.each(["eip155:0", "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", undefined])(
+    "refuses chain %s even when handed a request built by hand",
+    async (chainId) => {
+      const { connector, session } = await connected();
+      const request = { ...(await prepare()), chainId } as never;
+      await expect(
+        connector.signAuthorization(session, request),
+      ).rejects.toMatchObject({ code: "invalid_chain" });
+    },
+  );
+
+  it("refuses while the Solana account is active", async () => {
+    const connector = createPocketConnector({
+      storage: new MemoryStorage(),
+      chainId: "eip155:1",
+    });
+    const session = await connector.connect();
+    await connector.importFromMnemonic(MNEMONIC);
+    connector.setActiveNamespace("solana");
+    const request = await prepare({ account: ACCOUNT });
+    await expect(
+      connector.signAuthorization(session, request),
+    ).rejects.toMatchObject({ code: "namespace_mismatch" });
+  });
+
+  it("refuses after disconnect", async () => {
+    const { connector, session } = await connected();
+    const request = await prepare();
+    await connector.disconnect(session);
+    await expect(
+      connector.signAuthorization(session, request),
+    ).rejects.toMatchObject({ code: "session_expired" });
+  });
+});

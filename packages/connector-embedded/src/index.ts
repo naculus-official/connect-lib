@@ -10,12 +10,15 @@
 
 import type {
   ConnectorSupport,
+  DelegationAuthorizationRequest,
   SendCallsOptions,
+  SignedDelegationAuthorization,
   UniversalConnector,
   UniversalWalletSession,
 } from "@naculus/connect-core";
 import {
   createEmptySession,
+  eip155Reference,
   SOLANA_MAINNET,
   WalletError,
 } from "@naculus/connect-core";
@@ -218,9 +221,7 @@ class PocketConnectorImpl implements UniversalConnector {
     rpcUrl: string;
   };
   private wallet: import("@naculus/wallet-engine").PocketWallet | null = null;
-  private readonly accountListeners = new Set<
-    (accounts: string[]) => void
-  >();
+  private readonly accountListeners = new Set<(accounts: string[]) => void>();
   private activeSessionId: string | null = null;
 
   private requireActiveSession(session: UniversalWalletSession): void {
@@ -590,6 +591,70 @@ class PocketConnectorImpl implements UniversalConnector {
     return result.signature as `0x${string}`;
   }
 
+  /**
+   * Sign an EIP-7702 authorization delegating this wallet's EVM account.
+   *
+   * Signs only for its own account, and only on the chain the wallet is
+   * configured for (wallet-engine enforces the chain; the any-chain form is
+   * not reachable from here). Build `request` with
+   * `prepareDelegationAuthorization`, which computes the nonce and applies
+   * the delegate allowlist.
+   */
+  async signAuthorization(
+    session: UniversalWalletSession,
+    request: DelegationAuthorizationRequest,
+  ): Promise<SignedDelegationAuthorization> {
+    this.requireActiveSession(session);
+    const w = await this.ensureWallet();
+    if (!request || typeof request !== "object") {
+      throw new WalletError(
+        "invalid_input",
+        "Authorization request is required.",
+      );
+    }
+    // One read of each field: check and sign the same values.
+    const { account, chainId, address, nonce } = request;
+    if (w.getWalletData()?.activeNamespace !== "eip155") {
+      throw new WalletError(
+        "namespace_mismatch",
+        "EIP-7702 authorizations are signed by the EVM account; switch to eip155 first.",
+      );
+    }
+    const own = w.address;
+    if (
+      typeof account !== "string" ||
+      !own ||
+      account.toLowerCase() !== own.toLowerCase()
+    ) {
+      throw new WalletError(
+        "invalid_input",
+        `Authorization is for ${String(account)}, but this wallet signs for ${own ?? "no account"}.`,
+      );
+    }
+    const chainNumber =
+      typeof chainId === "string" ? eip155Reference(chainId) : null;
+    if (chainNumber === null) {
+      throw new WalletError(
+        "invalid_chain",
+        `EIP-7702 authorization needs a single EIP-155 chain, got ${String(chainId)}.`,
+      );
+    }
+    const signed = await w.signAuthorization({
+      chainId: chainNumber,
+      address,
+      nonce,
+    });
+    return {
+      account,
+      chainId,
+      address: signed.address as `0x${string}`,
+      nonce: signed.nonce as `0x${string}`,
+      yParity: signed.yParity,
+      r: signed.r,
+      s: signed.s,
+    };
+  }
+
   async signMessage(
     session: UniversalWalletSession,
     input: unknown,
@@ -604,9 +669,11 @@ class PocketConnectorImpl implements UniversalConnector {
 
     // An app naming an account it is not going to get a signature from must
     // be told, not quietly served a signature from a different curve.
-    const active = w.getWalletData()?.accounts.find(
-      (a) => a.namespace === w.getWalletData()?.activeNamespace,
-    );
+    const active = w
+      .getWalletData()
+      ?.accounts.find(
+        (a) => a.namespace === w.getWalletData()?.activeNamespace,
+      );
     if (active) validateRequestAccount(raw.address, active);
 
     // Route to typed data signing if typed data is provided
