@@ -815,10 +815,25 @@ export class PocketWallet {
     return this.signerFor(this.data?.activeNamespace ?? "eip155");
   }
 
-  private async initSignerWithKey(privateKey: string): Promise<void> {
-    if (this._signer instanceof IsolatedSigner) {
-      await this._signer.initWithKey(privateKey);
+  /**
+   * Start the isolated signer with the EIP-155 account's key.
+   *
+   * Always that account, whichever namespace is active: the worker only ever
+   * signs EIP-155 (signerFor routes Solana to the ed25519 signer), and it is
+   * started here rather than on every namespace switch. Starting it with the
+   * *active* account put the Solana seed in it whenever a wallet had been
+   * saved with Solana active, and every EVM signature after that reload
+   * recovered to an address this wallet does not hold.
+   */
+  private async initSignerWithKey(): Promise<void> {
+    if (!(this._signer instanceof IsolatedSigner)) return;
+    const evm = this.account("eip155");
+    if (!evm) {
+      // Nothing EVM to sign for; do not leave a previous wallet's key loaded.
+      await this._signer.clear();
+      return;
     }
+    await this._signer.initWithKey(evm.privateKey);
   }
 
   /** Generate a new random wallet (BIP39 mnemonic) */
@@ -838,7 +853,7 @@ export class PocketWallet {
       chainId: this.cfg.chainId,
       version: 2,
     });
-    await this.initSignerWithKey(this.activeAccount().privateKey);
+    await this.initSignerWithKey();
     if (this.cfg.autoSave)
       await this._storage.save(toStorableRecord(this.data));
     return this.data;
@@ -867,7 +882,7 @@ export class PocketWallet {
       chainId: this.cfg.chainId,
       version: 2,
     });
-    await this.initSignerWithKey(this.activeAccount().privateKey);
+    await this.initSignerWithKey();
     if (this.cfg.autoSave)
       await this._storage.save(toStorableRecord(this.data));
     return this.data;
@@ -911,6 +926,8 @@ export class PocketWallet {
         chainId: this.cfg.chainId,
         version: 2,
       });
+      // No EVM account: clears any previous wallet's key from the worker.
+      await this.initSignerWithKey();
       if (this.cfg.autoSave)
         await this._storage.save(toStorableRecord(this.data));
       return this.data;
@@ -946,7 +963,7 @@ export class PocketWallet {
       chainId: this.cfg.chainId,
       version: 2,
     });
-    await this.initSignerWithKey(pkHex);
+    await this.initSignerWithKey();
     if (this.cfg.autoSave)
       await this._storage.save(toStorableRecord(this.data));
     return this.data;
@@ -1002,7 +1019,7 @@ export class PocketWallet {
     }
 
     this.data = withActiveViews(data);
-    await this.initSignerWithKey(this.activeAccount().privateKey);
+    await this.initSignerWithKey();
     return true;
   }
 
@@ -1040,6 +1057,9 @@ export class PocketWallet {
       }
       this.data.accounts.push(account);
       added.push(account);
+    }
+    if (added.some((account) => account.namespace === "eip155")) {
+      await this.initSignerWithKey();
     }
     return added;
   }
