@@ -33,7 +33,16 @@ The user chose **option (a)**:
   onto its on-chain caveats. That is a new design, not an amendment of (C).
 
 Package (4) becomes `useDelegate()`: prepare → sign → send the type-4
-transaction, and revoke, for the owner only.
+transaction, and revoke, for the owner only. Its SDK half: core
+`delegateAccount` / `revokeDelegation` over an optional
+`UniversalConnector.sendDelegation` hook, implemented by the embedded
+connector through wallet-engine `PocketWallet.sendDelegation` — the only
+type-4 send path. The wallet signs the one authorization itself (the list is
+never caller-supplied), sends from and to the account with nonce =
+authorization nonce − 1, and uses EIP-1559 fees without a legacy fallback.
+`sendTransaction`, `bumpFee` and `sendWithSession` keep refusing type 4,
+because their input comes from dapps. The React and Vue shells are the
+appkit half.
 
 ## Why
 
