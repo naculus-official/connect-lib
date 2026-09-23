@@ -3,6 +3,7 @@ import {
   decryptSessionKey,
   encryptSessionKey,
   generateSessionKeyPair,
+  signTransactionWithSessionKey,
   signWithSessionKey,
 } from "../crypto";
 import type { SessionKeyPair } from "../types";
@@ -91,6 +92,41 @@ describe("session-keys / crypto", () => {
 
       expect(enc1.encryptedPrivateKey).not.toBe(enc2.encryptedPrivateKey);
       expect(enc1.iv).not.toBe(enc2.iv);
+    });
+  });
+
+  describe("signTransactionWithSessionKey", () => {
+    const PK = `0x${"ab".repeat(32)}` as `0x${string}`;
+    const TX = {
+      to: "0x1111111111111111111111111111111111111111",
+      chainId: 1,
+      maxFeePerGas: "0x1",
+    };
+    const AUTH = {
+      chainId: 1,
+      address: "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B",
+      nonce: "0x0",
+      yParity: 1,
+      r: `0x${"11".repeat(32)}`,
+      s: `0x${"22".repeat(32)}`,
+    };
+
+    it("refuses a type-4 transaction or any authorizationList", async () => {
+      for (const tx of [
+        { ...TX, type: "eip7702", authorizationList: [AUTH] },
+        { ...TX, authorizationList: [AUTH] },
+        { ...TX, type: "eip7702" },
+      ]) {
+        await expect(
+          signTransactionWithSessionKey(PK, tx as typeof TX),
+        ).rejects.toMatchObject({ code: "session_scope_exceeded" });
+      }
+    });
+
+    it("still signs an ordinary type-2 transaction", async () => {
+      await expect(signTransactionWithSessionKey(PK, TX)).resolves.toMatch(
+        /^0x02/,
+      );
     });
   });
 });

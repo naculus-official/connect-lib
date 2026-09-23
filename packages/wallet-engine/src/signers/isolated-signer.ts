@@ -1,5 +1,8 @@
 import { WalletError } from "../errors";
 import type {
+  Eip7702AuthorizationOptions,
+  Eip7702AuthorizationRequest,
+  SignedEip7702Authorization,
   Signer,
   SignRequest,
   SignResult,
@@ -7,9 +10,10 @@ import type {
 } from "./types";
 
 type WorkerMessage = {
-  type: "ready" | "signed" | "cleared" | "error";
+  type: "ready" | "signed" | "signedAuthorization" | "cleared" | "error";
   signature?: string;
   recovery?: number;
+  authorization?: SignedEip7702Authorization;
   error?: string;
 };
 
@@ -131,6 +135,21 @@ export class IsolatedSigner implements Signer {
     return this.send("signTransaction", tx);
   }
 
+  /**
+   * Sign an EIP-7702 authorization inside the worker; the key never crosses
+   * back. Validation (including the `chainId: 0` refusal) runs in the worker
+   * on the same encoder EVMSigner uses.
+   */
+  async signAuthorization(
+    auth: Eip7702AuthorizationRequest,
+    _privateKey?: `0x${string}`,
+    options?: Eip7702AuthorizationOptions,
+  ): Promise<SignedEip7702Authorization> {
+    if (!this.worker)
+      throw new WalletError("not_initialized", "Signer not initialized");
+    return this.send("signAuthorization", { authorization: auth, options });
+  }
+
   async clear(): Promise<void> {
     if (this.worker) {
       await this.send("clear", {});
@@ -192,6 +211,8 @@ export class IsolatedSigner implements Signer {
     else if (msg.type === "cleared" && entry) entry.resolve(undefined);
     else if (msg.type === "signed" && entry)
       entry.resolve({ signature: msg.signature, recovery: msg.recovery });
+    else if (msg.type === "signedAuthorization" && entry)
+      entry.resolve(msg.authorization);
     else if (msg.type === "error") {
       const err = new WalletError(
         "crypto_worker_error",

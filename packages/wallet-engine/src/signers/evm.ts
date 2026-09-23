@@ -1,12 +1,37 @@
 import { WalletError } from "../errors";
-import { encodeRlpList, hexToBytes, toRlpBytes, toRlpQuantity } from "./rlp";
+import {
+  assembleSignedTransaction,
+  authorizationHash,
+  signedAuthorization,
+  snapshotAuthorization,
+  snapshotTransaction,
+  TransactionInputError,
+  transactionSignature,
+  transactionSigningHash,
+} from "./evm-tx";
+import { hexToBytes } from "./rlp";
+import { signDigest } from "./secp256k1-digest";
 import type {
+  Eip7702AuthorizationOptions,
+  Eip7702AuthorizationRequest,
+  SignedEip7702Authorization,
   Signer,
   SignRequest,
   SignResult,
   TransactionRequest,
 } from "./types";
-import { type Secp256k1Like, signDigest } from "./secp256k1-digest";
+
+/** Report an encoder validation failure as the WalletError callers expect. */
+function invalidInput<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (err) {
+    if (err instanceof TransactionInputError) {
+      throw new WalletError("invalid_input", err.message);
+    }
+    throw err;
+  }
+}
 
 /**
  * Validate a private key and return its 32 bytes.
@@ -41,6 +66,7 @@ async function privateKeyBytes(privateKey: `0x${string}`): Promise<Uint8Array> {
  * Supports:
  * - Legacy (type 0) transactions via gasPrice
  * - EIP-1559 (type 2) transactions via maxFeePerGas + maxPriorityFeePerGas
+ * - EIP-7702 (type 4) transactions and authorizations (encoding in evm-tx.ts)
  * - personal_sign style message signing
  */
 export class EVMSigner implements Signer {
@@ -129,263 +155,46 @@ export class EVMSigner implements Signer {
     privateKey: `0x${string}`,
   ): Promise<SignResult> {
     const { secp256k1 } = await import("@noble/curves/secp256k1.js");
-    const { keccak_256 } = await import("@noble/hashes/sha3.js");
-    const { concatBytes, bytesToHex } = await import("@noble/hashes/utils.js");
-
-    if (typeof req.to !== "string" || !req.to)
-      throw new WalletError(
-        "invalid_input",
-        "Missing 'to' address for transaction",
-      );
-
-    if (req.chainId === undefined) {
-      throw new WalletError(
-        "invalid_input",
-        "Transaction chainId is required; refusing to guess a network.",
-      );
-    }
-    if (!Number.isSafeInteger(req.chainId)) {
-      throw new WalletError(
-        "invalid_input",
-        "Transaction chainId must be a safe integer.",
-      );
-    }
-    let txChainId: bigint;
-    try {
-      txChainId = BigInt(req.chainId);
-    } catch {
-      throw new WalletError(
-        "invalid_input",
-        "Transaction chainId must be an integer.",
-      );
-    }
-    if (txChainId <= 0n) {
-      throw new WalletError(
-        "invalid_input",
-        "Transaction chainId must be a positive integer.",
-      );
-    }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(req.to)) {
-      throw new WalletError(
-        "invalid_input",
-        "Transaction 'to' must be a 20-byte EVM address.",
-      );
-    }
-    const assertQuantity = (value: string | undefined, field: string): void => {
-      if (
-        value !== undefined &&
-        (!/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value) || BigInt(value) < 0n)
-      ) {
-        throw new WalletError(
-          "invalid_input",
-          `Transaction ${field} must be a canonical hexadecimal quantity.`,
-        );
-      }
-    };
-    assertQuantity(req.nonce, "nonce");
-    assertQuantity(req.gasPrice, "gasPrice");
-    assertQuantity(req.gas, "gas");
-    assertQuantity(req.value, "value");
-    assertQuantity(req.maxFeePerGas, "maxFeePerGas");
-    assertQuantity(req.maxPriorityFeePerGas, "maxPriorityFeePerGas");
-    const maxFeePerGas =
-      req.maxFeePerGas === undefined ? 0n : BigInt(req.maxFeePerGas);
-    const maxPriorityFeePerGas =
-      req.maxPriorityFeePerGas === undefined
-        ? 0n
-        : BigInt(req.maxPriorityFeePerGas);
-    if (maxPriorityFeePerGas > maxFeePerGas) {
-      throw new WalletError(
-        "invalid_input",
-        "maxPriorityFeePerGas cannot exceed maxFeePerGas.",
-      );
-    }
-    const hasEip1559Fees =
-      req.maxFeePerGas !== undefined || req.maxPriorityFeePerGas !== undefined;
-    if (req.type === "legacy" && hasEip1559Fees) {
-      throw new WalletError(
-        "invalid_input",
-        "Legacy transactions cannot include EIP-1559 fee fields.",
-      );
-    }
-    if (req.type === "eip1559" && !hasEip1559Fees) {
-      throw new WalletError(
-        "invalid_input",
-        "EIP-1559 transactions require maxFeePerGas or maxPriorityFeePerGas.",
-      );
-    }
-    if (hasEip1559Fees && req.gasPrice !== undefined) {
-      throw new WalletError(
-        "invalid_input",
-        "EIP-1559 transactions cannot include gasPrice.",
-      );
-    }
-    if (req.data !== undefined && !/^0x(?:[0-9a-fA-F]{2})*$/.test(req.data)) {
-      throw new WalletError(
-        "invalid_input",
-        "Transaction data must be an even-length hex byte string.",
-      );
-    }
+    // One copy for both halves, so the hash and the assembled bytes describe
+    // the same transaction.
+    const tx = invalidInput(() => snapshotTransaction(req));
+    const digest = invalidInput(() => transactionSigningHash(tx));
     const priv = await privateKeyBytes(privateKey);
-
-    // Helpers
-    function hexToBytes(h: string): Uint8Array {
-      const raw = h.startsWith("0x") ? h.slice(2) : h;
-      if (raw.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(raw)) {
-        throw new WalletError(
-          "invalid_input",
-          "Transaction hex values must contain complete bytes.",
-        );
-      }
-      const b = new Uint8Array(raw.length / 2);
-      for (let i = 0; i < raw.length; i += 2)
-        b[i / 2] = parseInt(raw.slice(i, i + 2), 16);
-      return b;
-    }
-
-    // Determine whether to encode as EIP-1559 (type 2) or Legacy (type 0)
-    const isEIP1559 =
-      req.type === "eip1559" || (req.type === undefined && hasEip1559Fees);
-
-    if (isEIP1559) {
-      return this.signEIP1559Tx(
-        req,
-        txChainId,
-        priv,
-        hexToBytes,
-        toRlpBytes,
-        encodeRlpList,
-        concatBytes,
-        keccak_256,
-        secp256k1,
-        bytesToHex,
-      );
-    }
-
-    // Legacy (type 0) — existing behavior
-    const nonce = toRlpQuantity(req.nonce ?? "0x0");
-    const gasPrice = toRlpQuantity(req.gasPrice ?? "0x0");
-    const gas = toRlpQuantity(req.gas ?? "0x5208");
-    const value = toRlpQuantity(req.value ?? "0x0");
-    const toBytes = toRlpBytes(req.to);
-    const dataBytes = toRlpBytes(req.data ?? "0x");
-    const chainIdHex = "0x" + txChainId.toString(16);
-
-    const unsignedTx = [
-      nonce,
-      gasPrice,
-      gas,
-      toBytes,
-      value,
-      dataBytes,
-      toRlpQuantity(chainIdHex),
-      toRlpBytes("0x"),
-      toRlpBytes("0x"),
-    ];
-
-    const encoded = encodeRlpList(unsignedTx);
-    const hash = keccak_256(encoded);
-    const sig = signDigest(secp256k1, hash, priv);
-    const compact = sig.compact;
-
-    const rBytes = compact.slice(0, 32);
-    const sBytes = compact.slice(32, 64);
-    // Noble's compact signature is exactly 64 bytes (r || s); recovery is a
-    // separate field and must be used for the EIP-155 y-parity value.
-    const vAdj = BigInt(sig.recovery) + 35n + txChainId * 2n;
-
-    const signedTxList = [
-      nonce,
-      gasPrice,
-      gas,
-      toBytes,
-      value,
-      dataBytes,
-      toRlpQuantity("0x" + vAdj.toString(16)),
-      toRlpQuantity("0x" + bytesToHex(rBytes)),
-      toRlpQuantity("0x" + bytesToHex(sBytes)),
-    ];
-    const signedEncoded = encodeRlpList(signedTxList);
-
+    const sig = signDigest(secp256k1, digest, priv);
     return {
-      signature: ("0x" + bytesToHex(signedEncoded)) as `0x${string}`,
+      signature: invalidInput(() =>
+        assembleSignedTransaction(
+          tx,
+          transactionSignature(sig.compact, sig.recovery),
+        ),
+      ),
     };
   }
 
   /**
-   * Sign an EIP-1559 (type 2) transaction.
+   * Sign an EIP-7702 authorization with the raw key — no EIP-191 prefix, the
+   * digest is keccak256(0x05 ‖ rlp([chainId, address, nonce])).
    *
-   * Format: 0x02 || rlp([chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, data, [], yParity, r, s])
+   * `chainId: 0` is refused unless `unsafeAllowAnyChainAuthorization` is set.
    */
-  private async signEIP1559Tx(
-    req: TransactionRequest,
-    txChainId: bigint,
-    priv: Uint8Array,
-    hexToBytes: (h: string) => Uint8Array,
-    toRlpBytes: (hex: string) => Uint8Array,
-    encodeRlpList: (items: Uint8Array[]) => Uint8Array,
-    concatBytes: (...arrays: Uint8Array[]) => Uint8Array,
-    keccak_256: (data: Uint8Array) => Uint8Array,
-    secp256k1: Secp256k1Like,
-    bytesToHex: (bytes: Uint8Array) => string,
-  ): Promise<SignResult> {
-    const chainIdRlp = toRlpQuantity("0x" + txChainId.toString(16));
-    const nonce = toRlpQuantity(req.nonce ?? "0x0");
-    const maxPriorityFeePerGas = toRlpQuantity(
-      req.maxPriorityFeePerGas ?? "0x0",
+  async signAuthorization(
+    auth: Eip7702AuthorizationRequest,
+    privateKey: `0x${string}`,
+    options?: Eip7702AuthorizationOptions,
+  ): Promise<SignedEip7702Authorization> {
+    const { secp256k1 } = await import("@noble/curves/secp256k1.js");
+    const authorization = invalidInput(() => snapshotAuthorization(auth));
+    const digest = invalidInput(() =>
+      authorizationHash(authorization, options),
     );
-    const maxFeePerGas = toRlpQuantity(req.maxFeePerGas ?? "0x0");
-    const gas = toRlpQuantity(req.gas ?? "0x5208");
-    const toBytes = toRlpBytes(req.to);
-    const value = toRlpQuantity(req.value ?? "0x0");
-    const dataBytes = toRlpBytes(req.data ?? "0x");
-    const emptyAccessList = new Uint8Array([0xc0]); // RLP empty list []
-
-    // Unsigned tx: rlp([chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, data, []])
-    const unsignedItems = [
-      chainIdRlp,
-      nonce,
-      maxPriorityFeePerGas,
-      maxFeePerGas,
-      gas,
-      toBytes,
-      value,
-      dataBytes,
-      emptyAccessList,
-    ];
-    const unsignedEncoded = encodeRlpList(unsignedItems);
-    const typePrefix = new Uint8Array([0x02]);
-    const unsignedMsg = concatBytes(typePrefix, unsignedEncoded);
-
-    const hash = keccak_256(unsignedMsg);
-    const sig = signDigest(secp256k1, hash, priv);
-    const compact = sig.compact;
-
-    const rBytes = compact.slice(0, 32);
-    const sBytes = compact.slice(32, 64);
-    const yParity = sig.recovery;
-
-    // Signed tx: rlp([chainId, nonce, maxPriorityFeePerGas, maxFeePerGas, gasLimit, to, value, data, [], yParity, r, s])
-    const signedItems = [
-      chainIdRlp,
-      nonce,
-      maxPriorityFeePerGas,
-      maxFeePerGas,
-      gas,
-      toBytes,
-      value,
-      dataBytes,
-      emptyAccessList,
-      toRlpQuantity("0x" + yParity.toString(16)),
-      toRlpQuantity("0x" + bytesToHex(rBytes)),
-      toRlpQuantity("0x" + bytesToHex(sBytes)),
-    ];
-    const signedEncoded = encodeRlpList(signedItems);
-    const signedPayload = concatBytes(typePrefix, signedEncoded);
-
-    return {
-      signature: ("0x" + bytesToHex(signedPayload)) as `0x${string}`,
-    };
+    const priv = await privateKeyBytes(privateKey);
+    const sig = signDigest(secp256k1, digest, priv);
+    return invalidInput(() =>
+      signedAuthorization(
+        authorization,
+        transactionSignature(sig.compact, sig.recovery),
+      ),
+    );
   }
 
   /**

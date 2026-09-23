@@ -21,8 +21,12 @@ import type {
 } from "./session-keys/types";
 import { Ed25519Signer } from "./signers/ed25519";
 import { EVMSigner } from "./signers/evm";
+import { snapshotAuthorization } from "./signers/evm-tx";
 import { IsolatedSigner } from "./signers/isolated-signer";
 import type {
+  Eip7702AuthorizationRequest,
+  Eip7702AuthorizationOptions,
+  SignedEip7702Authorization,
   Signer,
   SignRequest,
   SignResult,
@@ -465,6 +469,29 @@ async function deriveWallet(
   const addr = `0x${bytesToHex(hash.slice(-20))}` as `0x${string}`;
   const pk = `0x${bytesToHex(child.privateKey)}` as `0x${string}`;
   return { privateKey: pk, address: addr };
+}
+
+/**
+ * sendTransaction and bumpFee rebuild the request field by field
+ * (buildTransaction, cloneForBumping) and would drop `type` and
+ * `authorizationList`, quietly broadcasting a type-2 transaction with no
+ * delegation. sendWithSession must refuse it for a second reason: a session
+ * key never signs anything that changes the account's code. Until the send
+ * paths carry type 4 end to end, refuse it there; signTransaction signs it
+ * as given.
+ */
+function refuseSetCodeTransaction(
+  tx: TransactionRequest,
+): asserts tx is TransactionRequest & {
+  type?: "legacy" | "eip1559";
+  authorizationList?: undefined;
+} {
+  if (tx.type === "eip7702" || tx.authorizationList !== undefined) {
+    throw new WalletError(
+      "method_unsupported",
+      "EIP-7702 transactions cannot be sent or fee-bumped yet; use signTransaction and broadcast the result.",
+    );
+  }
 }
 
 /**
@@ -1160,6 +1187,54 @@ export class PocketWallet {
     );
   }
 
+  /**
+   * Sign an EIP-7702 authorization delegating the active account's code to
+   * `auth.address` (0x000…0 revokes). Signs only; broadcasting the type-4
+   * transaction that carries it is the caller's.
+   *
+   * The chain must be the configured one. `chainId: 0` — valid on every
+   * chain — additionally needs `unsafeAllowAnyChainAuthorization`.
+   * `auth.nonce` is the account's nonce at inclusion time: +1 when the same
+   * account also sends the type-4 transaction.
+   */
+  async signAuthorization(
+    auth: Eip7702AuthorizationRequest,
+    options?: Eip7702AuthorizationOptions,
+  ): Promise<SignedEip7702Authorization> {
+    if (!this.data)
+      throw new WalletError(
+        "no_wallet",
+        "No wallet loaded. Generate, import, or load a wallet first.",
+      );
+    const signer = this.activeSigner();
+    if (!signer.signAuthorization) {
+      throw new WalletError(
+        "method_unsupported",
+        `The ${signer.chainType} signer cannot sign an EIP-7702 authorization.`,
+      );
+    }
+    if (!auth || typeof auth !== "object") {
+      throw new WalletError("invalid_input", "Authorization is required.");
+    }
+    // Check and sign the same values; see snapshotAuthorization.
+    const authorization = snapshotAuthorization(auth);
+    const configuredChainId = sim.parseChainIdNumber(this.cfg.chainId);
+    if (
+      authorization.chainId !== 0 &&
+      authorization.chainId !== configuredChainId
+    ) {
+      throw new WalletError(
+        "chain_mismatch",
+        `Authorization chain ID ${authorization.chainId} does not match configured chain ${this.cfg.chainId}.`,
+      );
+    }
+    return signer.signAuthorization(
+      authorization,
+      this.activeAccount().privateKey as `0x${string}`,
+      options,
+    );
+  }
+
   // ── Export ──────────────────────────────────────────────────────
 
   /**
@@ -1373,6 +1448,7 @@ export class PocketWallet {
         "invalid_input",
         "Missing 'to' address for transaction.",
       );
+    refuseSetCodeTransaction(tx);
 
     const configuredChainId = this.assertConfiguredChain(tx);
 
@@ -1537,9 +1613,11 @@ export class PocketWallet {
     options: FeeBumpOptions = { strategy: "percentage", multiplier: 1.1 },
   ): Promise<TransactionResult> {
     if (!this.data) throw new WalletError("no_wallet", "No wallet loaded.");
+    refuseSetCodeTransaction(originalTx);
 
     // Clone the transaction without fee fields
     const bumpedTx = cloneForBumping(originalTx);
+    refuseSetCodeTransaction(bumpedTx);
 
     switch (options.strategy) {
       case "percentage": {
@@ -2003,6 +2081,7 @@ export class PocketWallet {
     tx: TransactionRequest,
     feeOptions?: FeeOptions,
   ): Promise<TransactionResult> {
+    refuseSetCodeTransaction(tx);
     if (!this.data) throw new WalletError("no_wallet", "No wallet loaded.");
     if (!tx.to)
       throw new WalletError(

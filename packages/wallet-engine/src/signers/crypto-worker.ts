@@ -1,25 +1,21 @@
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
-import { encodeRlpList, hexToBytes, toRlpBytes, toRlpQuantity } from "./rlp";
+import { bytesToHex } from "@noble/hashes/utils.js";
+import {
+  assembleSignedTransaction,
+  authorizationHash,
+  signedAuthorization,
+  transactionSignature,
+  transactionSigningHash,
+} from "./evm-tx";
+import { hexToBytes } from "./rlp";
 import { signDigest } from "./secp256k1-digest";
-
-interface SignMessageRequest {
-  message: string;
-}
-
-interface TransactionRequest {
-  to: string;
-  value?: string;
-  nonce?: string;
-  gasPrice?: string;
-  maxFeePerGas?: string;
-  maxPriorityFeePerGas?: string;
-  gas?: string;
-  data?: string;
-  chainId?: number;
-  type?: "legacy" | "eip1559";
-}
+import type {
+  Eip7702AuthorizationOptions,
+  Eip7702AuthorizationRequest,
+  SignedEip7702Authorization,
+  TransactionRequest,
+} from "./types";
 
 interface EncryptedPayload {
   salt: string;
@@ -35,13 +31,6 @@ function validatePrivateKey(key: Uint8Array): Uint8Array {
   }
   return key;
 }
-
-// RLP quantities are big-endian integers with leading zeros stripped. Inputs
-// arrive zero-padded from two directions: JSON-RPC callers may omit a leading
-// zero nibble, and secp256k1 r/s are fixed 32-byte values whose top nibble is
-// zero often enough to matter (~18% of signatures carry one). Normalize here
-// rather than rejecting; caller-supplied fields are separately held to
-// canonical form by assertQuantity() in signTransaction().
 
 function signPersonalMessage(msg: string): {
   signature: string;
@@ -68,132 +57,25 @@ function signPersonalMessage(msg: string): {
 
 function signTransaction(tx: TransactionRequest): { signature: string } {
   if (!privKey) throw new Error("no_key");
-  if (!tx.to || !/^0x[0-9a-fA-F]{40}$/.test(tx.to))
-    throw new Error("'to' must be a 20-byte EVM address");
-
-  if (tx.chainId === undefined || !Number.isSafeInteger(tx.chainId)) {
-    throw new Error("chainId must be a positive safe integer");
-  }
-  const txChainId = BigInt(tx.chainId);
-  if (txChainId <= 0n) throw new Error("chainId must be a positive integer");
-
-  const assertQuantity = (value: string | undefined): void => {
-    if (
-      value !== undefined &&
-      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)
-    ) {
-      throw new Error("transaction quantities must be canonical hex values");
-    }
+  const sig = signDigest(secp256k1, transactionSigningHash(tx), privKey);
+  return {
+    signature: assembleSignedTransaction(
+      tx,
+      transactionSignature(sig.compact, sig.recovery),
+    ),
   };
-  assertQuantity(tx.nonce);
-  assertQuantity(tx.gasPrice);
-  assertQuantity(tx.gas);
-  assertQuantity(tx.value);
-  assertQuantity(tx.maxFeePerGas);
-  assertQuantity(tx.maxPriorityFeePerGas);
-  const maxFeePerGas =
-    tx.maxFeePerGas === undefined ? 0n : BigInt(tx.maxFeePerGas);
-  const maxPriorityFeePerGas =
-    tx.maxPriorityFeePerGas === undefined
-      ? 0n
-      : BigInt(tx.maxPriorityFeePerGas);
-  if (maxPriorityFeePerGas > maxFeePerGas) {
-    throw new Error("maxPriorityFeePerGas cannot exceed maxFeePerGas");
-  }
-  const hasEIP1559Fees =
-    tx.maxFeePerGas !== undefined || tx.maxPriorityFeePerGas !== undefined;
-  if (tx.type === "legacy" && hasEIP1559Fees) {
-    throw new Error("legacy transactions cannot include EIP-1559 fee fields");
-  }
-  if (tx.type === "eip1559" && !hasEIP1559Fees) {
-    throw new Error(
-      "EIP-1559 transactions require maxFeePerGas or maxPriorityFeePerGas",
-    );
-  }
-  if (hasEIP1559Fees && tx.gasPrice !== undefined) {
-    throw new Error("EIP-1559 transactions cannot include gasPrice");
-  }
-  if (tx.data !== undefined && !/^0x(?:[0-9a-fA-F]{2})*$/.test(tx.data)) {
-    throw new Error("transaction data must be an even-length hex byte string");
-  }
-  const isEIP1559 =
-    tx.type === "eip1559" || (tx.type === undefined && hasEIP1559Fees);
+}
 
-  if (isEIP1559) {
-    const items = [
-      toRlpQuantity("0x" + txChainId.toString(16)),
-      toRlpQuantity(tx.nonce ?? "0x0"),
-      toRlpQuantity(tx.maxPriorityFeePerGas ?? "0x0"),
-      toRlpQuantity(tx.maxFeePerGas ?? "0x0"),
-      toRlpQuantity(tx.gas ?? "0x5208"),
-      toRlpBytes(tx.to),
-      toRlpQuantity(tx.value ?? "0x0"),
-      toRlpBytes(tx.data ?? "0x"),
-      new Uint8Array([0xc0]),
-    ];
-    const unsignedEncoded = encodeRlpList(items);
-    const unsignedMsg = concatBytes(new Uint8Array([0x02]), unsignedEncoded);
-    const hash = keccak_256(unsignedMsg);
-    const sig = signDigest(secp256k1, hash, privKey);
-    const compact = sig.compact;
-    const itemsSigned = [
-      toRlpQuantity("0x" + txChainId.toString(16)),
-      toRlpQuantity(tx.nonce ?? "0x0"),
-      toRlpQuantity(tx.maxPriorityFeePerGas ?? "0x0"),
-      toRlpQuantity(tx.maxFeePerGas ?? "0x0"),
-      toRlpQuantity(tx.gas ?? "0x5208"),
-      toRlpBytes(tx.to),
-      toRlpQuantity(tx.value ?? "0x0"),
-      toRlpBytes(tx.data ?? "0x"),
-      new Uint8Array([0xc0]),
-      toRlpQuantity("0x" + (sig.recovery).toString(16)),
-      toRlpQuantity("0x" + bytesToHex(compact.slice(0, 32))),
-      toRlpQuantity("0x" + bytesToHex(compact.slice(32, 64))),
-    ];
-    const signedEncoded = encodeRlpList(itemsSigned);
-    const signedPayload = concatBytes(new Uint8Array([0x02]), signedEncoded);
-    return { signature: "0x" + bytesToHex(signedPayload) };
-  }
-
-  const nonce = toRlpQuantity(tx.nonce ?? "0x0");
-  const gasPrice = toRlpQuantity(tx.gasPrice ?? "0x0");
-  const gas = toRlpQuantity(tx.gas ?? "0x5208");
-  const value = toRlpQuantity(tx.value ?? "0x0");
-  const toBytes = toRlpBytes(tx.to);
-  const dataBytes = toRlpBytes(tx.data ?? "0x");
-  const chainIdHex = "0x" + txChainId.toString(16);
-
-  const unsignedTx = [
-    nonce,
-    gasPrice,
-    gas,
-    toBytes,
-    value,
-    dataBytes,
-    toRlpQuantity(chainIdHex),
-    toRlpBytes("0x"),
-    toRlpBytes("0x"),
-  ];
-  const encoded = encodeRlpList(unsignedTx);
-  const hash = keccak_256(encoded);
-  const sig = signDigest(secp256k1, hash, privKey);
-  const compact = sig.compact;
-  // Compact signatures are 64 bytes; recovery is not stored at compact[64].
-  const vAdj = BigInt(sig.recovery) + 35n + txChainId * 2n;
-
-  const signedTxList = [
-    nonce,
-    gasPrice,
-    gas,
-    toBytes,
-    value,
-    dataBytes,
-    toRlpQuantity("0x" + vAdj.toString(16)),
-    toRlpQuantity("0x" + bytesToHex(compact.slice(0, 32))),
-    toRlpQuantity("0x" + bytesToHex(compact.slice(32, 64))),
-  ];
-  const signedEncoded = encodeRlpList(signedTxList);
-  return { signature: "0x" + bytesToHex(signedEncoded) };
+function signAuthorization(
+  auth: Eip7702AuthorizationRequest,
+  options: Eip7702AuthorizationOptions | undefined,
+): SignedEip7702Authorization {
+  if (!privKey) throw new Error("no_key");
+  const sig = signDigest(secp256k1, authorizationHash(auth, options), privKey);
+  return signedAuthorization(
+    auth,
+    transactionSignature(sig.compact, sig.recovery),
+  );
 }
 
 /**
@@ -266,7 +148,7 @@ self.onmessage = async (e: MessageEvent) => {
    * IsolatedSigner matches replies to pending promises by id and cannot do
    * anything with an unlabelled one, so a reply without an id is
    * indistinguishable from no reply at all — the caller waits out the full 30s
-   * timeout. Routing all eight replies through here makes that impossible to
+   * timeout. Routing every reply through here makes that impossible to
    * forget.
    */
   const reply = (msg: Record<string, unknown>) => {
@@ -304,6 +186,18 @@ self.onmessage = async (e: MessageEvent) => {
         }
         const result = signTransaction(payload);
         reply({ type: "signed", ...result });
+        break;
+      }
+      case "signAuthorization": {
+        if (!privKey) {
+          reply({ type: "error", error: "no_key" });
+          break;
+        }
+        const authorization = signAuthorization(
+          payload.authorization,
+          payload.options,
+        );
+        reply({ type: "signedAuthorization", authorization });
         break;
       }
       case "clear": {

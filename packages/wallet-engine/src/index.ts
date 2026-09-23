@@ -64,7 +64,14 @@ export type {
   StoredSessionKey,
 } from "./session-keys/types";
 export { EVMSigner } from "./signers/evm";
-export type { Signer, SignRequest, SignResult } from "./signers/types";
+export type {
+  Eip7702AuthorizationOptions,
+  Eip7702AuthorizationRequest,
+  Signer,
+  SignedEip7702Authorization,
+  SignRequest,
+  SignResult,
+} from "./signers/types";
 export { EthCallProvider } from "./simulation/providers/eth-call";
 export type { SimulationProvider } from "./simulation/providers/types";
 // Transaction Simulation

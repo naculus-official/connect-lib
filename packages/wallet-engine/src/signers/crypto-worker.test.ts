@@ -11,7 +11,13 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
  * probe fails at asset load long before it reaches a signature.
  */
 
-type Reply = { id?: string; type: string; signature?: string; error?: string };
+type Reply = {
+  id?: string;
+  type: string;
+  signature?: string;
+  authorization?: unknown;
+  error?: string;
+};
 
 let onmessage: (e: { data: unknown }) => Promise<void>;
 let replies: Reply[];
@@ -90,5 +96,68 @@ describe("crypto worker signing", () => {
     });
     expect(reply.type).toBe("error");
     expect(reply.error).toMatch(/canonical/);
+  });
+
+  // Vectors from viem 2.56.5 for the same key; see evm-tx.test.ts. The worker
+  // must produce the same bytes as EVMSigner because both use evm-tx.ts.
+  const DELEGATE = "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B";
+  const SIGNED_AUTH = {
+    chainId: 1,
+    address: DELEGATE,
+    nonce: "0x7",
+    yParity: 1,
+    r: "0x8590d30e098d3e27cd8e83b30b6965999605a2129f77b170dec7af1762a9e1c5",
+    s: "0x41f93e1aa5100e4ff37f1cf8c61d39d289b93cb994cbd27bc62db429919c149b",
+  };
+
+  it("signs an EIP-7702 authorization without exposing the key", async () => {
+    const reply = await send("signAuthorization", {
+      authorization: { chainId: 1, address: DELEGATE, nonce: "0x7" },
+    });
+    expect(reply.type).toBe("signedAuthorization");
+    expect(reply.authorization).toEqual(SIGNED_AUTH);
+  });
+
+  it("refuses an any-chain authorization unless explicitly allowed", async () => {
+    const auth = { chainId: 0, address: DELEGATE, nonce: "0x1" };
+    const refused = await send("signAuthorization", { authorization: auth });
+    expect(refused.type).toBe("error");
+    expect(refused.error).toMatch(/chainId 0/);
+
+    const allowed = await send("signAuthorization", {
+      authorization: auth,
+      options: { unsafeAllowAnyChainAuthorization: true },
+    });
+    expect(allowed.type).toBe("signedAuthorization");
+  });
+
+  it("signs a type-4 transaction byte-for-byte as EVMSigner does", async () => {
+    const reply = await send("signTransaction", {
+      type: "eip7702",
+      chainId: 1,
+      nonce: "0x6",
+      maxPriorityFeePerGas: "0x3b9aca00",
+      maxFeePerGas: "0x6fc23ac00",
+      gas: "0x186a0",
+      to: "0xe239cdc5fbe977a8a141B72194D3CF8c41bC5BC6",
+      value: "0x0",
+      data: "0xdeadbeef",
+      authorizationList: [SIGNED_AUTH],
+    });
+    expect(reply.signature).toBe(
+      "0x04f8ce0106843b9aca008506fc23ac00830186a094e239cdc5fbe977a8a141b72194d3cf8c41bc5bc68084deadbeefc0f85cf85a019463c0c19a282a1b52b07dd5a65b58948a07dae32b0701a08590d30e098d3e27cd8e83b30b6965999605a2129f77b170dec7af1762a9e1c5a041f93e1aa5100e4ff37f1cf8c61d39d289b93cb994cbd27bc62db429919c149b80a04915ac8dfea93ef28483d163fb90c66d4cef0c17a91569fa1165e9aecda8e6f1a02b47f7d85a2e092d052ade0d14b1a355d1e8c93ead82378abd23c074eb97a177",
+    );
+  });
+
+  it("refuses a type-4 transaction with an empty authorizationList", async () => {
+    const reply = await send("signTransaction", {
+      type: "eip7702",
+      chainId: 1,
+      maxFeePerGas: "0x1",
+      to: TO,
+      authorizationList: [],
+    });
+    expect(reply.type).toBe("error");
+    expect(reply.error).toMatch(/non-empty authorizationList/);
   });
 });

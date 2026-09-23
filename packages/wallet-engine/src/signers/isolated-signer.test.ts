@@ -311,3 +311,61 @@ describe("IsolatedSigner", () => {
     vi.useRealTimers();
   });
 });
+
+/**
+ * IsolatedSigner driving the real crypto-worker module, so the
+ * signAuthorization request and its "signedAuthorization" reply are checked as
+ * a pair rather than each against a mock of the other.
+ */
+describe("IsolatedSigner.signAuthorization over the real worker", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns the worker's signed authorization and surfaces its refusals", async () => {
+    let current: RealWorker | null = null;
+    vi.stubGlobal("self", {
+      onmessage: null,
+      postMessage: (data: unknown) => current?.onmessage?.({ data }),
+    });
+    vi.resetModules();
+    await import("./crypto-worker");
+    const workerOnMessage = (
+      globalThis as unknown as {
+        self: { onmessage: (e: { data: unknown }) => Promise<void> };
+      }
+    ).self.onmessage;
+
+    class RealWorker {
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      onmessageerror: ((e: unknown) => void) | null = null;
+      constructor() {
+        current = this;
+      }
+      postMessage(msg: unknown): void {
+        void workerOnMessage({ data: msg });
+      }
+      terminate(): void {}
+    }
+    vi.stubGlobal("Worker", RealWorker);
+
+    const signer = new IsolatedSigner();
+    await signer.initWithKey(`0x${"ab".repeat(32)}`);
+
+    const delegate = "0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B";
+    await expect(
+      signer.signAuthorization({ chainId: 1, address: delegate, nonce: "0x7" }),
+    ).resolves.toEqual({
+      chainId: 1,
+      address: delegate,
+      nonce: "0x7",
+      yParity: 1,
+      r: "0x8590d30e098d3e27cd8e83b30b6965999605a2129f77b170dec7af1762a9e1c5",
+      s: "0x41f93e1aa5100e4ff37f1cf8c61d39d289b93cb994cbd27bc62db429919c149b",
+    });
+    await expect(
+      signer.signAuthorization({ chainId: 0, address: delegate, nonce: "0x1" }),
+    ).rejects.toMatchObject({ code: "crypto_worker_error" });
+  });
+});

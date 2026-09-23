@@ -107,6 +107,19 @@ export async function signTransactionWithSessionKey(
     maxPriorityFeePerGas?: string;
   },
 ): Promise<`0x${string}`> {
+  // A type-4 transaction carries authorizationList, which no session scope
+  // check reads. A session key signs calls only; changing an account's code
+  // stays with the owner.
+  const { type, authorizationList } = tx as {
+    type?: unknown;
+    authorizationList?: unknown;
+  };
+  if (type === "eip7702" || authorizationList !== undefined) {
+    throw new WalletError(
+      "session_scope_exceeded",
+      "Session keys cannot sign EIP-7702 (type-4) transactions.",
+    );
+  }
   const { EVMSigner } = await import("../signers/evm");
   const signer = new EVMSigner();
 
