@@ -1,6 +1,6 @@
 {
   "name": "@naculus/connect",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Convenience umbrella \u2014 core exports and connector namespaces from one package",
   "type": "module",
   "main": "./index.js",
