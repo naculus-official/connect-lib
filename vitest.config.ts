@@ -49,6 +49,10 @@ export default defineConfig({
         "packages/connector-reown/src",
       ),
       "@naculus/siwx": path.resolve(__dirname, "packages/siwx/src"),
+      "@naculus/connector-solana-kit": path.resolve(
+        __dirname,
+        "packages/connector-solana-kit/src",
+      ),
       "@naculus/payments-x402": path.resolve(
         __dirname,
         "packages/payments-x402/src",

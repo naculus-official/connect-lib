@@ -31,6 +31,9 @@
       "@naculus/connector-wagmi": ["./packages/connector-wagmi/src"],
       "@naculus/connector-reown": ["./packages/connector-reown/src"],
       "@naculus/siwx": ["./packages/siwx/src"],
+      "@naculus/connector-solana-kit": [
+        "./packages/connector-solana-kit/src"
+      ],
       "@naculus/payments-x402": ["./packages/payments-x402/src"],
       "@naculus/wallet-engine": ["./packages/wallet-engine/src"],
       "@naculus/test-utils": ["./test-utils"],

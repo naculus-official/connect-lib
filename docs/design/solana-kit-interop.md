@@ -1,6 +1,13 @@
 # Solana Kit-native interop
 
-Status: design, step 1 of STATE.md thread 15. No code change.
+Status: step 2 implemented 2026-09-24 as `@naculus/connector-solana-kit`,
+against Kit **8** (peer `^8.0.0`; 8 adds
+`getTransactionLifetimeConstraintFromCompiledTransactionMessage`, which the
+modifying bridge needs to re-derive a rewritten transaction's lifetime).
+Messages map to `MessagePartialSigner`, not the modifying variant: Naculus's
+`signMessage` signs the given bytes and returns only a signature. Every
+returned signature is verified against the identity address. The reverse
+adapter (item 3) is not started.
 Date: 2026-09-21.
 
 ## Why
