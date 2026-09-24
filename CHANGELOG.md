@@ -11,6 +11,20 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **`@naculus/payments-x402`** (new package) — pays x402 v2 challenges with a session key. `createX402Fetch({ signer })` answers a 402 `PAYMENT-REQUIRED` challenge once: it picks the first requirement it can pay (`exact` scheme, EIP-3009 transfer method, single EIP-155 chain; Permit2, Solana and unknown schemes are refused), builds the `TransferWithAuthorization`, has it signed by `sessionKeyX402Signer(manager, sessionId)` under the key's policy (payee via `allowedRecipients`, amount via `tokenAllowances`, chain via `allowedChainIds`), and retries with `PAYMENT-SIGNATURE`. A second 402 is an error, a challenge that arrived through a redirect or names another origin is refused, the paid retry never follows a redirect, and nothing is broadcast. Without `allowedRecipients` the key pays whatever `payTo` the server names, up to its token budget.
 
+### Changed (breaking)
+
+- **The embedded wallet's session keys run on connect-core's engine** (`@naculus/wallet-engine`) — wallet-engine's own `SessionKeyManager` copy is removed. It enforced neither token allowances nor forbidden selectors (`approve`, `setApprovalForAll`, …), signed with keys the owner never authorized, had no cross-tab lock, and returned a signature before recording usage. `PocketWallet` now builds the transaction and its signing hash, and core's `SessionKeyManager` checks the full policy against that same transaction, signs the hash and records usage before the signature is returned. `createSessionKey` has the wallet's EVM account sign the key's authorization. **Migration:**
+  - `SessionKeyManager` is no longer exported from `@naculus/wallet-engine` (import it from `@naculus/connect-core`; its constructor differs), and `SessionSignResult` is removed.
+  - Session keys created by 0.2.x are **not carried over**. Their records (localStorage `naculus_session_keys`) are left untouched and no longer read: each old session key is its own EOA, and that encrypted record is the only copy of its private key. **Before upgrading, move any funds off your 0.2.x session-key addresses** (a 0.2.x build can still sign with them); then create new keys. New records live under `naculus_embedded_session_keys`, or in the adapter passed as `sessionKeys.storage`.
+  - Core's scope rules and defaults now apply: `allowedContracts` is required, omitted limits default to 0.1 ETH total value and 50 transactions, `tokenAllowances` and forbidden selectors are enforced, and only `mode: "offchain"` keys can be created (`eip7702` / `aa_module` are refused with `method_not_allowed`).
+  - `listSessions` returns revoked and expired keys too (check `status`), and scope refusals use core's `session_key_scope_exceeded` instead of `session_scope_exceeded`.
+  - A key whose scope sets `allowedRecipients` cannot send transactions (core refuses raw-digest signing for it).
+  - `wipe()` and `destroySession()` also clear the isolated worker's key and the session manager.
+
+### Fixed
+
+- **Session-key transactions came from the wrong address** (`@naculus/wallet-engine`) — `sendWithSession` read the nonce and estimated gas for the wallet's own address, but the session key signs and sends as its own EOA. Nonce, gas estimate and the reported `from` are now the session key's address, and the transaction must be for the configured chain.
+
 ## 0.2.8 — 2026-09-24
 
 ### Security
