@@ -12,16 +12,28 @@ import {
   shouldUseEIP1559,
   validateFeeParams,
 } from "./fee-oracle";
-import { SessionKeyManager } from "./session-keys/SessionKeyManager";
+import {
+  type SessionKeyManager,
+  sessionKeyAddress,
+} from "@naculus/connect-core";
+import {
+  createEmbeddedSessionKeyManager,
+  type EmbeddedSessionKeyOptions,
+  mnemonicFingerprint,
+  sessionAuthorizationMessage,
+} from "./session-keys/embedded";
 import type {
   ScopeCheckResult,
   SessionKeyInfo,
   SessionKeyScope,
-  SessionSignResult,
 } from "./session-keys/types";
 import { Ed25519Signer } from "./signers/ed25519";
 import { EVMSigner } from "./signers/evm";
-import { snapshotAuthorization } from "./signers/evm-tx";
+import {
+  serializeSignedTransaction,
+  snapshotAuthorization,
+  transactionSigningHash,
+} from "./signers/evm-tx";
 import { IsolatedSigner } from "./signers/isolated-signer";
 import type {
   DelegationTransactionResult,
@@ -86,6 +98,11 @@ export interface PocketConfig {
   autoSave?: boolean;
   /** Default chain ID (CAIP-10 format, default: "eip155:1") */
   chainId?: string;
+  /**
+   * Session keys: storage for their encrypted records and the core manager's
+   * policy/KDF settings. The encryption key is always derived from the seed.
+   */
+  sessionKeys?: EmbeddedSessionKeyOptions;
   /** RPC URL for transaction broadcasting */
   rpcUrl?: string;
   /**
@@ -526,6 +543,8 @@ export class PocketWallet {
   private _storage: StorageAdapter;
 
   private _sessionMgr: SessionKeyManager | null = null;
+  /** Fingerprint of the mnemonic the cached session manager was built for. */
+  private _sessionMgrWallet: string | null = null;
   private _txMonitor: TxMonitor | null = null;
   private _simulateFn: PocketConfig["simulateFn"];
   private _simManager: SimulationManager | null = null;
@@ -862,6 +881,7 @@ export class PocketWallet {
       chainId: this.cfg.chainId,
       version: 2,
     });
+    this.dropSessionMgr();
     await this.initSignerWithKey();
     if (this.cfg.autoSave)
       await this._storage.save(toStorableRecord(this.data));
@@ -891,6 +911,7 @@ export class PocketWallet {
       chainId: this.cfg.chainId,
       version: 2,
     });
+    this.dropSessionMgr();
     await this.initSignerWithKey();
     if (this.cfg.autoSave)
       await this._storage.save(toStorableRecord(this.data));
@@ -936,6 +957,7 @@ export class PocketWallet {
         version: 2,
       });
       // No EVM account: clears any previous wallet's key from the worker.
+      this.dropSessionMgr();
       await this.initSignerWithKey();
       if (this.cfg.autoSave)
         await this._storage.save(toStorableRecord(this.data));
@@ -972,6 +994,7 @@ export class PocketWallet {
       chainId: this.cfg.chainId,
       version: 2,
     });
+    this.dropSessionMgr();
     await this.initSignerWithKey();
     if (this.cfg.autoSave)
       await this._storage.save(toStorableRecord(this.data));
@@ -1028,6 +1051,7 @@ export class PocketWallet {
     }
 
     this.data = withActiveViews(data);
+    this.dropSessionMgr();
     await this.initSignerWithKey();
     return true;
   }
@@ -1068,6 +1092,7 @@ export class PocketWallet {
       added.push(account);
     }
     if (added.some((account) => account.namespace === "eip155")) {
+      this.dropSessionMgr();
       await this.initSignerWithKey();
     }
     return added;
@@ -1083,6 +1108,7 @@ export class PocketWallet {
   /** Clear wallet from memory and storage */
   async clear(): Promise<void> {
     this.data = null;
+    this.dropSessionMgr();
     await this._storage.clear();
     if (typeof (this._signer as any).clear === "function") {
       await (this._signer as any).clear();
@@ -1112,6 +1138,8 @@ export class PocketWallet {
       }
     }
     this.data = null;
+    this.dropSessionMgr();
+    await this.clearSignerKey();
     await this._storage.clear();
   }
 
@@ -1131,6 +1159,22 @@ export class PocketWallet {
       }
     }
     this.data = null;
+    this.dropSessionMgr();
+    // The isolated worker holds its own copy of the EVM key.
+    void this.clearSignerKey();
+  }
+
+  /** Forget the session manager, which holds a key derived from the seed. */
+  private dropSessionMgr(): void {
+    this._sessionMgr = null;
+    this._sessionMgrWallet = null;
+  }
+
+  /** Clear the isolated worker's key; a no-op for in-process signers. */
+  private async clearSignerKey(): Promise<void> {
+    if (this._signer instanceof IsolatedSigner) {
+      await this._signer.clear().catch(() => {});
+    }
   }
 
   // ── Signing ─────────────────────────────────────────────────────
@@ -2218,47 +2262,101 @@ export class PocketWallet {
   // ── Session Key Management ────────────────────────────────────
 
   /**
-   * Get or lazily initialize the SessionKeyManager.
-   * Requires an active wallet with mnemonic to derive the encryption seed.
+   * The core SessionKeyManager for this wallet, built on first use and
+   * rebuilt when a different wallet is loaded.
+   *
+   * Requires a mnemonic: the records are sealed with a key derived from its
+   * seed. Records from wallet-engine's pre-0.3.0 copy are not read (see
+   * LEGACY_SESSION_KEYS_STORAGE_KEY).
    */
   private async _getSessionMgr(): Promise<SessionKeyManager> {
-    if (this._sessionMgr) return this._sessionMgr;
-    if (!this.data?.mnemonic) {
+    const mnemonic = this.data?.mnemonic;
+    if (!mnemonic) {
       throw new WalletError(
         "no_wallet",
         "Wallet must be loaded with a mnemonic to use session keys. Import via mnemonic, not private key.",
       );
     }
-
+    const fingerprint = mnemonicFingerprint(mnemonic);
+    if (this._sessionMgr && this._sessionMgrWallet === fingerprint) {
+      return this._sessionMgr;
+    }
     const bip39 = await import("@scure/bip39");
-    const seed = await bip39.mnemonicToSeed(this.data.mnemonic);
-    this._sessionMgr = new SessionKeyManager(
+    const seed = await bip39.mnemonicToSeed(mnemonic);
+    this._sessionMgr = createEmbeddedSessionKeyManager(
       seed,
-      this.activeAccount().address as `0x${string}`,
-      this._storage,
+      this.cfg.sessionKeys,
     );
+    this._sessionMgrWallet = fingerprint;
     return this._sessionMgr;
   }
 
-  /**
-   * Create a new session key.
-   *
-   * Session keys are short-lived, scoped key pairs stored encrypted in localStorage.
-   * They allow automatic transaction signing without popping the wallet modal.
-   *
-   * @param scope - Authorization scope definition (expiry, spending limits, allowed contracts, etc.)
-   * @returns Session key public info (no private key exposed)
-   */
-  async createSessionKey(scope: SessionKeyScope): Promise<SessionKeyInfo> {
-    return (await this._getSessionMgr()).createSessionKey(scope);
+  /** The EVM account that owns this wallet's session keys. */
+  private evmAccount(): WalletAccount {
+    const evm = this.account("eip155");
+    if (!evm) {
+      throw new WalletError("no_wallet", "This wallet holds no EVM account.");
+    }
+    return evm;
   }
 
   /**
-   * List all active session keys (auto-cleans expired ones).
+   * Create a session key and authorize it.
+   *
+   * The key is a separate EOA: it signs and sends its own transactions, so it
+   * needs its own funds for value and gas. The wallet's EVM account signs an
+   * authorization for it at creation (core refuses to sign with an
+   * unauthorized key); a key whose authorization cannot be attached is
+   * revoked, not left usable.
+   *
+   * @param scope - Expiry, spending limits, allowed contracts, token allowances, …
+   * @returns Session key public info (no private key exposed)
+   */
+  async createSessionKey(scope: SessionKeyScope): Promise<SessionKeyInfo> {
+    if (scope?.mode !== undefined && scope.mode !== "offchain") {
+      throw new WalletError(
+        "method_not_allowed",
+        `Session keys of mode "${scope.mode}" need an on-chain executor; the embedded wallet creates "offchain" keys only.`,
+      );
+    }
+    const mgr = await this._getSessionMgr();
+    const owner = this.evmAccount();
+    const info = await mgr.createSessionKey(
+      scope,
+      owner.address as `0x${string}`,
+    );
+    try {
+      const message = sessionAuthorizationMessage({
+        owner: owner.address,
+        sessionId: info.id,
+        sessionKeyAddress: sessionKeyAddress(info.publicKey),
+        scope: info.scope,
+      });
+      const { signature } = await this.signerFor("eip155").signMessage(
+        { message },
+        owner.privateKey as `0x${string}`,
+      );
+      await mgr.setAuthorization(info.id, {
+        signerAddress: owner.address as `0x${string}`,
+        type: "offchain",
+        rawSignature: signature,
+        message,
+      });
+    } catch (err) {
+      await mgr.revokeSession(info.id).catch(() => {});
+      throw err;
+    }
+    return (
+      (await mgr.listSessions()).find((item) => item.id === info.id) ?? info
+    );
+  }
+
+  /**
+   * List this wallet's session keys.
    */
   async listSessions(): Promise<SessionKeyInfo[]> {
-    if (!this._sessionMgr) return [];
-    return this._sessionMgr.listSessions();
+    if (!this.data?.mnemonic) return [];
+    return (await this._getSessionMgr()).listSessions();
   }
 
   /**
@@ -2270,12 +2368,14 @@ export class PocketWallet {
   }
 
   /**
-   * Send a transaction using a session key (no wallet prompt).
+   * Send a transaction signed by a session key (no wallet prompt).
    *
-   * Automatically checks:
-   * - Session exists and is active
-   * - Session has not expired
-   * - Transaction is within scope limits
+   * The transaction is built here and its signing hash computed from it;
+   * core's SessionKeyManager checks the full policy against that same
+   * transaction — status, expiry, owner authorization, value and gas limits,
+   * contracts and methods, token allowances, forbidden selectors, count —
+   * signs the hash, and records the usage before returning the signature.
+   * The session key is the sender: nonce and gas are read for its address.
    *
    * @param sessionId - The session key to use
    * @param tx - Transaction request
@@ -2293,11 +2393,23 @@ export class PocketWallet {
         "invalid_input",
         "Missing 'to' address for transaction.",
       );
+    const configuredChainId = this.assertConfiguredChain(tx);
+    const mgr = await this._getSessionMgr();
+    const info = (await mgr.listSessions()).find(
+      (item) => item.id === sessionId,
+    );
+    if (!info) {
+      throw new WalletError(
+        "session_not_found",
+        `Session key '${sessionId}' not found.`,
+      );
+    }
+    const from = sessionKeyAddress(info.publicKey);
 
     // Get nonce if not provided
     if (!tx.nonce) {
       const nonceHex = (await this.rpcCall("eth_getTransactionCount", [
-        this.activeAccount().address,
+        from,
         "pending",
       ])) as string;
       tx.nonce = nonceHex;
@@ -2307,7 +2419,7 @@ export class PocketWallet {
     if (!tx.gas) {
       const estimated = (await this.rpcCall("eth_estimateGas", [
         {
-          from: this.activeAccount().address,
+          from,
           to: tx.to,
           value: tx.value ?? "0x0",
           data: tx.data ?? "0x",
@@ -2325,19 +2437,39 @@ export class PocketWallet {
     );
     validateFeeParams(resolvedFees);
 
-    // Build the final transaction
+    // Build the final transaction, then hash exactly that transaction.
     const builtTx = buildTransaction(tx, resolvedFees);
-    builtTx.chainId = resolveChainId(tx, this.cfg.chainId);
+    builtTx.chainId = configuredChainId;
+    let digest: `0x${string}`;
+    try {
+      digest = `0x${Array.from(transactionSigningHash(builtTx), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join("")}`;
+    } catch (err) {
+      throw new WalletError(
+        "invalid_input",
+        err instanceof Error ? err.message : "Invalid transaction.",
+      );
+    }
 
-    // Sign with session key (no wallet modal)
-    const { signature } = await (await this._getSessionMgr()).signWithSession(
-      sessionId,
-      builtTx,
-    );
+    // Policy and signature in one locked step, on the same facts.
+    const signature = await mgr.signWithSessionKey(sessionId, digest, {
+      to: builtTx.to,
+      value: builtTx.value ?? "0x0",
+      data: builtTx.data ?? "0x",
+      chainId: configuredChainId,
+      gas: builtTx.gas,
+    });
+    const v = Number.parseInt(signature.slice(130, 132), 16);
+    const rawTx = serializeSignedTransaction(builtTx, {
+      r: `0x${signature.slice(2, 66)}`,
+      s: `0x${signature.slice(66, 130)}`,
+      yParity: (v - 27) as 0 | 1,
+    });
 
     // Broadcast
     const txHash = (await this.rpcCall("eth_sendRawTransaction", [
-      signature,
+      rawTx,
     ])) as string;
     if (!txHash)
       throw new WalletError("tx_failed", "Failed to broadcast transaction.");
@@ -2348,7 +2480,7 @@ export class PocketWallet {
       this._txMonitor
         .watchTx(txHash, parsedChainId, {
           initialEntry: {
-            from: this.activeAccount().address,
+            from,
             to: tx.to,
             value: tx.value ?? "0x0",
             data: tx.data,
@@ -2364,7 +2496,7 @@ export class PocketWallet {
 
     return {
       hash: txHash,
-      from: this.activeAccount().address,
+      from,
       to: tx.to,
       value: tx.value ?? "0x0",
       data: tx.data ?? "0x",
@@ -2385,6 +2517,21 @@ export class PocketWallet {
     sessionId: string,
     tx: TransactionRequest,
   ): Promise<ScopeCheckResult> {
-    return (await this._getSessionMgr()).checkScope(sessionId, tx);
+    // Same chain rule as sendWithSession, so a preview cannot say "valid"
+    // for a transaction the send would refuse.
+    const chainId = resolveChainId(tx, this.cfg.chainId);
+    if (chainId !== sim.parseChainIdNumber(this.cfg.chainId)) {
+      return {
+        valid: false,
+        reason: `Transaction chain ID ${chainId} does not match configured chain ${this.cfg.chainId}.`,
+      };
+    }
+    return (await this._getSessionMgr()).checkSessionScope(sessionId, {
+      to: tx.to,
+      value: tx.value,
+      data: tx.data,
+      chainId,
+      gas: tx.gas,
+    });
   }
 }

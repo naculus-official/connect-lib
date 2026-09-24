@@ -49,9 +49,13 @@ export {
   toWireBytes,
 } from "./solana/transaction";
 // Session Keys
-// Client-side session keys for automatic transaction signing
-// without popping the wallet modal for every transaction.
-export { SessionKeyManager } from "./session-keys/SessionKeyManager";
+// The embedded wallet's session keys run on connect-core's SessionKeyManager
+// (import it from @naculus/connect-core); PocketWallet wires it up.
+export {
+  EMBEDDED_SESSION_KEYS_PREFIX,
+  type EmbeddedSessionKeyOptions,
+  LEGACY_SESSION_KEYS_STORAGE_KEY,
+} from "./session-keys/embedded";
 export type {
   ScopeCheckResult,
   SessionKeyBundle,
@@ -59,7 +63,6 @@ export type {
   SessionKeyPair,
   SessionKeyScope,
   SessionKeyStatus,
-  SessionSignResult,
   SignedAuthorization,
   StoredSessionKey,
 } from "./session-keys/types";

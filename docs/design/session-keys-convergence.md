@@ -1,6 +1,11 @@
 # Session keys: one policy engine for embedded and external wallets
 
-Status: review + corrected plan for STATE.md thread 16. No code change.
+Status: implemented 2026-09-24 (0.3.0). Changed from step 3 below after
+review: 0.2.x records under `naculus_session_keys` are **left in place and
+no longer read**, not deleted — each old key is a funded EOA and that record
+is the only copy of its private key. New records use
+`naculus_embedded_session_keys`. Also fixed while wiring it: session-key
+transactions now read nonce and gas for the session key's own address.
 Date: 2026-09-22.
 
 ## What was found
