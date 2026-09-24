@@ -70,6 +70,46 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/**
+ * Read every field of a request exactly once into a plain object.
+ *
+ * Validation, the scope mapping and the digest each read the request, so an
+ * object whose getters answer differently on later reads could be checked as
+ * one transfer and signed as another (independent review, 2026-09-23: a
+ * getter on `to`/`value` got an attacker's transfer signed while the scope
+ * charged a small one). The manager works only on this copy. Values are
+ * copied as-is, not coerced, so validation still sees their real types.
+ */
+export function snapshotTypedDataRequest(
+  req: SessionKeyTypedDataRequest,
+): SessionKeyTypedDataRequest {
+  if (!req || typeof req !== "object") {
+    return { primaryType: undefined } as unknown as SessionKeyTypedDataRequest;
+  }
+  const { domain, message, primaryType } = req;
+  const d =
+    domain && typeof domain === "object"
+      ? (({ name, version, chainId, verifyingContract }) => ({
+          name,
+          version,
+          chainId,
+          verifyingContract,
+        }))(domain)
+      : domain;
+  const m =
+    message && typeof message === "object"
+      ? (({ from, to, value, validAfter, validBefore, nonce }) => ({
+          from,
+          to,
+          value,
+          validAfter,
+          validBefore,
+          nonce,
+        }))(message)
+      : message;
+  return { domain: d, message: m, primaryType } as SessionKeyTypedDataRequest;
+}
+
 /** Structural validation; returns a reason instead of throwing so callers can report it as a scope failure. */
 export function validateTypedDataRequest(
   req: SessionKeyTypedDataRequest,
@@ -85,10 +125,22 @@ export function validateTypedDataRequest(
   if (!Number.isSafeInteger(d.chainId) || d.chainId <= 0) {
     return "Typed data domain chainId must be a positive integer";
   }
-  if (!ADDRESS.test(d.verifyingContract)) {
+  // typeof first: RegExp.test coerces, so an object with its own toString
+  // and slice could pass here and then encode differently in the scope
+  // mapping and the digest (independent review, 2026-09-24).
+  if (
+    typeof d.verifyingContract !== "string" ||
+    !ADDRESS.test(d.verifyingContract)
+  ) {
     return "Typed data verifyingContract must be an EVM address";
   }
-  if (!m || !ADDRESS.test(m.from) || !ADDRESS.test(m.to)) {
+  if (
+    !m ||
+    typeof m.from !== "string" ||
+    typeof m.to !== "string" ||
+    !ADDRESS.test(m.from) ||
+    !ADDRESS.test(m.to)
+  ) {
     return "TransferWithAuthorization from/to must be EVM addresses";
   }
   for (const [name, v] of [
@@ -100,7 +152,7 @@ export function validateTypedDataRequest(
       return `TransferWithAuthorization ${name} must be a decimal uint256`;
     }
   }
-  if (!BYTES32.test(m.nonce)) {
+  if (typeof m.nonce !== "string" || !BYTES32.test(m.nonce)) {
     return "TransferWithAuthorization nonce must be 32 bytes";
   }
   return null;

@@ -49,6 +49,12 @@ export interface SessionKeyScope {
    * `transfer`/`transferFrom` on an allowance-scoped token, or the `to` of a
    * `TransferWithAuthorization`. Any other calldata has no recognizable
    * recipient and is refused while this is set.
+   *
+   * While this is non-empty the key signs only through
+   * `signTypedDataWithSessionKey`, where the manager derives the digest from
+   * what it checked. Raw-digest signing (`signWithSessionKey`,
+   * `signWithVerifiedOffchainAuthorization`) is refused: a digest cannot be
+   * tied to the recipient of the transaction it arrives with.
    */
   allowedRecipients?: `0x${string}`[];
 

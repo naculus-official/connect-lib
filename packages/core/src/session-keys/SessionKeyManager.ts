@@ -22,17 +22,18 @@ import { isValidAddress, isZeroAddress } from "../address-validation";
 import type { StorageAdapter } from "../storage";
 import { createSessionKeyError } from "./errors";
 import {
-  type SessionKeyTypedDataRequest,
-  sessionKeyAddress,
-  typedDataAsTransaction,
-  typedDataDigest,
-  validateTypedDataRequest,
-} from "./typed-data";
-import {
   decryptPrivateKey,
   encryptPrivateKey,
   SessionKeyStorage,
 } from "./storage";
+import {
+  type SessionKeyTypedDataRequest,
+  sessionKeyAddress,
+  snapshotTypedDataRequest,
+  typedDataAsTransaction,
+  typedDataDigest,
+  validateTypedDataRequest,
+} from "./typed-data";
 import type {
   ScopeCheckResult,
   SessionKeyBundle,
@@ -365,6 +366,9 @@ export class SessionKeyManager {
 
     // Validate status
     this.validateSessionStatus(stored);
+    // The raw key signs anything; handing it out would undo the recipient
+    // limit exactly as a raw digest would.
+    this.refuseRawDigestForRecipientScope(stored);
 
     // Decrypt private key
     const privateKey = decryptPrivateKey(
@@ -391,6 +395,11 @@ export class SessionKeyManager {
    * Sign a raw message hash using a session key.
    * Validates scope, increments usage counter, and returns the signature.
    *
+   * The scope is checked against `tx`, which the caller describes; nothing
+   * ties `messageHash` to it. Use `signTypedDataWithSessionKey` where amount
+   * and recipient must be bound to what is signed. Refused while the scope
+   * sets `allowedRecipients`.
+   *
    * @param sessionId - The session key ID
    * @param messageHash - The 32-byte message hash to sign (0x-prefixed hex)
    * @returns secp256k1 signature as hex
@@ -409,6 +418,7 @@ export class SessionKeyManager {
         if (!stored) {
           throw createSessionKeyError("session_key_not_found", sessionId);
         }
+        this.refuseRawDigestForRecipientScope(stored);
         return this.signStoredSessionKey(stored, messageHash, tx);
       }),
     );
@@ -450,6 +460,7 @@ export class SessionKeyManager {
             "Off-chain authorization no longer matches the signed policy",
           );
         }
+        this.refuseRawDigestForRecipientScope(stored);
         return this.signStoredSessionKey(stored, messageHash, tx);
       }),
     );
@@ -473,8 +484,10 @@ export class SessionKeyManager {
         if (!stored) {
           throw createSessionKeyError("session_key_not_found", sessionId);
         }
-        const tx = this.typedDataToScopedTransaction(stored, request);
-        return this.signStoredSessionKey(stored, typedDataDigest(request), tx);
+        // One copy for the check, the scope mapping and the digest.
+        const snapshot = snapshotTypedDataRequest(request);
+        const tx = this.typedDataToScopedTransaction(stored, snapshot);
+        return this.signStoredSessionKey(stored, typedDataDigest(snapshot), tx);
       }),
     );
   }
@@ -508,10 +521,33 @@ export class SessionKeyManager {
             "Off-chain authorization no longer matches the signed policy",
           );
         }
-        const tx = this.typedDataToScopedTransaction(stored, request);
-        return this.signStoredSessionKey(stored, typedDataDigest(request), tx);
+        // One copy for the check, the scope mapping and the digest.
+        const snapshot = snapshotTypedDataRequest(request);
+        const tx = this.typedDataToScopedTransaction(stored, snapshot);
+        return this.signStoredSessionKey(stored, typedDataDigest(snapshot), tx);
       }),
     );
+  }
+
+  /**
+   * A raw digest cannot be tied to the `tx` it arrives with: the manager
+   * signs the 32 bytes it is handed and checks the transaction it is told
+   * about. So a scope that limits *who gets paid* cannot be enforced on it —
+   * a harmless `transfer(payee, 0)` could accompany the digest of a transfer
+   * to anyone (independent review, 2026-09-23). While `allowedRecipients` is
+   * set, only paths where the manager derives the digest itself
+   * (`signTypedDataWithSessionKey`) may sign.
+   */
+  private refuseRawDigestForRecipientScope(stored: StoredSessionKey): void {
+    if (
+      stored.scope.allowedRecipients &&
+      stored.scope.allowedRecipients.length > 0
+    ) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "This session key limits recipients; a raw digest cannot be bound to a recipient. Use signTypedDataWithSessionKey.",
+      );
+    }
   }
 
   /** Typed-data-specific refusals, then the transaction the scope check sees. */
@@ -522,6 +558,21 @@ export class SessionKeyManager {
     const structural = validateTypedDataRequest(request);
     if (structural) {
       throw createSessionKeyError("session_key_scope_exceeded", structural);
+    }
+    // The amount must count against something. Without a tokenAllowances
+    // entry for this token the equivalent transfer has no budget, and the
+    // scope check would let any value through.
+    const token = request.domain.verifyingContract.toLowerCase();
+    if (
+      !stored.scope.tokenAllowances ||
+      !Object.keys(stored.scope.tokenAllowances).some(
+        (address) => address.toLowerCase() === token,
+      )
+    ) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "TransferWithAuthorization requires a tokenAllowances entry for the token",
+      );
     }
     const selfAddress = sessionKeyAddress(stored.keyPair.publicKey);
     if (request.message.from.toLowerCase() !== selfAddress.toLowerCase()) {

@@ -72,6 +72,49 @@ describe("typed-data helpers", () => {
     expect(sessionKeyAddress(pub)).toBe(expected);
   });
 
+  it("matches viem's hashTypedData byte for byte", () => {
+    // Independent vectors: viem 2.56.5 hashTypedData in a throwaway script,
+    // same domain and message, EIP-3009 TransferWithAuthorization types.
+    const base: SessionKeyTypedDataRequest = {
+      domain: {
+        name: "USD Coin",
+        version: "2",
+        chainId: 1,
+        verifyingContract: USDC,
+      },
+      primaryType: "TransferWithAuthorization",
+      message: {
+        from: SIGNER,
+        to: PAYEE,
+        value: "1500000",
+        validAfter: "0",
+        validBefore: "1790000000",
+        nonce: `0x${"ab".repeat(32)}`,
+      },
+    };
+    expect(typedDataDigest(base)).toBe(
+      "0x87536b953850e2da56d3d030a2573c36bc5d23912ad4b6d19fa5abb2e7f41e91",
+    );
+    expect(
+      typedDataDigest({
+        ...base,
+        domain: {
+          ...base.domain,
+          chainId: 8453,
+          verifyingContract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        },
+        message: {
+          ...base.message,
+          value: ((1n << 256n) - 1n).toString(),
+          validAfter: "1",
+          nonce: `0x00${"01".repeat(31)}`,
+        },
+      }),
+    ).toBe(
+      "0x7edae92b253fff2bfe505c829c03821c544ac9b39cfe0ccd5f63e1ab566f0e75",
+    );
+  });
+
   it("computes the EIP-712 digest that a signature must recover against", () => {
     const req = request(PAYEE);
     const digest = typedDataDigest(req);
@@ -151,24 +194,223 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       allowedContracts: [PAYEE, OTHER],
       allowedRecipients: [PAYEE],
     });
-    const hash = `0x${"ab".repeat(32)}` as const;
-    await expect(
-      m.signWithSessionKey(info.id, hash, { to: PAYEE, value: "1" }),
-    ).resolves.toMatch(/^0x/);
+    expect(
+      await m.checkSessionScope(info.id, { to: PAYEE, value: "1" }),
+    ).toMatchObject({ valid: true });
     expect(
       await m.checkSessionScope(info.id, { to: OTHER, value: "1" }),
     ).toMatchObject({
       valid: false,
       reason: expect.stringMatching(/not in allowed list/),
     });
-    await expect(
-      m.signWithSessionKey(info.id, hash, { to: OTHER, value: "1" }),
-    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
     expect(
       await m.checkSessionScope(info.id, { to: PAYEE, data: "0x12345678" }),
     ).toMatchObject({
       valid: false,
       reason: expect.stringMatching(/no recognizable recipient/),
+    });
+  });
+
+  it("refuses raw-digest signing while recipients are limited", async () => {
+    // The digest of a transfer to anyone, sent with a harmless tx describing a
+    // zero transfer to the payee (independent review, 2026-09-23).
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 2_000_000n },
+      allowedRecipients: [PAYEE],
+    });
+    const self = sessionKeyAddress(info.publicKey);
+    const theft = typedDataDigest(
+      request(self, { to: OTHER, value: "999999999999" }),
+    );
+    const harmless = {
+      to: USDC,
+      chainId: 1,
+      data: `0xa9059cbb${"0".repeat(24)}${PAYEE.slice(2)}${"0".repeat(64)}`,
+    };
+    await expect(
+      m.signWithSessionKey(info.id, theft, harmless),
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+    await expect(
+      m.signWithVerifiedOffchainAuthorization(
+        info.id,
+        () => "test",
+        () => true,
+        theft,
+        harmless,
+      ),
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+  });
+
+  it("still signs raw digests when recipients are not limited", async () => {
+    const m = manager();
+    const info = await authorizedKey(m, { allowedContracts: [PAYEE] });
+    await expect(
+      m.signWithSessionKey(info.id, `0x${"ab".repeat(32)}`, {
+        to: PAYEE,
+        value: "1",
+      }),
+    ).resolves.toMatch(/^0x/);
+  });
+
+  it("signs the digest it checked, recoverable to the session key", async () => {
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 2_000_000n },
+    });
+    const self = sessionKeyAddress(info.publicKey);
+    const req = request(self);
+    const sig = await m.signTypedDataWithSessionKey(info.id, req);
+    const bytes = hexToBytes(sig.slice(2));
+    const v = bytes[64] >= 27 ? bytes[64] - 27 : bytes[64];
+    const recovered = secp256k1.Signature.fromBytes(
+      bytes.slice(0, 64),
+      "compact",
+    )
+      .addRecoveryBit(v)
+      .recoverPublicKey(hexToBytes(typedDataDigest(req).slice(2)));
+    expect(sessionKeyAddress(`0x${recovered.toHex(true)}`)).toBe(self);
+  });
+
+  it("checks and signs one read of each field", async () => {
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 2_000_000n },
+      allowedRecipients: [PAYEE],
+    });
+    const self = sessionKeyAddress(info.publicKey);
+    const honest = request(self);
+    let reads = 0;
+    const shifty = {
+      ...honest,
+      message: {
+        ...honest.message,
+        get to() {
+          reads += 1;
+          return reads === 1 ? PAYEE : OTHER;
+        },
+      },
+    } as SessionKeyTypedDataRequest;
+    const sig = await m.signTypedDataWithSessionKey(info.id, shifty);
+    expect(reads).toBe(1);
+    // The signature is over the payee transfer that was checked.
+    const bytes = hexToBytes(sig.slice(2));
+    const v = bytes[64] >= 27 ? bytes[64] - 27 : bytes[64];
+    const recovered = secp256k1.Signature.fromBytes(
+      bytes.slice(0, 64),
+      "compact",
+    )
+      .addRecoveryBit(v)
+      .recoverPublicKey(hexToBytes(typedDataDigest(honest).slice(2)));
+    expect(sessionKeyAddress(`0x${recovered.toHex(true)}`)).toBe(self);
+  });
+
+  it("refuses typed data for a token with no allowance entry", async () => {
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+    });
+    const self = sessionKeyAddress(info.publicKey);
+    const failure = await m
+      .signTypedDataWithSessionKey(
+        info.id,
+        request(self, { value: ((1n << 256n) - 1n).toString() }),
+      )
+      .then(
+        () => null,
+        (e: unknown) => e as { code: string; details?: unknown },
+      );
+    expect(failure?.code).toBe("session_key_scope_exceeded");
+    expect(String(failure?.details)).toMatch(/tokenAllowances entry/);
+  });
+
+  it("refuses malformed or expired authorizations", async () => {
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 10_000_000n },
+    });
+    const self = sessionKeyAddress(info.publicKey);
+    const now = Math.floor(Date.now() / 1000);
+    const cases: [SessionKeyTypedDataRequest, RegExp][] = [
+      [request(self, { validBefore: String(now - 1) }), /in the past/],
+      [
+        request(self, {
+          validAfter: String(now + 60),
+          validBefore: String(now + 60),
+        }),
+        /window is empty/,
+      ],
+      [request(self, { value: "01" }), /decimal uint256/],
+      [request(self, { value: (1n << 256n).toString() }), /decimal uint256/],
+      [request(self, { value: 5 as never }), /decimal uint256/],
+      [request(self, { nonce: `0x${"ab".repeat(31)}` }), /32 bytes/],
+    ];
+    for (const [req, reason] of cases) {
+      const failure = await m.signTypedDataWithSessionKey(info.id, req).then(
+        () => null,
+        (e: unknown) => e as { code: string; details?: unknown },
+      );
+      expect(failure?.code).toBe("session_key_scope_exceeded");
+      expect(String(failure?.details)).toMatch(reason);
+    }
+  });
+
+  it("refuses non-string addresses that would encode twice", async () => {
+    // An object passing the address regex through its toString, whose slice
+    // answers differently on each call (independent review, 2026-09-24).
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 2_000_000n },
+      allowedRecipients: [PAYEE],
+    });
+    const self = sessionKeyAddress(info.publicKey);
+    let slices = 0;
+    const shifty = {
+      toString: () => PAYEE,
+      slice: (start: number) => {
+        slices += 1;
+        return (slices === 1 ? PAYEE : OTHER).slice(start);
+      },
+    };
+    const honest = request(self);
+    for (const req of [
+      { ...honest, message: { ...honest.message, to: shifty } },
+      { ...honest, message: { ...honest.message, from: shifty } },
+      { ...honest, domain: { ...honest.domain, verifyingContract: shifty } },
+      {
+        ...honest,
+        message: {
+          ...honest.message,
+          nonce: { toString: () => honest.message.nonce },
+        },
+      },
+    ]) {
+      await expect(
+        m.signTypedDataWithSessionKey(info.id, req as never),
+      ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+    }
+  });
+
+  it("does not hand out the raw key while recipients are limited", async () => {
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      tokenAllowances: { [USDC]: 2_000_000n },
+      allowedRecipients: [PAYEE],
+    });
+    await expect(m.getSessionBundle(info.id)).rejects.toMatchObject({
+      code: "session_key_scope_exceeded",
     });
   });
 });
