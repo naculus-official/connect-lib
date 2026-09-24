@@ -7,6 +7,25 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.2.8 — 2026-09-24
+
+### Security
+
+- **Session-key recipient limits are bound to what is signed** (`@naculus/connect-core`) — an independent review of 0.2.7's EIP-3009 path found that `allowedRecipients` could be bypassed. `signWithSessionKey` and `signWithVerifiedOffchainAuthorization` sign a caller-supplied 32-byte digest checked only against a transaction the caller describes, so a harmless `transfer(payee, 0)` could accompany the digest of a transfer to anyone. While `allowedRecipients` is set, both now refuse, and so does `getSessionBundle` (which returned the raw key); only `signTypedDataWithSessionKey` / `signTypedDataWithVerifiedOffchainAuthorization`, where the manager derives the digest itself, can sign. **Upgrade if you use `allowedRecipients`** — in 0.2.7 it is not a payee guarantee.
+
+### Fixed
+
+- **Typed-data requests are read once** (`@naculus/connect-core`) — fields were read several times, so getters (or non-string objects passing the address check through `toString`) could have one transfer checked and another signed. The request is copied once; addresses and the nonce must be strings.
+- **Typed data needs a token allowance** (`@naculus/connect-core`) — `TransferWithAuthorization` for a token with no `tokenAllowances` entry had no amount limit; it is now refused.
+
+### Changed
+
+- **Behavior change:** a session key whose scope sets `allowedRecipients` can no longer sign raw digests or export its key. With `allowedRecipients` unset, raw-digest signing is unchanged; its documentation now states that the scope applies to the described transaction, not to the digest.
+
+### Package impact
+
+`@naculus/connect-core` carries functional change. The other 13 packages are version-bump-only releases required by the lockstep release model.
+
 ## 0.2.7 — 2026-09-23
 
 ### Added
