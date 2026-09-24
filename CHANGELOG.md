@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`@naculus/payments-x402`** (new package) — pays x402 v2 challenges with a session key. `createX402Fetch({ signer })` answers a 402 `PAYMENT-REQUIRED` challenge once: it picks the first requirement it can pay (`exact` scheme, EIP-3009 transfer method, single EIP-155 chain; Permit2, Solana and unknown schemes are refused), builds the `TransferWithAuthorization`, has it signed by `sessionKeyX402Signer(manager, sessionId)` under the key's policy (payee via `allowedRecipients`, amount via `tokenAllowances`, chain via `allowedChainIds`), and retries with `PAYMENT-SIGNATURE`. A second 402 is an error, a challenge that arrived through a redirect or names another origin is refused, the paid retry never follows a redirect, and nothing is broadcast. Without `allowedRecipients` the key pays whatever `payTo` the server names, up to its token budget.
+
 ## 0.2.8 — 2026-09-24
 
 ### Security

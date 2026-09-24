@@ -49,6 +49,10 @@ export default defineConfig({
         "packages/connector-reown/src",
       ),
       "@naculus/siwx": path.resolve(__dirname, "packages/siwx/src"),
+      "@naculus/payments-x402": path.resolve(
+        __dirname,
+        "packages/payments-x402/src",
+      ),
       "@naculus/wallet-engine": path.resolve(
         __dirname,
         "packages/wallet-engine/src",

@@ -1,6 +1,22 @@
 # Agentic payments (x402 / MPP) on the session-key policy engine
 
-Status: steps 1–2 done (2026-09-22): typed-data awareness and `allowedRecipients` are in core session-keys. Step 3 (`payments-x402` package) pending wire-shape verification.
+Status: steps 1–2 done (2026-09-22), hardened after independent review in
+0.2.8; step 3 done (2026-09-24): `@naculus/payments-x402`, client side of
+x402 v2 over HTTP, EVM `exact` scheme with EIP-3009 only.
+
+**Wire shapes pinned 2026-09-24** against coinbase/x402 `specs/`
+(`x402-specification-v2.md`, `transports-v2/http.md`,
+`schemes/exact/scheme_exact_evm.md`); these supersede the *verify* notes
+below. Headers are `PAYMENT-REQUIRED` (402 challenge), `PAYMENT-SIGNATURE`
+(client payload) and `PAYMENT-RESPONSE` (settlement), each base64-encoded
+JSON with `x402Version: 2` — the `X-PAYMENT` names are v1. `accepts[]`
+entries carry `scheme`, `network` (plain CAIP-2), `amount`, `asset`, `payTo`,
+`maxTimeoutSeconds` and `extra` (`name`/`version` of the token's EIP-712
+domain, optional `assetTransferMethod`). EVM `exact` prefers EIP-3009 and
+falls back to Permit2; the package refuses Permit2 (a session key signs only
+`TransferWithAuthorization`). SVM `exact` is a partially signed
+`TransferChecked` transaction — out of scope until the Solana Kit work
+(thread 15).
 Date: 2026-09-21.
 
 Protocol details below are from memory of the public specs as of mid-2026
