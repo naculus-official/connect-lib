@@ -83,7 +83,7 @@ jobs:
 
       # pnpm -r publish skips any package whose version is already on the
       # registry, so a partial bump publishes nothing and still exits 0. The
-      # tag step below reads packages/core, which assumes all 14 agree. Prove
+      # tag step below reads packages/core, which assumes every package agrees. Prove
       # both, plus the packed manifests, before anything reaches npm.
       - name: Release preflight
         if: ${{ inputs.dry_run == 'false' }}
@@ -136,7 +136,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           VERSION=$(node -p "require('./packages/core/package.json').version")
-          # preflight already proved all 14 packages agree on this version and
+          # preflight already proved every package agrees on this version and
           # that v$VERSION did not exist. If either has changed underneath us,
           # these fail and the run goes red.
           git tag -a "v$VERSION" -m "Release v$VERSION"

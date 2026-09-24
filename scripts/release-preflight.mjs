@@ -5,11 +5,11 @@
  *   node scripts/release-preflight.mjs --pre-bump
  *   node scripts/release-preflight.mjs --expect <version>
  *
- * This repository releases all 14 packages in lockstep. That is not a
+ * This repository releases every public package in lockstep. That is not a
  * convention someone wrote down — it is what `scripts/publish.sh` enforces with
  * a literal `sed` keyed on `packages/core`'s version, and it is what every
- * published release has done: all 14 packages share one version set, and all 14
- * skipped 0.1.4 together.
+ * published release has done: the packages share one version set, and the 14
+ * that existed then all skipped 0.1.4 together.
  *
  * Nothing checked that, so one package drifting out of step would be silent,
  * and the drift would compound:

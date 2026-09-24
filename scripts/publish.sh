@@ -5,8 +5,8 @@
 # What this does:
 #
 #   1. refuse to run from a dirty working tree
-#   2. refuse to bump unless all 14 packages already agree on one version
-#   3. bump all 14 (changesets if any exist, otherwise a literal sed)
+#   2. refuse to bump unless every package already agrees on one version
+#   3. bump every package (changesets if any exist, otherwise a literal sed)
 #   4. verify the bump landed on every package
 #   5. tell you what to do next
 #
@@ -31,7 +31,7 @@ VERSION="${VERSION:-${1:-}}"
 
 # A literal sed keyed on packages/core's version silently skips any package
 # that has already drifted, so drift compounds instead of surfacing. Refuse to
-# touch versions unless all 14 currently agree.
+# touch versions unless every package currently agrees.
 node "$ROOT_DIR/scripts/release-preflight.mjs" --pre-bump || {
   echo "❌ release-preflight --pre-bump failed — refusing to bump"
   exit 1
@@ -84,7 +84,7 @@ if find "$ROOT_DIR/.changeset" -maxdepth 1 -type f -name '*.md' ! -name 'README.
   VERSION=$(node -p "require('$ROOT_DIR/packages/core/package.json').version")
   echo "🔼 Changesets bumped to $VERSION"
   # .changeset/config.json has "fixed": [], so changesets bumps only the
-  # packages a changeset names, while the release model assumes all 14 move
+  # packages a changeset names, while the release model assumes every package moves
   # together. Verify that rather than trusting it.
   node "$ROOT_DIR/scripts/release-preflight.mjs" --expect "$VERSION" || {
     echo "❌ changesets produced a partial bump — stopping"
