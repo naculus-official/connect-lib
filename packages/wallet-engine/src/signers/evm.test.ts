@@ -391,6 +391,42 @@ describe("EVMSigner — signTypedData edge cases", () => {
     expect(result.signature).toMatch(/^0x[0-9a-f]{130}$/);
   });
 
+  it("sign-extends negative intN to 256 bits, as ABI encoding does", async () => {
+    // Vector: viem 2.56.5 signTypedData for the same key and data. The
+    // encoder used 2^N for a negative intN < int256, so these signatures
+    // matched no verifier.
+    const typedData = JSON.stringify({
+      domain: {
+        name: "Ints",
+        version: "1",
+        chainId: 1,
+        verifyingContract: "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC",
+      },
+      types: {
+        EIP712Domain: [
+          { name: "name", type: "string" },
+          { name: "version", type: "string" },
+          { name: "chainId", type: "uint256" },
+          { name: "verifyingContract", type: "address" },
+        ],
+        M: [
+          { name: "a", type: "int8" },
+          { name: "b", type: "int64" },
+          { name: "c", type: "int256" },
+          { name: "d", type: "int64" },
+        ],
+      },
+      primaryType: "M",
+      message: { a: "-1", b: "-42", c: "-7", d: "5" },
+    });
+    await expect(
+      signer.signTypedData(typedData, testPk),
+    ).resolves.toMatchObject({
+      signature:
+        "0x5db99addec464352531f1314a4450b963a5c2ab5afd0c1607bf6ebca1ca650d239de6549b2fd294ba4381a8169bf0f1887e8130118afcc277887c5303e629bb31c",
+    });
+  });
+
   it("rejects unsafe JavaScript numbers in EIP-712 integers", async () => {
     const typedData = JSON.stringify({
       types: {

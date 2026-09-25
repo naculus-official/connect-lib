@@ -295,7 +295,10 @@ export class EVMSigner implements Signer {
           throw new Error(`uint overflow: ${type}`);
         if (type.startsWith("int") && (n < -(limit >> 1n) || n >= limit >> 1n))
           throw new Error(`int overflow: ${type}`);
-        const encoded = type.startsWith("int") && n < 0n ? limit + n : n;
+        // ABI encodes every signed integer as a 256-bit two's complement word
+        // (sign-extended), whatever N is; using 2^N here signed a digest no
+        // verifier computes for a negative intN < int256.
+        const encoded = type.startsWith("int") && n < 0n ? (1n << 256n) + n : n;
         return bigintWordBytes(encoded);
       }
       if (type === "bool") {
