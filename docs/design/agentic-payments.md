@@ -114,3 +114,68 @@ EIP-3009 gasless transfers benefits). 3 follows. Estimated: ~250 lines core +
 tests, ~300 lines package + tests. Two Codex work packages, two review
 rounds. Suggested for a 0.3.0 alongside thread 1 (EIP-7702 execution),
 since both change what a session key may sign.
+
+## Step 4: the MPP adapter (pinned 2026-09-26)
+
+Pinned against `tempoxyz/mpp-specs` @ `08e7dd8` (`draft-httpauth-payment-01`,
+`draft-payment-intent-charge-00`, `draft-evm-charge-00`) and the reference
+client `wevm/mppx` `src/evm/client/Charge.ts` / `src/evm/Types.ts`.
+
+**Wire format.** A 402 carries one or more `WWW-Authenticate: Payment`
+challenges (RFC 9110 auth-params): required `id`, `realm`, `method`
+(lowercase), `intent`, `request` (base64url-nopad JCS JSON); optional
+`expires` (RFC 3339), `digest` (RFC 9530 body digest), `description`,
+`header` (only `Payment-Authorization` is legal), `opaque` (base64url JCS
+flat string map). The credential is `Payment <base64url-nopad JSON>` with
+`{ challenge: <echo of every received param, unchanged>, payload, source? }`,
+sent in `Authorization`, or in `Payment-Authorization` when the challenge
+says so. Success returns `Payment-Receipt` (base64url JSON: `status:
+"success"`, `method`, `timestamp`, `reference`, EVM adds `challengeId`,
+`chainId`); failure is 402 + a fresh challenge + RFC 9457 problem JSON.
+
+**The one method that fits the session-key engine: `method="evm"`,
+`intent="charge"`, credential `type="authorization"`.** It is EIP-3009
+`TransferWithAuthorization`, exactly what `signTypedDataWithSessionKey`
+already bounds (token, payee, amount, chain, lifetime, usage). Request:
+`amount` (base units), `currency` (token), `recipient`,
+`methodDetails.chainId`, `methodDetails.credentialTypes`. Payload `{ type:
+"authorization", from, to, value, validAfter: "0", validBefore, nonce,
+signature }` where:
+
+- `nonce = keccak256(utf8(challenge.id + challenge.realm))` — the server,
+  not the client, fixes the nonce; the token contract consumes it, so a
+  replayed challenge cannot be paid twice.
+- `validBefore` = `expires` in unix seconds, or now + 300 s when absent (as
+  mppx); core already refuses a `validBefore` beyond the session's expiry.
+- Used only when `credentialTypes` lists `"authorization"` and there are no
+  `splits` (the spec forbids splits with this type).
+
+Refused, fail-closed: `type="permit2"` (the engine cannot bound a Permit2
+witness transfer — same reason x402 refuses it), `type="transaction"` and
+`type="hash"` (the key would sign or broadcast a transfer transaction; a
+later step if a consumer needs it), every non-`evm` method, every intent
+but `charge`, `splits`, an expired challenge, a `header` other than
+`Payment-Authorization`, a malformed or duplicated auth-param.
+
+**The gap the spec leaves: the token's EIP-712 domain.** x402 sends
+`extra.name/version`; MPP sends nothing, and mppx resolves it from a
+known-assets table or a caller setting. A wrong domain only yields a
+signature the token rejects (the domain binds `verifyingContract` and
+`chainId`), so it is a liveness risk, not a funds risk.
+
+**Boundary.** Only the new adapter's files and tests; no change to core or
+to the signing path (it calls `signTypedDataWithSessionKey` as x402 does);
+no new dependency beyond `@noble/hashes` for keccak (already in the
+workspace); no broadcasting, no retries beyond one, redirects refused on
+the paid retry (`redirect: "error"`), the credential never sent to another
+origin than the challenge's. Review: the challenge parser and the
+credential echo get an independent pass.
+
+**Decisions needed before implementing:**
+
+1. Home: a new `@naculus/payments-mpp` package (needs the user's npm
+   bootstrap, as for x402), or inside `@naculus/payments-x402`.
+2. Domain source: caller-supplied only; or a built-in USDC table for the
+   seven thread-17 chains, each value read from the chain and pinned by a
+   test, with a caller override.
+3. Credential types: `authorization` only for now (recommended).
