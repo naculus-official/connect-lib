@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **Session keys that act on the owner's account through EIP-7702** (`@naculus/connect-core`, `@naculus/wallet-engine`) — `mode: "eip7702"` session keys on MetaMask Delegation Framework v1.3.0 (Ethereum, Sepolia, Base, Base Sepolia, Arbitrum One, Optimism, Polygon). The owner's account, already delegated to `EIP7702StatelessDeleGatorImpl`, signs an EIP-712 `Delegation` to the session key whose caveats encode the scope (expiry, targets, methods, native caps, one token allowance, one recipient, call count) and pin the session key as the only redeemer; the key then sends `redeemDelegations` transactions and the chain enforces the caveats. Scopes the chain cannot enforce are refused (several tokens or recipients, no `allowedMethods`, the owner's account or DelegationManager as a target, forbidden selectors). core: `caveatsFromScope`, `buildDelegation`, `delegationTypedData`, `prepareDelegation` / `attachDelegation` / `buildDelegationRedemption` / `signDelegationRedemption`. `PocketWallet.createSessionKey({ mode: "eip7702", … })` and `sendWithSession` use it; not yet with `isolation: "worker"`. Design: `docs/design/eip7702-session-delegation.md`.
+
+### Changed
+
+- **An `eip7702` session key signs only its delegation redemptions** (`@naculus/connect-core`) — `setAuthorization` no longer accepts `type: "eip7702"` (it stored unverified bytes); such keys are authorized with `attachDelegation`, and raw-digest signing, typed-data signing and `getSessionBundle` refuse them.
+
 ## 0.3.0 — 2026-09-25
 
 **Breaking for `@naculus/wallet-engine` session-key users** — see *Changed (breaking)*. Everything else is additive.

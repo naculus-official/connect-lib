@@ -303,12 +303,12 @@ describe("PocketWallet session keys on the core engine", () => {
     expect(sessions[0]?.status).toBe("revoked");
   });
 
-  it("creates offchain keys only", async () => {
+  it("creates offchain and eip7702 keys only", async () => {
     const w = await wallet();
     await expect(
       w.createSessionKey({
         allowedContracts: [USDC],
-        mode: "eip7702",
+        mode: "aa_module",
       } as never),
     ).rejects.toMatchObject({ code: "method_not_allowed" });
   });

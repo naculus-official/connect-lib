@@ -13,6 +13,10 @@ import {
   validateFeeParams,
 } from "./fee-oracle";
 import {
+  DELEGATION_FRAMEWORK,
+  delegationTypedData,
+  type FrameworkExecution,
+  readDelegation,
   type SessionKeyManager,
   sessionKeyAddress,
 } from "@naculus/connect-core";
@@ -2313,10 +2317,11 @@ export class PocketWallet {
    * @returns Session key public info (no private key exposed)
    */
   async createSessionKey(scope: SessionKeyScope): Promise<SessionKeyInfo> {
+    if (scope?.mode === "eip7702") return this.createDelegatedSessionKey(scope);
     if (scope?.mode !== undefined && scope.mode !== "offchain") {
       throw new WalletError(
         "method_not_allowed",
-        `Session keys of mode "${scope.mode}" need an on-chain executor; the embedded wallet creates "offchain" keys only.`,
+        `Session keys of mode "${scope.mode}" need an on-chain executor; the embedded wallet creates "offchain" and "eip7702" keys only.`,
       );
     }
     const mgr = await this._getSessionMgr();
@@ -2342,6 +2347,82 @@ export class PocketWallet {
         rawSignature: signature,
         message,
       });
+    } catch (err) {
+      await mgr.revokeSession(info.id).catch(() => {});
+      throw err;
+    }
+    return (
+      (await mgr.listSessions()).find((item) => item.id === info.id) ?? info
+    );
+  }
+
+  /**
+   * An `eip7702` session key: it acts on this wallet's own account through the
+   * MetaMask Delegation Framework, within caveats the chain enforces
+   * (docs/design/eip7702-session-delegation.md).
+   *
+   * Requires the account to be delegated already to
+   * EIP7702StatelessDeleGatorImpl on the configured chain — send that
+   * delegation first (sendDelegation with that implementation allowlisted).
+   * The wallet's EVM key signs the Delegation (EIP-712) and core attaches it
+   * after checking signature and caveats. Not available with
+   * `isolation: "worker"` yet: the worker cannot sign typed data.
+   */
+  private async createDelegatedSessionKey(
+    scope: SessionKeyScope,
+  ): Promise<SessionKeyInfo> {
+    if (this._signer instanceof IsolatedSigner) {
+      throw new WalletError(
+        "method_unsupported",
+        'eip7702 session keys are not available with isolation: "worker" yet (the worker cannot sign the EIP-712 delegation).',
+      );
+    }
+    const mgr = await this._getSessionMgr();
+    const owner = this.evmAccount();
+    const chainId = sim.parseChainIdNumber(this.cfg.chainId);
+    const status = readDelegation(
+      await this.rpcCall("eth_getCode", [owner.address, "latest"]),
+    );
+    if (
+      status.delegated !== true ||
+      status.delegate?.toLowerCase() !==
+        DELEGATION_FRAMEWORK.eip7702StatelessDeleGator.toLowerCase()
+    ) {
+      throw new WalletError(
+        "method_not_allowed",
+        `This account must first delegate to EIP7702StatelessDeleGatorImpl (${DELEGATION_FRAMEWORK.eip7702StatelessDeleGator}) on ${this.cfg.chainId} (sendDelegation).`,
+      );
+    }
+    const info = await mgr.createSessionKey(
+      scope,
+      owner.address as `0x${string}`,
+    );
+    try {
+      const delegation = await mgr.prepareDelegation(info.id, chainId);
+      const typed = delegationTypedData(delegation);
+      const signer = this.signerFor("eip155");
+      if (!signer.signTypedData) {
+        throw new WalletError(
+          "method_unsupported",
+          "The EVM signer cannot sign typed data.",
+        );
+      }
+      const { signature } = await signer.signTypedData(
+        JSON.stringify({
+          ...typed,
+          types: {
+            EIP712Domain: [
+              { name: "name", type: "string" },
+              { name: "version", type: "string" },
+              { name: "chainId", type: "uint256" },
+              { name: "verifyingContract", type: "address" },
+            ],
+            ...typed.types,
+          },
+        }),
+        owner.privateKey as `0x${string}`,
+      );
+      await mgr.attachDelegation(info.id, delegation, signature);
     } catch (err) {
       await mgr.revokeSession(info.id).catch(() => {});
       throw err;
@@ -2406,31 +2487,66 @@ export class PocketWallet {
     }
     const from = sessionKeyAddress(info.publicKey);
 
+    // An eip7702 key does not send `tx` itself: it sends the redemption that
+    // has the owner's account execute it, and `tx` becomes the execution.
+    let execution: FrameworkExecution | null = null;
+    let sendTx: typeof tx = tx;
+    if (info.scope.mode === "eip7702") {
+      let value: bigint;
+      try {
+        value = BigInt(tx.value ?? "0x0");
+      } catch {
+        throw new WalletError(
+          "invalid_input",
+          "Transaction value is not a quantity.",
+        );
+      }
+      execution = {
+        target: tx.to as `0x${string}`,
+        value,
+        callData: (tx.data ?? "0x") as `0x${string}`,
+      };
+      const call = await mgr.buildDelegationRedemption(sessionId, execution);
+      if (call.chainId !== configuredChainId) {
+        throw new WalletError(
+          "chain_mismatch",
+          `The session's delegation is for chain ${call.chainId}, not ${this.cfg.chainId}.`,
+        );
+      }
+      sendTx = {
+        to: call.to,
+        value: "0x0",
+        data: call.data,
+        chainId: configuredChainId,
+        ...(tx.nonce ? { nonce: tx.nonce } : {}),
+      };
+    }
+
     // Get nonce if not provided
-    if (!tx.nonce) {
+    if (!sendTx.nonce) {
       const nonceHex = (await this.rpcCall("eth_getTransactionCount", [
         from,
         "pending",
       ])) as string;
-      tx.nonce = nonceHex;
+      sendTx.nonce = nonceHex;
     }
 
     // Estimate gas if not provided
-    if (!tx.gas) {
+    if (!sendTx.gas) {
       const estimated = (await this.rpcCall("eth_estimateGas", [
         {
           from,
-          to: tx.to,
-          value: tx.value ?? "0x0",
-          data: tx.data ?? "0x",
+          to: sendTx.to,
+          value: sendTx.value ?? "0x0",
+          data: sendTx.data ?? "0x",
         },
       ])) as string;
-      tx.gas = estimated;
+      sendTx.gas = estimated;
     }
 
     // Resolve fee options (EIP-1559 or Legacy)
     const resolvedFees = await resolveFeeOptions(
-      tx,
+      sendTx,
       this.cfg.rpcUrl!,
       this.cfg.chainId,
       feeOptions,
@@ -2438,7 +2554,7 @@ export class PocketWallet {
     validateFeeParams(resolvedFees);
 
     // Build the final transaction, then hash exactly that transaction.
-    const builtTx = buildTransaction(tx, resolvedFees);
+    const builtTx = buildTransaction(sendTx, resolvedFees);
     builtTx.chainId = configuredChainId;
     let digest: `0x${string}`;
     try {
@@ -2453,13 +2569,21 @@ export class PocketWallet {
     }
 
     // Policy and signature in one locked step, on the same facts.
-    const signature = await mgr.signWithSessionKey(sessionId, digest, {
+    const outerFacts = {
       to: builtTx.to,
       value: builtTx.value ?? "0x0",
       data: builtTx.data ?? "0x",
       chainId: configuredChainId,
       gas: builtTx.gas,
-    });
+    };
+    const signature = execution
+      ? await mgr.signDelegationRedemption(
+          sessionId,
+          digest,
+          outerFacts,
+          execution,
+        )
+      : await mgr.signWithSessionKey(sessionId, digest, outerFacts);
     const v = Number.parseInt(signature.slice(130, 132), 16);
     const rawTx = serializeSignedTransaction(builtTx, {
       r: `0x${signature.slice(2, 66)}`,
@@ -2484,7 +2608,7 @@ export class PocketWallet {
             to: tx.to,
             value: tx.value ?? "0x0",
             data: tx.data,
-            nonce: tx.nonce ? parseInt(tx.nonce, 16) : undefined,
+            nonce: sendTx.nonce ? parseInt(sendTx.nonce, 16) : undefined,
             gasUsed: builtTx.gas,
             effectiveGasPrice: builtTx.gasPrice ?? builtTx.maxFeePerGas,
           },

@@ -49,6 +49,12 @@ export {
   delegationSigningDigest,
   delegationTypedData,
   type FrameworkCaveat,
+  encodePermissionContext,
+  encodeRedeemDelegations,
+  encodeRedeemDelegationsWithContext,
+  encodeSingleExecution,
   type FrameworkDelegation,
+  type FrameworkExecution,
   ROOT_AUTHORITY,
+  SINGLE_DEFAULT_MODE,
 } from "./delegation-framework";

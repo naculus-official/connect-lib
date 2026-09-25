@@ -936,7 +936,14 @@ export class SessionKeyManager {
   async signDelegationRedemption(
     sessionId: string,
     digest: `0x${string}`,
-    outerTx: { to?: string; value?: string; data?: string; chainId?: number },
+    outerTx: {
+      to?: string;
+      value?: string;
+      data?: string;
+      chainId?: number;
+      /** The redemption's gas limit, checked against maxGasPerTx / maxTotalGas. */
+      gas?: string;
+    },
     execution: FrameworkExecution,
   ): Promise<`0x${string}`> {
     return this.storage.withKeyLock(sessionId, () =>
@@ -960,11 +967,14 @@ export class SessionKeyManager {
             "The transaction is not this key's redemption for the execution",
           );
         }
+        // The execution is what the scope governs; gas is the key's own spend
+        // on the transaction it sends, so it comes from the outer transaction.
         return this.signStoredSessionKey(stored, digest, {
           to: execution.target,
           value: `0x${execution.value.toString(16)}`,
           data: execution.callData,
           chainId,
+          ...(outerTx.gas !== undefined ? { gas: outerTx.gas } : {}),
         });
       }),
     );
