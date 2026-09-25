@@ -132,6 +132,18 @@ to stand in for Naculus's forbidden selectors.
    (embedded), session key sends the redemption (same tx path as thread 16).
 4. **appkit**: `useDelegationPolicy` accepts the `eip7702` route with the
    framework adapter; React + Vue shells.
+   *Refined 2026-09-25:* appkit-core `createPolicy` creates an `eip7702`
+   policy by having the connected wallet sign the Delegation
+   (`eth_signTypedData_v4`) and `attachDelegation`; `executePolicy` signs an
+   `eip7702` policy's redemption with `signDelegationRedemption` (the
+   off-chain policy path refuses such keys). A new appkit-core
+   `createDelegationFrameworkAdapter({ manager, rpc, codec })` implements the
+   existing `PolicyExecutionAdapter` for `route: "eip7702"`: it builds the
+   redemption for the session key's own address (nonce, gas, fees from
+   `rpc`), hashes and serializes it with an app-supplied `codec` (viem or
+   wallet-engine), and broadcasts. appkit-core gains no dependency; the app
+   passes the adapter as today. Shells add only the `signTypedData` and
+   `chainId` inputs.
 
 Review: session-keys and signing are always-review — two independent passes
 (1–2, then 3–4). Verification against a fork of a chain where v1.3.0 is
