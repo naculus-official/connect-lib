@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.3.0 — 2026-09-25
+
+**Breaking for `@naculus/wallet-engine` session-key users** — see *Changed (breaking)*. Everything else is additive.
+
 ### Added
 
 - **`@naculus/connector-solana-kit`** (new package) — `toKitSigners(roles)` turns the Solana roles a connected wallet can fill into `@solana/kit` 8 signers: a `TransactionModifyingSigner` (a wallet may rewrite the message, so the result is decoded as a new transaction with its lifetime re-derived), a `MessagePartialSigner` and a `TransactionSendingSigner`, each `null` when the wallet lacks the feature. The account's own signature is verified against its address before Kit sees it, a wallet's bytes never fill another account's signature slot, and a co-signer's existing signature is kept only when the wallet left the message unchanged. `@solana/kit` ^8 is a peer dependency; `@naculus/connector-solana` stays Kit-free.
@@ -26,6 +30,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Fixed
 
 - **Session-key transactions came from the wrong address** (`@naculus/wallet-engine`) — `sendWithSession` read the nonce and estimated gas for the wallet's own address, but the session key signs and sends as its own EOA. Nonce, gas estimate and the reported `from` are now the session key's address, and the transaction must be for the configured chain.
+
+### Package impact
+
+`@naculus/wallet-engine` carries the breaking change and the session-key fix. `@naculus/payments-x402` and `@naculus/connector-solana-kit` are new (each was bootstrapped on npm at 0.2.8 so its trusted publisher could be configured; 0.3.0 is their first release from the Publish workflow). The other 13 packages are version-bump-only releases required by the lockstep release model.
 
 ## 0.2.8 — 2026-09-24
 
