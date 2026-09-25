@@ -37,3 +37,18 @@ export {
   validateTypedDataRequest,
 } from "./typed-data";
 export type { SessionKeyTypedDataRequest } from "./typed-data";
+export {
+  ANY_DELEGATE,
+  type BuildDelegationInput,
+  buildDelegation,
+  type CaveatOptions,
+  caveatsFromScope,
+  DELEGATION_FRAMEWORK,
+  DELEGATION_FRAMEWORK_CHAIN_IDS,
+  delegationHash,
+  delegationSigningDigest,
+  delegationTypedData,
+  type FrameworkCaveat,
+  type FrameworkDelegation,
+  ROOT_AUTHORITY,
+} from "./delegation-framework";

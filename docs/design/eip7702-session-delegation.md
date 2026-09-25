@@ -1,7 +1,16 @@
 # Session keys through an EIP-7702 delegated account
 
-Status: design, STATE.md thread 17 (option (b) of the 2026-09-23 decision in
-`eip7702-execution.md`). No code change. Date: 2026-09-25.
+Status: design **approved by the user 2026-09-25**, STATE.md thread 17
+(option (b) of the 2026-09-23 decision in `eip7702-execution.md`).
+
+**Decisions (user, 2026-09-25):** the session key pays the redemption gas
+(it stays an EOA, as in thread 16); single-token / single-recipient scopes
+only — anything more is refused; chains: Ethereum, Sepolia, Base, Base
+Sepolia, Arbitrum One, Optimism, Polygon. `eth_getCode` on all seven
+(2026-09-25) found DelegationManager (11503 bytes),
+EIP7702StatelessDeleGatorImpl (11185), TimestampEnforcer (1255) and
+ERC20TransferAmountEnforcer (2078) at the pinned addresses with identical
+sizes.
 
 ## Why
 
@@ -125,9 +134,4 @@ deployed (anvil `--fork-url`) before any wallet is asked to sign.
 
 ## Open questions for the user
 
-- **Gas**: session key pays for redemption (as today), or add a 4337
-  sponsored path first?
-- **Multiple tokens / recipients**: ship single-token/single-recipient
-  scopes first (recommended), or design `LogicalOrWrapperEnforcer` now?
-- **Scope of chains**: which chains to pin first (v1.3.0 covers Ethereum,
-  Base, Arbitrum, Optimism, Polygon, Gnosis, … and their testnets).
+Answered 2026-09-25 — see *Decisions* at the top.
