@@ -107,4 +107,33 @@ describe("EIP-712 encoder", () => {
       new EVMSigner().signTypedData(JSON.stringify(typedData), PK),
     ).resolves.toMatchObject({ signature: expected });
   });
+
+  it("includes struct types referenced through fixed and nested arrays", async () => {
+    // viem 2.56.5 vector. `P[2]` and `P[][]` used to drop P from the
+    // encoded type string, so the signature matched no verifier.
+    const typedData = {
+      domain: {
+        name: "Arr",
+        version: "1",
+        chainId: 1,
+        verifyingContract: "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC",
+      },
+      types: {
+        EIP712Domain: DOMAIN_TYPE,
+        P: [{ name: "n", type: "string" }],
+        M: [
+          { name: "fixed", type: "P[2]" },
+          { name: "nested", type: "P[][]" },
+        ],
+      },
+      primaryType: "M",
+      message: { fixed: [{ n: "a" }, { n: "b" }], nested: [[{ n: "c" }], []] },
+    };
+    await expect(
+      new EVMSigner().signTypedData(JSON.stringify(typedData), PK),
+    ).resolves.toMatchObject({
+      signature:
+        "0x3f8d85990056676dc430f9c76e3dbcf0296f57ff55bcbc6e9e621c3011b3560f2a7dac2cfc7249a07daf2a84c1554b04c3aa3dff4fc5e38d84003f000c377c5a1c",
+    });
+  });
 });

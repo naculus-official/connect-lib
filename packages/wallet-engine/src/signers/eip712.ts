@@ -30,7 +30,9 @@ export function typedDataSigningHash(typedData: string): Uint8Array {
     const dependencies = new Set<string>();
     const visit = (name: string) => {
       for (const field of types[name] ?? []) {
-        const dependency = field.type.replace(/\[\]$/, "");
+        // Every array suffix: P[2] and P[][] reference P too. Stripping only a
+        // trailing [] left P out of the type string for those.
+        const dependency = field.type.replace(/(\[\d*\])+$/, "");
         if (
           types[dependency] &&
           dependency !== typeName &&

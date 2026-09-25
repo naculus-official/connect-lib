@@ -16,6 +16,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 ### Fixed
 
 - **EIP-712 signatures over negative `int8`…`int248` values were wrong** (`@naculus/wallet-engine`) — the encoder used an N-bit two's complement where ABI sign-extends to 256 bits, so such signatures matched no verifier.
+- **EIP-712 dropped struct types referenced through fixed or nested arrays** (`@naculus/wallet-engine`) — `P[2]` or `P[][]` left `P` out of the encoded type string, so the signature matched no verifier.
 
 ### Changed
 
