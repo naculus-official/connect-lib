@@ -160,4 +160,40 @@ describe("crypto worker signing", () => {
     expect(reply.type).toBe("error");
     expect(reply.error).toMatch(/non-empty authorizationList/);
   });
+
+  it("signs EIP-712 typed data with the shared encoder (viem vector)", async () => {
+    // Same key and data as the negative-intN vector in evm.test.ts, from
+    // viem 2.56.5 signTypedData.
+    const typedData = JSON.stringify({
+      domain: {
+        name: "Ints",
+        version: "1",
+        chainId: 1,
+        verifyingContract: "0xCcCCccccCCCCcCCCCCCcCcCccCcCCCcCcccccccC",
+      },
+      types: {
+        EIP712Domain: [
+          { name: "name", type: "string" },
+          { name: "version", type: "string" },
+          { name: "chainId", type: "uint256" },
+          { name: "verifyingContract", type: "address" },
+        ],
+        M: [
+          { name: "a", type: "int8" },
+          { name: "b", type: "int64" },
+          { name: "c", type: "int256" },
+          { name: "d", type: "int64" },
+        ],
+      },
+      primaryType: "M",
+      message: { a: "-1", b: "-42", c: "-7", d: "5" },
+    });
+    const reply = await send("signTypedData", { typedData });
+    expect(reply.type).toBe("signed");
+    expect(reply.signature).toBe(
+      "0x5db99addec464352531f1314a4450b963a5c2ab5afd0c1607bf6ebca1ca650d239de6549b2fd294ba4381a8169bf0f1887e8130118afcc277887c5303e629bb31c",
+    );
+    const refused = await send("signTypedData", { typedData: 42 });
+    expect(refused.type).toBe("error");
+  });
 });

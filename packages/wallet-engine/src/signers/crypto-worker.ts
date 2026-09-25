@@ -1,6 +1,7 @@
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
+import { typedDataSigningHash } from "./eip712";
 import {
   assembleSignedTransaction,
   authorizationHash,
@@ -63,6 +64,21 @@ function signTransaction(tx: TransactionRequest): { signature: string } {
       tx,
       transactionSignature(sig.compact, sig.recovery),
     ),
+  };
+}
+
+/** EIP-712: the same digest EVMSigner computes, signed inside the worker. */
+function signTypedData(typedData: string): {
+  signature: string;
+  recovery: number;
+} {
+  if (!privKey) throw new Error("no_key");
+  if (typeof typedData !== "string")
+    throw new Error("typed data must be a JSON string");
+  const sig = signDigest(secp256k1, typedDataSigningHash(typedData), privKey);
+  return {
+    signature: `0x${bytesToHex(sig.compact)}${(sig.recovery + 27).toString(16)}`,
+    recovery: sig.recovery,
   };
 }
 
@@ -185,6 +201,15 @@ self.onmessage = async (e: MessageEvent) => {
           break;
         }
         const result = signTransaction(payload);
+        reply({ type: "signed", ...result });
+        break;
+      }
+      case "signTypedData": {
+        if (!privKey) {
+          reply({ type: "error", error: "no_key" });
+          break;
+        }
+        const result = signTypedData(payload.typedData);
         reply({ type: "signed", ...result });
         break;
       }

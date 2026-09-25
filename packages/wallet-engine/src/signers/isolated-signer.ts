@@ -136,6 +136,19 @@ export class IsolatedSigner implements Signer {
   }
 
   /**
+   * Sign EIP-712 typed data (JSON-stringified) inside the worker. The worker
+   * computes the digest with the same encoder EVMSigner uses.
+   */
+  async signTypedData(
+    typedData: string,
+    _privateKey?: `0x${string}`,
+  ): Promise<SignResult> {
+    if (!this.worker)
+      throw new WalletError("not_initialized", "Signer not initialized");
+    return this.send("signTypedData", { typedData });
+  }
+
+  /**
    * Sign an EIP-7702 authorization inside the worker; the key never crosses
    * back. Validation (including the `chainId: 0` refusal) runs in the worker
    * on the same encoder EVMSigner uses.

@@ -115,6 +115,8 @@ const manager = (w: PocketWallet) =>
 describe("PocketWallet eip7702 session keys", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    // The worker test stubs self/Worker; never let a failure leak them.
+    vi.unstubAllGlobals();
   });
 
   it("creates a key authorized by the wallet's signed delegation", async () => {
@@ -138,33 +140,43 @@ describe("PocketWallet eip7702 session keys", () => {
     expect(await w.listSessions()).toEqual([]);
   });
 
-  it("is not available with worker isolation yet", async () => {
-    vi.stubGlobal(
-      "Worker",
-      class {
-        postMessage() {}
-        terminate() {}
-      },
-    );
-    const w = new PocketWallet({
-      storage: new MemoryWalletStorage(),
-      autoSave: false,
-      chainId: "eip155:8453",
-      rpcUrl: "https://rpc.invalid",
-      isolation: "worker",
-      sessionKeys: { storage: new MemoryStorageAdapter() },
+  it("works with worker isolation: the worker signs the delegation", async () => {
+    // Drive the real crypto-worker module (as isolation-reload.test.ts does).
+    let current: { onmessage: ((e: { data: unknown }) => void) | null } | null =
+      null;
+    vi.stubGlobal("self", {
+      onmessage: null,
+      postMessage: (data: unknown) => current?.onmessage?.({ data }),
     });
+    vi.resetModules();
+    await import("../signers/crypto-worker");
+    const workerOnMessage = (
+      globalThis as unknown as {
+        self: { onmessage: (e: { data: unknown }) => Promise<void> };
+      }
+    ).self.onmessage;
+    class RealWorker {
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      onmessageerror: ((e: unknown) => void) | null = null;
+      constructor() {
+        current = this;
+      }
+      postMessage(msg: unknown): void {
+        void workerOnMessage({ data: msg });
+      }
+      terminate(): void {}
+    }
+    vi.stubGlobal("Worker", RealWorker);
+
+    const w = await wallet({ isolation: "worker" });
     expect((w as unknown as { _signer: unknown })._signer).toBeInstanceOf(
       IsolatedSigner,
     );
-    // No mnemonic import needed: the refusal comes first.
-    (w as unknown as { data: unknown }).data = {
-      mnemonic: MNEMONIC,
-      accounts: [],
-    };
-    await expect(w.createSessionKey(scope)).rejects.toMatchObject({
-      code: "method_unsupported",
-    });
+    mockRpc();
+    const info = await w.createSessionKey(scope);
+    // attachDelegation verified the worker's signature against the owner.
+    expect(info.authorized).toBe(true);
     vi.unstubAllGlobals();
   });
 

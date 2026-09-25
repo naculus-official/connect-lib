@@ -2365,18 +2365,12 @@ export class PocketWallet {
    * EIP7702StatelessDeleGatorImpl on the configured chain — send that
    * delegation first (sendDelegation with that implementation allowlisted).
    * The wallet's EVM key signs the Delegation (EIP-712) and core attaches it
-   * after checking signature and caveats. Not available with
-   * `isolation: "worker"` yet: the worker cannot sign typed data.
+   * after checking signature and caveats. With `isolation: "worker"` the
+   * worker signs it; the key does not leave the worker.
    */
   private async createDelegatedSessionKey(
     scope: SessionKeyScope,
   ): Promise<SessionKeyInfo> {
-    if (this._signer instanceof IsolatedSigner) {
-      throw new WalletError(
-        "method_unsupported",
-        'eip7702 session keys are not available with isolation: "worker" yet (the worker cannot sign the EIP-712 delegation).',
-      );
-    }
     const mgr = await this._getSessionMgr();
     const owner = this.evmAccount();
     const chainId = sim.parseChainIdNumber(this.cfg.chainId);
