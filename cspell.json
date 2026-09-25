@@ -356,7 +356,9 @@
     "zerion",
     "zkevm",
     "zksync",
-    "zora"
+    "zora",
+    "Cyfrin",
+    "ConsenSys"
   ],
   "ignoreWords": [
     "eykt",
