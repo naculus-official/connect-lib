@@ -13,10 +13,16 @@ import { waitForSafeEnvironment } from "./environment";
 
 type FakeWindow = Record<string, unknown>;
 
-function installWindow(ancestorOrigins?: string[]) {
+function installWindow(
+  ancestorOrigins?: string[],
+  referrer = "https://app.safe.global/safe-app",
+) {
   const listeners = new Set<(e: unknown) => void>();
-  const posted: unknown[] = [];
-  const parent = { postMessage: (msg: unknown) => posted.push(msg) };
+  const posted: Array<{ message: unknown; targetOrigin: string }> = [];
+  const parent = {
+    postMessage: (message: unknown, targetOrigin: string) =>
+      posted.push({ message, targetOrigin }),
+  };
   const win: FakeWindow = {
     top: {},
     parent,
@@ -30,9 +36,12 @@ function installWindow(ancestorOrigins?: string[]) {
   };
   win.self = win;
   vi.stubGlobal("window", win);
+  vi.stubGlobal("document", { referrer });
   return {
     parent,
-    requestId: () => (posted.at(-1) as { messageId: string })?.messageId,
+    requestId: () =>
+      (posted.at(-1)?.message as { messageId: string })?.messageId,
+    posted,
     emit: (e: Record<string, unknown>) => {
       for (const h of listeners) h(e);
     },
@@ -48,18 +57,40 @@ const payload = (messageId?: string) => ({
 afterEach(() => vi.unstubAllGlobals());
 
 describe("waitForSafeEnvironment origin gate", () => {
-  it("accepts any parent-frame origin by default, as the official SDK does", async () => {
-    // @safe-global/safe-apps-sdk defaults `allowedOrigins` to null and gates
-    // only on `source === window.parent`. No built-in domain list is invented
-    // here, so the default stays permissive and pinning is opt-in.
-    const h = installWindow(undefined); // Firefox: no ancestorOrigins
+  it("uses document.referrer as the exact target in Firefox", async () => {
+    const h = installWindow(
+      undefined,
+      "https://self-hosted-safe.example.com/apps/1",
+    );
     const pending = waitForSafeEnvironment(500);
+    expect(h.posted[0]?.targetOrigin).toBe(
+      "https://self-hosted-safe.example.com",
+    );
     h.emit({
       source: h.parent,
       origin: "https://self-hosted-safe.example.com",
       data: payload(h.requestId()),
     });
     await expect(pending).resolves.toMatchObject({ isSafeApp: true });
+  });
+
+  it("fails closed when the parent origin cannot be determined", async () => {
+    const h = installWindow(undefined, "");
+    await expect(waitForSafeEnvironment(500)).rejects.toThrow(
+      /Cannot post message to parent/,
+    );
+    expect(h.posted).toEqual([]);
+  });
+
+  it("rejects a parent reply from an origin other than the referrer", async () => {
+    const h = installWindow(undefined, "https://app.safe.global/apps/1");
+    const pending = waitForSafeEnvironment(60);
+    h.emit({
+      source: h.parent,
+      origin: "https://evil.example.com",
+      data: payload(h.requestId()),
+    });
+    await expect(pending).rejects.toThrow(/timed out/);
   });
 
   it("rejects an origin outside a consumer-supplied allowedOrigins list", async () => {
@@ -125,8 +156,12 @@ describe("waitForSafeEnvironment origin gate", () => {
   });
 
   it("honours ancestorOrigins when the browser provides it", async () => {
-    const h = installWindow(["https://safe.mycompany.internal"]);
+    const h = installWindow(
+      ["https://safe.mycompany.internal"],
+      "https://different-referrer.example.com/page",
+    );
     const pending = waitForSafeEnvironment(500);
+    expect(h.posted[0]?.targetOrigin).toBe("https://safe.mycompany.internal");
     h.emit({
       source: h.parent,
       origin: "https://safe.mycompany.internal",
@@ -204,12 +239,25 @@ describe("isSafeAppEnvironment", () => {
   it("resolves true for a Safe reply from the parent frame", async () => {
     const h = installWindow(undefined);
     const pending = isSafeAppEnvironment();
+    expect(h.posted[0]?.targetOrigin).toBe("https://app.safe.global");
     h.emit({
       source: h.parent,
       origin: "https://app.safe.global",
       data: { type: "SAFE_ENV_INFO" },
     });
     await expect(pending).resolves.toBe(true);
+  });
+
+  it("fails closed without posting when the parent origin is unavailable", async () => {
+    const h = installWindow(undefined, "");
+    await expect(isSafeAppEnvironment()).resolves.toBe(false);
+    expect(h.posted).toEqual([]);
+  });
+
+  it("fails closed when the parent referrer is malformed", async () => {
+    const h = installWindow(undefined, "not a URL");
+    await expect(isSafeAppEnvironment()).resolves.toBe(false);
+    expect(h.posted).toEqual([]);
   });
 
   it("ignores a Safe-shaped reply that did not come from the parent", async () => {

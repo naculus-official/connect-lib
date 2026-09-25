@@ -28,7 +28,13 @@ function independentDerive(seed: Uint8Array, path: string): Uint8Array {
   let chainCode = I.slice(32);
 
   for (const segment of path.split("/").slice(1)) {
-    const index = Number.parseInt(segment.replace("'", ""), 10) + 0x80000000;
+    const match = /^(\d+)'$/.exec(segment);
+    if (!match) throw new Error(`Invalid hardened path segment: ${segment}`);
+    const value = Number.parseInt(match[1], 10);
+    if (!Number.isSafeInteger(value) || value > 0x7fffffff) {
+      throw new Error(`Hardened path segment is out of range: ${segment}`);
+    }
+    const index = value + 0x80000000;
     const data = new Uint8Array(37);
     data[0] = 0;
     data.set(key, 1);
@@ -57,6 +63,19 @@ describe("Solana derivation", () => {
     // our own choosing would give a valid wallet at an address no other
     // software would ever show the user.
     expect(SOLANA_DERIVATION_PATH).toBe("m/44'/501'/0'/0'");
+  });
+
+  it("makes the independent vector reject malformed hardened segments", () => {
+    const seed = new Uint8Array(64);
+    expect(() => independentDerive(seed, "m/44/501'")).toThrow(
+      /Invalid hardened path segment/,
+    );
+    expect(() => independentDerive(seed, "m/44''/501'")).toThrow(
+      /Invalid hardened path segment/,
+    );
+    expect(() => independentDerive(seed, "m/2147483648'/501'")).toThrow(
+      /out of range/,
+    );
   });
 
   it.each(MNEMONICS)(

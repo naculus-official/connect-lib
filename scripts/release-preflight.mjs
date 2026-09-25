@@ -330,7 +330,7 @@ function tagExists(root, version) {
 }
 
 async function isPublished(name, version) {
-  const url = `${REGISTRY}/${name.replace("/", "%2F")}/${version}`;
+  const url = `${REGISTRY}/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
   const res = await fetch(url, { headers: { accept: "application/json" } });
   if (res.status === 200) return true;
   if (res.status === 404) return false;

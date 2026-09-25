@@ -71,7 +71,8 @@ export async function isSafeAppEnvironment(
  *
  * @param timeoutMs Maximum time to wait (default 5000ms)
  * @param allowedOrigins Optional RegExps the answering origin must match, as
- *   in @safe-global/safe-apps-sdk. Omit to accept any parent-frame origin.
+ *   in @safe-global/safe-apps-sdk. The browser-derived parent origin is always
+ *   required; this list can narrow it further.
  * @throws If the environment is not a Safe App or the handshake times out.
  */
 export async function waitForSafeEnvironment(
@@ -104,14 +105,33 @@ export async function waitForSafeEnvironment(
 /**
  * Origins permitted to answer a Safe handshake.
  *
- * Mirrors the `allowedOrigins` option of the official
- * `@safe-global/safe-apps-sdk` PostMessageCommunicator: a list of RegExps
- * supplied by the consumer, defaulting to "unrestricted". No built-in domain
- * list is hard-coded here on purpose — the Safe interface is self-hostable, so
- * any fixed list would be both incomplete and stale, and pinning one would be
- * inventing a security boundary the protocol does not define.
+ * An optional additional restriction, mirroring the `allowedOrigins` option
+ * of the official `@safe-global/safe-apps-sdk` PostMessageCommunicator. The
+ * exact browser-derived parent origin is always enforced first. No built-in
+ * domain list is hard-coded because the Safe interface is self-hostable.
  */
 export type SafeAllowedOrigins = readonly RegExp[];
+
+/**
+ * Resolve the parent frame to one exact origin before starting a handshake.
+ *
+ * Chromium/WebKit expose `ancestorOrigins`; Firefox does not, but supplies the
+ * embedding page as `document.referrer` unless the parent deliberately strips
+ * it. If neither source is available, there is no safe `postMessage` target:
+ * fail closed instead of sending the correlation id to `"*"`.
+ */
+function getParentOrigin(): string | null {
+  const candidate =
+    window.location.ancestorOrigins?.[0] ||
+    (typeof document !== "undefined" ? document.referrer : "");
+  if (!candidate) return null;
+
+  try {
+    return new URL(candidate).origin;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Gate every handshake reply on the sender actually being our parent frame.
@@ -137,8 +157,8 @@ function isTrustedSafeMessage(
   if (window.parent === window.self) return false;
 
   // Browser-supplied, not guessed: only present where the engine implements it.
-  const parentOrigin = window.location.ancestorOrigins?.[0];
-  if (parentOrigin && event.origin !== parentOrigin) return false;
+  const parentOrigin = getParentOrigin();
+  if (!parentOrigin || event.origin !== parentOrigin) return false;
 
   if (allowedOrigins && !allowedOrigins.some((re) => re.test(event.origin))) {
     return false;
@@ -231,9 +251,13 @@ async function detectViaHandshake(
 
     // Ask the parent frame to identify itself as a Safe interface
     try {
+      const parentOrigin = getParentOrigin();
+      if (!parentOrigin) {
+        throw new Error("Cannot determine parent origin");
+      }
       window.parent.postMessage(
         { source: "sdk", method: "ready", messageId: requestId },
-        window.location.ancestorOrigins?.[0] || "*",
+        parentOrigin,
       );
     } catch {
       cleanup();
@@ -286,13 +310,17 @@ async function handshakeForSafeInfo(
 
     // Request environment info from the parent Safe interface
     try {
+      const parentOrigin = getParentOrigin();
+      if (!parentOrigin) {
+        throw new Error("Cannot determine parent origin");
+      }
       window.parent.postMessage(
         {
           source: "sdk",
           method: "getEnvInfo",
           messageId: requestId,
         },
-        window.location.ancestorOrigins?.[0] || "*",
+        parentOrigin,
       );
     } catch {
       cleanup();
