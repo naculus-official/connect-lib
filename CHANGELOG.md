@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`@naculus/payments-mpp` — MPP payments by a policy-bound session key** (new package) — answers a 402 `WWW-Authenticate: Payment` challenge for `method="evm"`, `intent="charge"` with an EIP-3009 `authorization` credential (tempoxyz/mpp-specs `draft-evm-charge-00`), signed by the session key under its policy, and retries once. Built-in EIP-712 domains for Circle USDC on the seven delegated-session chains; `tokenDomains` for others. Permit2, `transaction` and `hash` credentials, splits and every other method are refused. Interoperates with the reference SDK `mppx` (its challenges parse; our credential deserializes and its HMAC-bound challenge still verifies).
+
 ## 0.4.0 — 2026-09-26
 
 **Behavior change for `eip7702` session keys** — see *Changed*: `setAuthorization` no longer accepts `type: "eip7702"`. Everything else is additive or a fix.

@@ -53,6 +53,10 @@ export default defineConfig({
         __dirname,
         "packages/connector-solana-kit/src",
       ),
+      "@naculus/payments-mpp": path.resolve(
+        __dirname,
+        "packages/payments-mpp/src",
+      ),
       "@naculus/payments-x402": path.resolve(
         __dirname,
         "packages/payments-x402/src",

@@ -127,7 +127,8 @@ challenges (RFC 9110 auth-params): required `id`, `realm`, `method`
 `expires` (RFC 3339), `digest` (RFC 9530 body digest), `description`,
 `header` (only `Payment-Authorization` is legal), `opaque` (base64url JCS
 flat string map). The credential is `Payment <base64url-nopad JSON>` with
-`{ challenge: <echo of every received param, unchanged>, payload, source? }`,
+`{ challenge: <echo of every param the spec defines, values unchanged;
+unknown params dropped>, payload, source? }`,
 sent in `Authorization`, or in `Payment-Authorization` when the challenge
 says so. Success returns `Payment-Receipt` (base64url JSON: `status:
 "success"`, `method`, `timestamp`, `reference`, EVM adds `challengeId`,

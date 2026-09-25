@@ -34,6 +34,7 @@
       "@naculus/connector-solana-kit": [
         "./packages/connector-solana-kit/src"
       ],
+      "@naculus/payments-mpp": ["./packages/payments-mpp/src"],
       "@naculus/payments-x402": ["./packages/payments-x402/src"],
       "@naculus/wallet-engine": ["./packages/wallet-engine/src"],
       "@naculus/test-utils": ["./test-utils"],

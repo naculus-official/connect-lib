@@ -358,7 +358,12 @@
     "zksync",
     "zora",
     "Cyfrin",
-    "ConsenSys"
+    "ConsenSys",
+    "httpauth",
+    "mppx",
+    "nopad",
+    "tempoxyz",
+    "wevm"
   ],
   "ignoreWords": [
     "eykt",
