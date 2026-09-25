@@ -42,11 +42,15 @@ const EXPECTED_TERMS = [
   "0x0000000000000000000000000000000000000000000000000000000000000000",
   "0x00000000000000000000000000000000000000000000000000000000000000040000000000000000000000002222222222222222222222222222222222222222",
   "0x0000000000000000000000000000000000000000000000000000000000000014",
+  "0x742d35cc6634c0532925a3b844bc9e7595f2bd18",
 ];
 
 describe("delegation framework: encoding", () => {
   it("encodes a payment scope exactly as MetaMask's own builders do", () => {
-    const caveats = caveatsFromScope(paymentScope, 8453, { delegator: OWNER });
+    const caveats = caveatsFromScope(paymentScope, 8453, {
+      delegator: OWNER,
+      delegate: KEY,
+    });
     expect(caveats.map((c) => c.enforcer)).toEqual([
       E.timestamp,
       E.allowedTargets,
@@ -55,6 +59,7 @@ describe("delegation framework: encoding", () => {
       E.valueLte,
       E.allowedCalldata,
       E.limitedCalls,
+      E.redeemer,
     ]);
     expect(caveats.map((c) => c.terms.toLowerCase())).toEqual(EXPECTED_TERMS);
     expect(caveats.every((c) => c.args === "0x")).toBe(true);
@@ -70,10 +75,10 @@ describe("delegation framework: encoding", () => {
     });
     expect(delegation.authority).toBe(ROOT_AUTHORITY);
     expect(delegationHash(delegation)).toBe(
-      "0x22767cfa4078971b7e926a8baf2535e2618d031560029b3e8293795297d6e95b",
+      "0xd32458e56ef36142d9daa136683d37ce3e6aca1050606cf173e5bce19d17475b",
     );
     expect(delegationSigningDigest(delegation)).toBe(
-      "0xb81bd490ed7ad7273a8777576b0e309d4adee614ca1c8cc0a6c94f65767217a1",
+      "0x2812e665c586d4fc1d1a69a5f6a1034e64d298512eb3ca13673fc65c6e311648",
     );
     // The typed data a wallet signs names the same domain and message.
     const typed = delegationTypedData(delegation);
@@ -123,7 +128,7 @@ describe("delegation framework: encoding", () => {
         maxTotalValue: 10n ** 17n,
       },
       1,
-      { delegator: OWNER },
+      { delegator: OWNER, delegate: KEY },
     );
     expect(caveats.map((c) => c.enforcer)).toEqual([
       E.timestamp,
@@ -131,6 +136,7 @@ describe("delegation framework: encoding", () => {
       E.allowedMethods,
       E.valueLte,
       E.nativeTokenTransferAmount,
+      E.redeemer,
     ]);
   });
 
@@ -228,7 +234,7 @@ describe("delegation framework: refusals", () => {
       caveatsFromScope(
         { ...paymentScope, ...override } as SessionKeyScope,
         chainId,
-        { delegator: OWNER },
+        { delegator: OWNER, delegate: KEY },
       ),
     ).toThrow(
       expect.objectContaining({
@@ -288,10 +294,13 @@ describe("delegation framework: refusals", () => {
       allowedMethods: ["0xd505accf"],
       maxTotalValue: 1n,
     };
-    expect(caveatsFromScope(scope, 8453, { delegator: OWNER })).toHaveLength(4);
+    expect(
+      caveatsFromScope(scope, 8453, { delegator: OWNER, delegate: KEY }),
+    ).toHaveLength(5);
     expect(() =>
       caveatsFromScope(scope, 8453, {
         delegator: OWNER,
+        delegate: KEY,
         forbiddenMethods: ["0xD505ACCF"],
       }),
     ).toThrow(
@@ -309,7 +318,7 @@ describe("delegation framework: refusals", () => {
           allowedMethods: ["0x12345678"],
         },
         8453,
-        { delegator: OWNER },
+        { delegator: OWNER, delegate: KEY },
       ),
     ).toThrow(
       expect.objectContaining({
@@ -326,7 +335,7 @@ describe("delegation framework: refusals", () => {
           tokenAllowances: { [USDC]: 1.5 as unknown as bigint },
         },
         8453,
-        { delegator: OWNER },
+        { delegator: OWNER, delegate: KEY },
       ),
     ).toThrow(expect.objectContaining({ code: "session_key_invalid_input" }));
     expect(() =>
@@ -346,6 +355,7 @@ describe("delegation framework: refusals", () => {
     expect(() =>
       caveatsFromScope({ ...paymentScope, allowedChainIds: [] }, 137, {
         delegator: OWNER,
+        delegate: KEY,
       }),
     ).not.toThrow();
   });
@@ -364,7 +374,7 @@ describe("delegation framework: refusals", () => {
           maxTotalValue: 1n,
         },
         8453,
-        { delegator: OWNER },
+        { delegator: OWNER, delegate: KEY },
       ),
     ).toThrow(
       expect.objectContaining({ details: expect.stringMatching(/forbidden/) }),
@@ -391,5 +401,26 @@ describe("delegation framework: refusals", () => {
     expect(() => {
       (delegation as { chainId: number }).chainId = 1;
     }).toThrow(TypeError);
+  });
+
+  it("pins the session key as the only redeemer", () => {
+    // A re-delegation the key could be tricked into signing names another
+    // redeemer; RedeemerEnforcer makes the root delegation refuse it.
+    const caveats = caveatsFromScope(paymentScope, 8453, {
+      delegator: OWNER,
+      delegate: KEY,
+    });
+    expect(caveats.at(-1)).toEqual({
+      enforcer: E.redeemer,
+      terms: KEY,
+      args: "0x",
+    });
+    expect(() =>
+      caveatsFromScope(paymentScope, 8453, { delegator: OWNER } as never),
+    ).toThrow(
+      expect.objectContaining({
+        details: expect.stringMatching(/delegate is required/),
+      }),
+    );
   });
 });

@@ -20,6 +20,17 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils.js";
 import { isValidAddress, isZeroAddress } from "../address-validation";
 import type { StorageAdapter } from "../storage";
+import {
+  buildDelegation,
+  DELEGATION_FRAMEWORK,
+  delegationHash,
+  delegationSigningDigest,
+  encodePermissionContext,
+  encodeRedeemDelegationsWithContext,
+  encodeSingleExecution,
+  type FrameworkDelegation,
+  type FrameworkExecution,
+} from "./delegation-framework";
 import { createSessionKeyError } from "./errors";
 import {
   decryptPrivateKey,
@@ -485,6 +496,12 @@ export class SessionKeyManager {
           throw createSessionKeyError("session_key_not_found", sessionId);
         }
         // One copy for the check, the scope mapping and the digest.
+        if (stored.scope.mode === "eip7702") {
+          throw createSessionKeyError(
+            "session_key_scope_exceeded",
+            "An eip7702 session key signs only delegation redemptions (signDelegationRedemption).",
+          );
+        }
         const snapshot = snapshotTypedDataRequest(request);
         const tx = this.typedDataToScopedTransaction(stored, snapshot);
         return this.signStoredSessionKey(stored, typedDataDigest(snapshot), tx);
@@ -522,6 +539,12 @@ export class SessionKeyManager {
           );
         }
         // One copy for the check, the scope mapping and the digest.
+        if (stored.scope.mode === "eip7702") {
+          throw createSessionKeyError(
+            "session_key_scope_exceeded",
+            "An eip7702 session key signs only delegation redemptions (signDelegationRedemption).",
+          );
+        }
         const snapshot = snapshotTypedDataRequest(request);
         const tx = this.typedDataToScopedTransaction(stored, snapshot);
         return this.signStoredSessionKey(stored, typedDataDigest(snapshot), tx);
@@ -539,6 +562,14 @@ export class SessionKeyManager {
    * (`signTypedDataWithSessionKey`) may sign.
    */
   private refuseRawDigestForRecipientScope(stored: StoredSessionKey): void {
+    // An eip7702 key signs only its delegation redemptions; a raw digest or
+    // its exported key would let it sign anything its address can send.
+    if (stored.scope.mode === "eip7702") {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "An eip7702 session key signs only delegation redemptions (signDelegationRedemption).",
+      );
+    }
     if (
       stored.scope.allowedRecipients &&
       stored.scope.allowedRecipients.length > 0
@@ -674,10 +705,13 @@ export class SessionKeyManager {
           "Authorization type or signer address does not match the session key",
         );
       }
-      if (authorization.type === "eip7702" && !authorization.authorization) {
+      if (authorization.type === "eip7702") {
+        // Unverified bytes here used to authorize the key. An eip7702 key is
+        // authorized only by a delegation whose signature and caveats were
+        // checked: prepareDelegation → owner signs → attachDelegation.
         throw createSessionKeyError(
           "session_key_invalid_input",
-          "EIP-7702 authorization bytes are required",
+          "EIP-7702 session keys are authorized with attachDelegation, not setAuthorization",
         );
       }
       if (
@@ -693,6 +727,247 @@ export class SessionKeyManager {
       await this.storage.save(stored);
       this.cache.set(stored.id, stored);
     });
+  }
+
+  // ─── EIP-7702 delegation (MetaMask Delegation Framework) ──────────────
+
+  /**
+   * The unsigned delegation from the session's owner to its session key, for
+   * `chainId`. The owner signs `delegationTypedData(delegation)` (or its
+   * digest) and hands the signature to `attachDelegation`. Refuses a scope the
+   * chain cannot enforce (see caveatsFromScope).
+   */
+  async prepareDelegation(
+    sessionId: string,
+    chainId: number,
+    salt?: bigint,
+  ): Promise<FrameworkDelegation> {
+    const stored = await this.readStoredSession(sessionId);
+    if (!stored) {
+      throw createSessionKeyError("session_key_not_found", sessionId);
+    }
+    this.validateSessionStatus(stored);
+    return this.delegationFor(stored, chainId, salt);
+  }
+
+  private delegationFor(
+    stored: StoredSessionKey,
+    chainId: number,
+    salt: bigint | undefined,
+  ): FrameworkDelegation {
+    if (stored.scope.mode !== "eip7702") {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "Only an eip7702 session key has a delegation",
+      );
+    }
+    const owner = stored.authorization.signerAddress;
+    if (!isValidAddress(owner, "eip155") || isZeroAddress(owner)) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "An eip7702 session key needs its owner address (createSessionKey signerAddress)",
+      );
+    }
+    return buildDelegation({
+      delegator: owner,
+      delegate: sessionKeyAddress(stored.keyPair.publicKey),
+      scope: stored.scope,
+      chainId,
+      salt,
+      forbiddenMethods: this.config.forbiddenMethods,
+    });
+  }
+
+  /**
+   * Authorize an eip7702 session key with the owner's signed delegation.
+   *
+   * The delegation must be exactly the one `prepareDelegation` builds for
+   * this key, scope and chain (compared by hash), and the signature must
+   * recover to the owner over its EIP-712 digest — the same check the
+   * owner's EIP7702StatelessDeleGator makes on chain (ECDSA.recover ==
+   * address(this)), so a delegation accepted here is one the chain accepts.
+   */
+  async attachDelegation(
+    sessionId: string,
+    delegation: FrameworkDelegation,
+    signature: `0x${string}`,
+  ): Promise<void> {
+    await this.storage.withKeyLock(sessionId, async () => {
+      const stored = await this.readStoredSession(sessionId);
+      if (!stored) {
+        throw createSessionKeyError("session_key_not_found", sessionId);
+      }
+      this.validateSessionStatus(stored);
+      if (
+        !delegation ||
+        typeof delegation.salt !== "bigint" ||
+        !Number.isSafeInteger(delegation.chainId)
+      ) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          "A delegation from prepareDelegation is required",
+        );
+      }
+      const expected = this.delegationFor(
+        stored,
+        delegation.chainId,
+        delegation.salt,
+      );
+      if (delegationHash(expected) !== delegationHash(delegation)) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          "The delegation does not match this session key's scope",
+        );
+      }
+      if (!/^0x[0-9a-fA-F]{130}$/.test(signature ?? "")) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          "The delegation signature must be 65 bytes",
+        );
+      }
+      const sig = hexToBytes(signature.slice(2));
+      const v = sig[64] as number;
+      let recovered: string | null = null;
+      try {
+        if (v === 27 || v === 28) {
+          const signatureObject = secp256k1.Signature.fromBytes(
+            sig.slice(0, 64),
+            "compact",
+          );
+          // OpenZeppelin ECDSA (used by the DeleGator) rejects high-s.
+          if (!signatureObject.hasHighS()) {
+            const point = signatureObject
+              .addRecoveryBit(v - 27)
+              .recoverPublicKey(
+                hexToBytes(delegationSigningDigest(expected).slice(2)),
+              );
+            recovered = sessionKeyAddress(`0x${point.toHex(true)}`);
+          }
+        }
+      } catch {
+        recovered = null;
+      }
+      const owner = stored.authorization.signerAddress;
+      if (!recovered || recovered.toLowerCase() !== owner.toLowerCase()) {
+        throw createSessionKeyError(
+          "session_key_invalid_input",
+          "The delegation signature does not recover to the owner",
+        );
+      }
+      stored.authorization = {
+        type: "eip7702",
+        signerAddress: owner,
+        authorization: encodePermissionContext([{ ...expected, signature }]),
+        delegationChainId: expected.chainId,
+      };
+      await this.storage.save(stored);
+      this.cache.set(stored.id, stored);
+    });
+  }
+
+  /**
+   * The `DelegationManager.redeemDelegations` call that has the owner's
+   * account run `execution`, for an authorized eip7702 session key. The
+   * session key sends it as its own transaction (to, value 0, data).
+   */
+  async buildDelegationRedemption(
+    sessionId: string,
+    execution: FrameworkExecution,
+  ): Promise<{
+    to: `0x${string}`;
+    value: "0x0";
+    data: `0x${string}`;
+    chainId: number;
+  }> {
+    const stored = await this.readStoredSession(sessionId);
+    if (!stored) {
+      throw createSessionKeyError("session_key_not_found", sessionId);
+    }
+    this.validateSessionStatus(stored);
+    const { chainId, data } = this.redemptionFor(stored, execution);
+    return {
+      to: DELEGATION_FRAMEWORK.delegationManager,
+      value: "0x0",
+      data,
+      chainId,
+    };
+  }
+
+  private redemptionFor(
+    stored: StoredSessionKey,
+    execution: FrameworkExecution,
+  ): { chainId: number; data: `0x${string}` } {
+    const auth = stored.authorization;
+    if (
+      stored.scope.mode !== "eip7702" ||
+      auth.type !== "eip7702" ||
+      !auth.authorization ||
+      auth.delegationChainId === undefined
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "This session key has no attached delegation",
+      );
+    }
+    // The stored context is a single signed root delegation; re-encode the
+    // call around it rather than trusting a caller's calldata.
+    const context = auth.authorization;
+    const executionData = encodeSingleExecution(execution);
+    const data = encodeRedeemDelegationsWithContext(context, executionData);
+    return { chainId: auth.delegationChainId, data };
+  }
+
+  /**
+   * Sign the session key's redemption transaction.
+   *
+   * `digest` is the signing hash of `outerTx`, computed by the caller (core
+   * has no EVM transaction encoder). What is checked: `outerTx` is exactly
+   * the redemption of this key's delegation for `execution` on its chain,
+   * with value 0; `execution` passes the session scope off chain; usage is
+   * recorded before the signature is returned. The digest itself is not
+   * derived here, so a caller holding the manager could have the key sign
+   * another transaction or message from its own address. The owner's assets
+   * still move only through the delegation, whose caveats — including
+   * RedeemerEnforcer pinning this key as the only redeemer, so a
+   * re-delegation it is tricked into signing cannot be redeemed — the chain
+   * enforces regardless of what the key signs. The exposure left is the
+   * key's own gas funds.
+   */
+  async signDelegationRedemption(
+    sessionId: string,
+    digest: `0x${string}`,
+    outerTx: { to?: string; value?: string; data?: string; chainId?: number },
+    execution: FrameworkExecution,
+  ): Promise<`0x${string}`> {
+    return this.storage.withKeyLock(sessionId, () =>
+      this.withSessionLock(sessionId, async () => {
+        const stored = await this.readStoredSession(sessionId);
+        if (!stored) {
+          throw createSessionKeyError("session_key_not_found", sessionId);
+        }
+        this.validateSessionStatus(stored);
+        const { chainId, data } = this.redemptionFor(stored, execution);
+        if (
+          outerTx.chainId !== chainId ||
+          !outerTx.to ||
+          outerTx.to.toLowerCase() !==
+            DELEGATION_FRAMEWORK.delegationManager.toLowerCase() ||
+          BigInt(outerTx.value ?? "0") !== 0n ||
+          (outerTx.data ?? "").toLowerCase() !== data.toLowerCase()
+        ) {
+          throw createSessionKeyError(
+            "session_key_scope_exceeded",
+            "The transaction is not this key's redemption for the execution",
+          );
+        }
+        return this.signStoredSessionKey(stored, digest, {
+          to: execution.target,
+          value: `0x${execution.value.toString(16)}`,
+          data: execution.callData,
+          chainId,
+        });
+      }),
+    );
   }
 
   /**

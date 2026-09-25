@@ -649,21 +649,24 @@ describe("SessionKeyManager", () => {
   });
 
   describe("setAuthorization", () => {
-    it("should attach an authorization to an existing key", async () => {
+    it("refuses unverified eip7702 bytes: those keys use attachDelegation", async () => {
+      // Arbitrary bytes used to authorize an eip7702 key here. Such keys are
+      // now authorized only by a verified delegation (delegation-redemption
+      // tests cover that path).
       const info = await manager.createSessionKey(
         { mode: "eip7702" },
         signerAddress,
       );
-      await manager.setAuthorization(info.id, {
-        signerAddress,
-        type: "eip7702",
-        authorization: "0xauthorizationdata",
+      await expect(
+        manager.setAuthorization(info.id, {
+          signerAddress,
+          type: "eip7702",
+          authorization: "0xauthorizationdata",
+        }),
+      ).rejects.toMatchObject({
+        code: "session_key_invalid_input",
+        details: expect.stringMatching(/attachDelegation/),
       });
-
-      // Verify by checking the bundle (authorization is included)
-      const bundle = await manager.getSessionBundle(info.id);
-      expect(bundle.authorization.type).toBe("eip7702");
-      expect(bundle.authorization.signerAddress).toBe(signerAddress);
     });
 
     it("reports an attached off-chain authorization without exposing secrets", async () => {

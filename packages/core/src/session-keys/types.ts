@@ -118,6 +118,13 @@ export interface SignedAuthorization {
 
   /** Authorization type */
   type: "eip7702" | "offchain" | "aa_module";
+
+  /**
+   * For `eip7702`: the chain the signed delegation is valid on. The signed
+   * delegation itself is stored ABI-encoded in `authorization` (the
+   * permission context DelegationManager redeems).
+   */
+  delegationChainId?: number;
 }
 
 // ─── Persisted Session Key ─────────────────────────────────────────────

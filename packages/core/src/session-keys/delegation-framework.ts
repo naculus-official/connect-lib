@@ -38,6 +38,7 @@ export const DELEGATION_FRAMEWORK = {
     erc20TransferAmount: "0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc",
     limitedCalls: "0x04658B29F6b82ed55274221a06Fc97D318E25416",
     nativeTokenTransferAmount: "0xF71af580b9c3078fbc2BBF16FbB8EEd82b330320",
+    redeemer: "0xE144b0b2618071B4E56f746313528a669c7E65c5",
     timestamp: "0x1046bb45C8d673d4ea75321280DB34899413c069",
     valueLte: "0x92Bf12322527cAA612fd31a0e810472BBB106A8F",
   },
@@ -141,6 +142,7 @@ function sameAddress(a: string, b: string): boolean {
  * - one `allowedRecipients` entry (token scopes only) → AllowedCalldataEnforcer
  *   on the `transfer` recipient word
  * - `allowedChainIds` → the delegation's EIP-712 domain; must contain `chainId`
+ * - always RedeemerEnforcer = [session key]: no re-delegated redeemer
  * - `maxGasPerTx` / `maxTotalGas` have no enforcer and stay off-chain checks:
  *   the session key pays its own gas.
  */
@@ -150,6 +152,14 @@ export interface CaveatOptions {
    * `execute` runs inner calls no caveat sees. Required so no path skips it.
    */
   delegator: `0x${string}`;
+  /**
+   * The session key. Pinned as the only redeemer (RedeemerEnforcer): the key
+   * is an EOA, and DelegationManager accepts a re-delegation it signs, so
+   * without this a signature over an unbound digest could hand the whole
+   * caveat budget to another redeemer, beyond revokeSession (review,
+   * 2026-09-25).
+   */
+  delegate: `0x${string}`;
   /**
    * Selectors that must never be allowed; defaults to the manager's
    * built-in list. Pass the manager's configured list when it differs.
@@ -170,6 +180,9 @@ export function caveatsFromScope(
   ].map((m) => m.toLowerCase());
   if (!options?.delegator || !ADDRESS.test(options.delegator)) {
     refuse("the delegator is required");
+  }
+  if (!options.delegate || !ADDRESS.test(options.delegate)) {
+    refuse("the delegate is required");
   }
   if (scope.mode !== "eip7702") refuse(`mode is ${String(scope.mode)}`);
   if (!DELEGATION_FRAMEWORK_CHAIN_IDS.includes(chainId)) {
@@ -288,6 +301,7 @@ export function caveatsFromScope(
     }
     caveats.push(caveat(e.limitedCalls, word(BigInt(scope.maxTxCount))));
   }
+  caveats.push(caveat(e.redeemer, address20(options.delegate, "the delegate")));
   return caveats;
 }
 
@@ -329,6 +343,7 @@ export function buildDelegation(
   // for a chain its scope was not checked against.
   const caveats = caveatsFromScope(input.scope, input.chainId, {
     delegator,
+    delegate,
     forbiddenMethods: input.forbiddenMethods,
   }).map((c) => Object.freeze(c));
   return Object.freeze({
@@ -468,4 +483,140 @@ export function delegationTypedData(delegation: FrameworkDelegation) {
       salt: delegation.salt.toString(),
     },
   };
+}
+
+// ── Redemption encoding (ABI) ───────────────────────────────────────
+
+/** ERC-7579 ModeCode for one call, default execution: all zero. */
+export const SINGLE_DEFAULT_MODE = `0x${"0".repeat(64)}` as const;
+
+/** `redeemDelegations(bytes[],bytes32[],bytes[])` */
+const REDEEM_SELECTOR = bytesToHex(
+  keccak_256(utf8("redeemDelegations(bytes[],bytes32[],bytes[])")).slice(0, 4),
+);
+
+export interface FrameworkExecution {
+  target: `0x${string}`;
+  /** Wei, as a bigint. */
+  value: bigint;
+  callData: `0x${string}`;
+}
+
+function padRight(bytes: Uint8Array): Uint8Array {
+  const out = new Uint8Array(Math.ceil(bytes.length / 32) * 32);
+  out.set(bytes);
+  return out;
+}
+
+/** ABI `bytes`: length word, then the data right-padded to 32 bytes. */
+function abiBytes(hex: string): Uint8Array {
+  const data = bytesOf(hex);
+  return concat(w(BigInt(data.length)), padRight(data));
+}
+
+/**
+ * Head/tail encoding of a tuple (or of a parameter list) whose members are
+ * either static 32-byte words or already-encoded dynamic values.
+ */
+function abiTuple(
+  members: Array<{ word: Uint8Array } | { dynamic: Uint8Array }>,
+): Uint8Array {
+  const heads: Uint8Array[] = [];
+  const tails: Uint8Array[] = [];
+  let offset = BigInt(members.length * 32);
+  for (const member of members) {
+    if ("word" in member) {
+      heads.push(member.word);
+    } else {
+      heads.push(w(offset));
+      tails.push(member.dynamic);
+      offset += BigInt(member.dynamic.length);
+    }
+  }
+  return concat(...heads, ...tails);
+}
+
+/** ABI array of dynamic elements: length, offsets, elements. */
+function abiDynamicArray(elements: Uint8Array[]): Uint8Array {
+  return concat(
+    w(BigInt(elements.length)),
+    abiTuple(elements.map((dynamic) => ({ dynamic }))),
+  );
+}
+
+function encodeDelegationTuple(d: FrameworkDelegation): Uint8Array {
+  const caveats = abiDynamicArray(
+    d.caveats.map((c) =>
+      abiTuple([
+        { word: a(c.enforcer) },
+        { dynamic: abiBytes(c.terms) },
+        { dynamic: abiBytes(c.args) },
+      ]),
+    ),
+  );
+  return abiTuple([
+    { word: a(d.delegate) },
+    { word: a(d.delegator) },
+    { word: bytesOf(d.authority) },
+    { dynamic: caveats },
+    { word: w(d.salt) },
+    { dynamic: abiBytes(d.signature) },
+  ]);
+}
+
+/**
+ * `abi.encode(Delegation[])` — the permission context DelegationManager
+ * decodes, leaf first (a single root delegation here).
+ */
+export function encodePermissionContext(
+  delegations: readonly FrameworkDelegation[],
+): `0x${string}` {
+  return `0x${bytesToHex(
+    abiTuple([
+      { dynamic: abiDynamicArray(delegations.map(encodeDelegationTuple)) },
+    ]),
+  )}`;
+}
+
+/** ERC-7579 single-call execution: `abi.encodePacked(target, value, callData)`. */
+export function encodeSingleExecution(
+  execution: FrameworkExecution,
+): `0x${string}` {
+  address20(execution.target, "the execution target");
+  if (!/^0x([0-9a-fA-F]{2})*$/.test(execution.callData)) {
+    refuse("the execution callData is not hex bytes");
+  }
+  return `0x${execution.target.slice(2).toLowerCase()}${word(execution.value)}${execution.callData.slice(2).toLowerCase()}`;
+}
+
+/**
+ * Calldata for `DelegationManager.redeemDelegations` redeeming one signed
+ * delegation for one single-call execution.
+ */
+export function encodeRedeemDelegations(
+  delegation: FrameworkDelegation,
+  execution: FrameworkExecution,
+): `0x${string}` {
+  if (!/^0x[0-9a-fA-F]{130}$/.test(delegation.signature)) {
+    refuse("the delegation is not signed");
+  }
+  return encodeRedeemDelegationsWithContext(
+    encodePermissionContext([delegation]),
+    encodeSingleExecution(execution),
+  );
+}
+
+/** As encodeRedeemDelegations, from an encoded context and execution. */
+export function encodeRedeemDelegationsWithContext(
+  permissionContext: `0x${string}`,
+  executionCallData: `0x${string}`,
+): `0x${string}` {
+  const bytesArray = (hex: `0x${string}`) => abiDynamicArray([abiBytes(hex)]);
+  return `0x${REDEEM_SELECTOR}${bytesToHex(
+    abiTuple([
+      { dynamic: bytesArray(permissionContext) },
+      { dynamic: concat(w(1n), bytesOf(SINGLE_DEFAULT_MODE)) },
+      { dynamic: bytesArray(executionCallData) },
+    ]),
+  )}`;
 }

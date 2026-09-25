@@ -95,8 +95,13 @@ to stand in for Naculus's forbidden selectors.
 
 - The delegate is always the session key's address; never an **open
   delegation** (`delegate = 0xa11`).
-- `authority` is always ROOT; no re-delegation by the session key (no
-  `RedeemerEnforcer` loophole: the delegate is fixed).
+- `authority` is always ROOT, and every delegation carries
+  `RedeemerEnforcer` = [session key] (v1.3.0
+  `0xE144b0b2618071B4E56f746313528a669c7E65c5`, on all seven chains). The
+  session key is an EOA and DelegationManager accepts a re-delegation it
+  signs; the key signs caller-computed digests (package 2, option (b)), so it
+  could be made to sign one. The redeemer caveat makes any such chain revert:
+  only the session key itself can redeem (review, 2026-09-25).
 - The owner's EOA must be delegated to `EIP7702StatelessDeleGatorImpl` for
   the chain in question (checked with `readDelegation`); if it is later
   re-delegated or revoked, every delegation becomes unredeemable — that is
