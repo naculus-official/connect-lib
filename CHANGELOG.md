@@ -19,6 +19,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Safe App handshake is sent only to the exact parent origin** (`@naculus/connector-safe`) — the handshake used to fall back to `postMessage(…, "*")` when the browser did not expose `ancestorOrigins` (Firefox), and replies were accepted from any origin there. The parent origin now comes from `ancestorOrigins` or `document.referrer`; when neither is available, Safe detection fails closed (a Safe App whose parent strips the referrer on Firefox is no longer detected). `allowedOrigins` narrows it further. CodeQL alerts #10–#13.
 - **EIP-712 signatures over negative `int8`…`int248` values were wrong** (`@naculus/wallet-engine`) — the encoder used an N-bit two's complement where ABI sign-extends to 256 bits, so such signatures matched no verifier.
 - **EIP-712 dropped struct types referenced through fixed or nested arrays** (`@naculus/wallet-engine`) — `P[2]` or `P[][]` left `P` out of the encoded type string, so the signature matched no verifier.
 
@@ -28,7 +29,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Packages
 
-`@naculus/connect-core` and `@naculus/wallet-engine` carry the changes above. The other 14 packages are version-bump-only releases required by the lockstep release model.
+`@naculus/connect-core`, `@naculus/wallet-engine` and `@naculus/connector-safe` carry the changes above. The other 13 packages are version-bump-only releases required by the lockstep release model.
 
 ## 0.3.0 — 2026-09-25
 
