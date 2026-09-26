@@ -33,3 +33,24 @@ What it does on a `402` with a `PAYMENT-REQUIRED` header:
 
 Nothing is broadcast: the server's facilitator settles on chain. The session
 key's own address is the payer (`from`), so it must hold the tokens.
+
+## Solana (`exact` on SVM)
+
+```ts
+import { solanaPaymentRpc } from "@naculus/connect-core";
+
+const pay = createX402Fetch({
+  signer, // optional: EVM requirements, paid by the session key
+  solana: { signer: solanaRoles.signer, rpc: solanaPaymentRpc(rpcUrl) },
+});
+```
+
+A Solana requirement is paid by the **connected wallet** (the Naculus
+`SolanaSigner` role): one SPL `TransferChecked` to the payee's associated
+token account, with the facilitator's `extra.feePayer` as fee payer, and the
+seller's `extra.memo` or a random 16-byte memo. Every payment is a wallet
+prompt; no session-key policy applies. Before signing, the RPC must serve the
+requirement's cluster (genesis hash) and the mint must be an SPL Token /
+Token-2022 mint. What the wallet returns is checked before it is sent — same
+transfer, fee payer, blockhash and memo; only Lighthouse assertions may be
+added; the payer's signature must verify.

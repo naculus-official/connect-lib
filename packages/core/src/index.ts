@@ -10,6 +10,7 @@ export { CHAINS } from "./chain-registry";
 export * from "./connector";
 export * from "./connector-manager";
 export * from "./constants";
+export * from "./solana-payment";
 export * from "./errors";
 export * from "./fee-estimation";
 export * from "./hex";

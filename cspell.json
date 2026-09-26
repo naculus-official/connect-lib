@@ -363,7 +363,10 @@
     "mppx",
     "nopad",
     "tempoxyz",
-    "wevm"
+    "wevm",
+    "localnet",
+    "decompiles",
+    "promptless"
   ],
   "ignoreWords": [
     "eykt",

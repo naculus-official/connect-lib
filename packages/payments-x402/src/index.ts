@@ -9,6 +9,12 @@ export {
   type X402TypedDataSigner,
 } from "./evm-exact";
 export {
+  createSvmPaymentPayload,
+  svmUnsupportedReason,
+  type X402SolanaOptions,
+  type X402SolanaSigner,
+} from "./svm-exact";
+export {
   createX402Fetch,
   type X402FetchOptions,
   type X402FetchResult,

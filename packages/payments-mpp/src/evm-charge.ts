@@ -6,6 +6,11 @@ import {
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import {
+  type MppSolanaNetwork,
+  readSolanaRequest,
+  type SolanaChargeRequest,
+} from "./solana-charge";
+import {
   encodeCredential,
   isRecord,
   type MppChallenge,
@@ -136,14 +141,31 @@ export interface SelectOptions {
   tokenDomains?: readonly TokenDomain[];
   /** Milliseconds since the epoch; defaults to now. */
   now?: number;
+  /** Pay `method="evm"` charges (EIP-3009). Default true. */
+  evm?: boolean;
+  /** Pay `method="solana"` charges (wallet-signed). Default false. */
+  solana?: boolean;
+  /** Solana clusters this client will pay on. Default both. */
+  solanaNetworks?: readonly MppSolanaNetwork[];
 }
 
-/** A challenge this client can pay, with what it takes to sign it. */
-export interface SelectedCharge {
+/** An EVM charge this client can pay, with what it takes to sign it. */
+export interface SelectedEvmCharge {
+  method: "evm";
   challenge: MppChallenge;
   request: EvmChargeRequest;
   domain: TokenDomain;
 }
+
+/** A Solana charge this client can pay. */
+export interface SelectedSolanaCharge {
+  method: "solana";
+  challenge: MppChallenge;
+  request: SolanaChargeRequest;
+}
+
+/** A challenge this client can pay. */
+export type SelectedCharge = SelectedEvmCharge | SelectedSolanaCharge;
 
 function readRequest(
   request: Record<string, unknown>,
@@ -209,7 +231,9 @@ export function unsupportedReason(
   options: SelectOptions = {},
 ): string | null {
   const { method, intent } = challenge.params;
-  if (method !== "evm") return `method ${method} is not supported`;
+  if (method !== "evm" && method !== "solana") {
+    return `method ${method} is not supported`;
+  }
   if (intent !== "charge") return `intent ${intent} is not supported`;
   const now = options.now ?? Date.now();
   // validBefore is whole seconds: an expiry inside the current second leaves
@@ -220,6 +244,15 @@ export function unsupportedReason(
   ) {
     return "the challenge has expired";
   }
+  if (method === "solana") {
+    if (!options.solana) return "no Solana signer is configured";
+    const request = readSolanaRequest(
+      challenge.request,
+      options.solanaNetworks,
+    );
+    return typeof request === "string" ? request : null;
+  }
+  if (options.evm === false) return "no EVM signer is configured";
   const request = readRequest(challenge.request);
   if (typeof request === "string") return request;
   if (options.chainIds && !options.chainIds.includes(request.chainId)) {
@@ -244,8 +277,19 @@ export function selectCharge(
       reasons.push(reason);
       continue;
     }
+    if (challenge.params.method === "solana") {
+      return {
+        method: "solana",
+        challenge,
+        request: readSolanaRequest(
+          challenge.request,
+          options.solanaNetworks,
+        ) as SolanaChargeRequest,
+      };
+    }
     const request = readRequest(challenge.request) as EvmChargeRequest;
     return {
+      method: "evm",
       challenge,
       request,
       domain: findDomain(request, options) as TokenDomain,
@@ -270,7 +314,7 @@ export function challengeNonce(challenge: {
 
 /** The EIP-3009 typed data that pays `selected` from `from`. */
 export function buildChargeAuthorization(
-  selected: SelectedCharge,
+  selected: SelectedEvmCharge,
   from: `0x${string}`,
   options: { now?: number } = {},
 ): SessionKeyTypedDataRequest {
@@ -304,7 +348,7 @@ export function buildChargeAuthorization(
  * challenge selected and its value.
  */
 export async function createChargeCredential(
-  selected: SelectedCharge,
+  selected: SelectedEvmCharge,
   signer: MppTypedDataSigner,
   options: { now?: number } = {},
 ): Promise<{ header: string; value: string }> {

@@ -18,6 +18,7 @@ import {
   type MppCredential,
   type MppTypedDataSigner,
   PAYMENT_RECEIPT_HEADER,
+  type SelectedEvmCharge,
   parseAuthenticate,
   parsePaymentChallenges,
   parsePaymentReceipt,
@@ -199,7 +200,9 @@ describe("evm charge", () => {
   });
 
   it("builds the authorization the challenge describes", () => {
-    const selected = selectCharge([one(header())], { now: NOW });
+    const selected = selectCharge([one(header())], {
+      now: NOW,
+    }) as SelectedEvmCharge;
     const from = "0x1111111111111111111111111111111111111111";
     expect(buildChargeAuthorization(selected, from, { now: NOW })).toEqual({
       domain: {
@@ -226,7 +229,7 @@ describe("evm charge", () => {
     delete c.params.expires;
     delete c.expiresAt;
     const typed = buildChargeAuthorization(
-      selectCharge([c], { now: NOW }),
+      selectCharge([c], { now: NOW }) as SelectedEvmCharge,
       OTHER,
       { now: NOW },
     );
@@ -305,7 +308,8 @@ describe("evm charge", () => {
       tokenDomains: [
         { chainId: 84532, address: OTHER, name: "Other", version: "1" },
       ],
-    });
+    }) as SelectedEvmCharge;
+    expect(selected.method).toBe("evm");
     expect(selected.domain.name).toBe("Other");
   });
 

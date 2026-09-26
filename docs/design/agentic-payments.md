@@ -180,3 +180,36 @@ credential echo get an independent pass.
    seven thread-17 chains, each value read from the chain and pinned by a
    test, with a caller override.
 3. Credential types: `authorization` only for now (recommended).
+
+## Step 5: Solana, signed by the wallet (2026-09-26)
+
+User decision: Solana payments are signed by the connected wallet first;
+promptless Solana session keys come later (STATE thread 18) and reuse the
+byte-level builder/verifier below.
+
+Both x402 `exact` on SVM (coinbase/x402 `scheme_exact_svm.md`) and MPP
+`solana` charge in pull mode (`draft-solana-charge-00`) ask the payer to sign
+one v0 transaction: ComputeBudget limit and price, one SPL `TransferChecked`
+into the payee's associated token account, a Memo; the fee payer is the
+facilitator / server (`extra.feePayer`, `feePayerKey`) or, for MPP without
+sponsorship, the payer. connect-core `solana-payment.ts` builds it without
+`@solana/kit` (base58 via `@scure/base`, ATA via sha256 + ed25519 off-curve,
+both already core dependencies) and verifies what the wallet returns: same
+fee payer, blockhash, first three instructions and memo; for x402 only,
+Lighthouse instructions may be added (Phantom/Solflare inject them; x402
+allows them, MPP servers reject them, so MPP refuses such a wallet result); the payer's ed25519 signature must verify over the returned message;
+no legacy messages, lookup tables or trailing bytes. Cross-checked against
+@solana/kit 8 and @solana-program/token (ATA 80/80; kit decodes and
+decompiles the build into exactly the intended instructions; kit-signed
+variants: Lighthouse accepted, an added SOL transfer / second memo / changed
+fee payer refused).
+
+Before the wallet is asked, the RPC's genesis hash must match the
+challenge's cluster, and the blockhash always comes from that RPC: MPP's
+advisory `recentBlockhash` is ignored, because a devnet challenge carrying a
+mainnet blockhash (with a mint that exists on both, e.g. wrapped SOL) would
+otherwise get a mainnet-valid transfer signed (independent review, high). A fee payer equal to
+the payer is refused (x402 forbids it; for MPP it contradicts `feePayer`).
+Refused for now: native SOL, splits, push mode, confidential transfers,
+`localnet`, Token-2022 transfer-fee / hook extensions beyond a plain
+`TransferChecked`.

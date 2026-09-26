@@ -44,3 +44,30 @@ against its `DOMAIN_SEPARATOR()`). For another token, pass `tokenDomains`;
 an entry there takes precedence over the built-in table.
 
 Spec: tempoxyz/mpp-specs `draft-httpauth-payment-01`, `draft-evm-charge-00`.
+
+## Solana charges
+
+```ts
+import { solanaPaymentRpc } from "@naculus/connect-core";
+
+const pay = createMppFetch({
+  signer, // optional: evm charges, paid by the session key
+  solana: {
+    signer: solanaRoles.signer,
+    rpc: solanaPaymentRpc(rpcUrl),
+    networks: ["mainnet"],
+  },
+});
+```
+
+`method="solana"` charges (pull mode, SPL tokens) are paid by the **connected
+wallet**: one `TransferChecked` to the recipient's associated token account,
+`externalId` as the memo. With `feePayer: true` the server's `feePayerKey`
+pays the fee and co-signs; otherwise the payer pays it and signs alone. The
+RPC must serve the challenge's cluster, and the mint must match the
+challenge's `decimals` and `tokenProgram`. Native SOL, splits, push mode,
+confidential transfers and `localnet` are refused. The blockhash always
+comes from your RPC (the server's advisory `recentBlockhash` is ignored), and
+the wallet's result is checked as for x402 — except that wallets adding
+Lighthouse assertions (Phantom, Solflare) are refused, because MPP servers
+reject such transactions.

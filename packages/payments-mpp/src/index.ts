@@ -6,6 +6,8 @@ export {
   type EvmChargeRequest,
   type MppTypedDataSigner,
   type SelectedCharge,
+  type SelectedEvmCharge,
+  type SelectedSolanaCharge,
   type SelectOptions,
   selectCharge,
   sessionKeyMppSigner,
@@ -13,6 +15,14 @@ export {
   USDC_DOMAINS,
   unsupportedReason,
 } from "./evm-charge";
+export {
+  createSolanaChargeCredential,
+  type MppSolanaNetwork,
+  type MppSolanaOptions,
+  type MppSolanaSigner,
+  readSolanaRequest,
+  type SolanaChargeRequest,
+} from "./solana-charge";
 export {
   createMppFetch,
   type MppFetchOptions,

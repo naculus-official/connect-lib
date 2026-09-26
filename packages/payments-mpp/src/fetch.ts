@@ -6,6 +6,11 @@ import {
   selectCharge,
 } from "./evm-charge";
 import {
+  createSolanaChargeCredential,
+  type MppSolanaNetwork,
+  type MppSolanaOptions,
+} from "./solana-charge";
+import {
   MppError,
   type MppReceipt,
   PAYMENT_RECEIPT_HEADER,
@@ -14,8 +19,12 @@ import {
   WWW_AUTHENTICATE_HEADER,
 } from "./wire";
 
-export interface MppFetchOptions extends Omit<SelectOptions, "now"> {
-  signer: MppTypedDataSigner;
+export interface MppFetchOptions
+  extends Omit<SelectOptions, "now" | "evm" | "solana" | "solanaNetworks"> {
+  /** Pays `evm` charges: a policy-bound session key (EIP-3009). */
+  signer?: MppTypedDataSigner;
+  /** Pays `solana` charges: the connected wallet signs each one. */
+  solana?: MppSolanaOptions & { networks?: readonly MppSolanaNetwork[] };
   /**
    * Defaults to the global fetch. A replacement must report redirects
    * (`redirected` / `url`) and honour `redirect: "error"`; the redirect
@@ -95,6 +104,13 @@ async function problemDetail(response: Response): Promise<string> {
  */
 export function createMppFetch(options: MppFetchOptions) {
   const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const { signer, solana } = options;
+  if (!signer && !solana) {
+    throw new MppError(
+      "invalid_input",
+      "createMppFetch needs a signer, a solana signer, or both.",
+    );
+  }
 
   return async function mppFetch(
     input: RequestInfo | URL,
@@ -124,11 +140,28 @@ export function createMppFetch(options: MppFetchOptions) {
     const { challenges, rejected } = parsePaymentChallenges(
       first.headers.get(WWW_AUTHENTICATE_HEADER),
     );
-    const selected = selectCharge(challenges, options, rejected);
+    const selected = selectCharge(
+      challenges,
+      {
+        ...(options.chainIds ? { chainIds: options.chainIds } : {}),
+        ...(options.tokenDomains ? { tokenDomains: options.tokenDomains } : {}),
+        evm: Boolean(signer),
+        solana: Boolean(solana),
+        ...(solana?.networks ? { solanaNetworks: solana.networks } : {}),
+      },
+      rejected,
+    );
     if (options.approve && !(await options.approve(selected))) {
       throw new MppError("payment_rejected", "Payment declined by approve().");
     }
-    const credential = await createChargeCredential(selected, options.signer);
+    const credential =
+      selected.method === "solana"
+        ? await createSolanaChargeCredential(
+            selected.challenge,
+            selected.request,
+            solana as MppSolanaOptions,
+          )
+        : await createChargeCredential(selected, signer as MppTypedDataSigner);
 
     const headers = new Headers(request.headers);
     headers.set(credential.header, credential.value);

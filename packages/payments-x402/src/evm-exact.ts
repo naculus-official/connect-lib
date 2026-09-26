@@ -4,6 +4,7 @@ import {
   type SessionKeyTypedDataRequest,
   sessionKeyAddress,
 } from "@naculus/connect-core";
+import { svmUnsupportedReason } from "./svm-exact";
 import {
   X402_VERSION,
   X402Error,
@@ -93,8 +94,12 @@ export function unsupportedReason(
 }
 
 export interface SelectOptions {
-  /** CAIP-2 chains this client will pay on. Omitted: any EIP-155 chain. */
+  /** CAIP-2 chains this client will pay on. Omitted: any it can pay on. */
   networks?: readonly string[];
+  /** Pay EIP-155 requirements (EIP-3009). Default true. */
+  evm?: boolean;
+  /** Pay Solana requirements (`svm-exact`). Default false. */
+  solana?: boolean;
 }
 
 /** The first requirement, in the server's order, this client can pay. */
@@ -104,7 +109,13 @@ export function selectRequirement(
 ): X402PaymentRequirements {
   const reasons: string[] = [];
   for (const requirement of required.accepts) {
-    const reason = unsupportedReason(requirement);
+    const reason = requirement.network.startsWith("solana:")
+      ? options.solana
+        ? svmUnsupportedReason(requirement)
+        : "no Solana signer is configured"
+      : (options.evm ?? true)
+        ? unsupportedReason(requirement)
+        : "no EVM signer is configured";
     if (reason) {
       reasons.push(reason);
       continue;

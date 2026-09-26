@@ -4,6 +4,7 @@ import {
   selectRequirement,
   type X402TypedDataSigner,
 } from "./evm-exact";
+import { createSvmPaymentPayload, type X402SolanaOptions } from "./svm-exact";
 import {
   encodeHeader,
   PAYMENT_REQUIRED_HEADER,
@@ -17,8 +18,12 @@ import {
   type X402SettlementResponse,
 } from "./wire";
 
-export interface X402FetchOptions extends SelectOptions {
-  signer: X402TypedDataSigner;
+export interface X402FetchOptions
+  extends Omit<SelectOptions, "evm" | "solana"> {
+  /** Pays EVM requirements: a policy-bound session key (EIP-3009). */
+  signer?: X402TypedDataSigner;
+  /** Pays Solana requirements: the connected wallet signs each one. */
+  solana?: X402SolanaOptions;
   /** Defaults to the global fetch. */
   fetch?: typeof fetch;
   /**
@@ -51,6 +56,13 @@ export interface X402FetchResult {
  */
 export function createX402Fetch(options: X402FetchOptions) {
   const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const { signer, solana } = options;
+  if (!signer && !solana) {
+    throw new X402Error(
+      "invalid_input",
+      "createX402Fetch needs a signer, a solana signer, or both.",
+    );
+  }
 
   return async function x402Fetch(
     input: RequestInfo | URL,
@@ -99,15 +111,25 @@ export function createX402Fetch(options: X402FetchOptions) {
       );
     }
 
-    const requirement = selectRequirement(required, options);
+    const requirement = selectRequirement(required, {
+      ...(options.networks ? { networks: options.networks } : {}),
+      evm: Boolean(signer),
+      solana: Boolean(solana),
+    });
     if (options.approve && !(await options.approve(requirement, required))) {
       throw new X402Error("payment_rejected", "Payment declined by approve().");
     }
-    const payload = await createPaymentPayload(
-      required,
-      requirement,
-      options.signer,
-    );
+    const payload = requirement.network.startsWith("solana:")
+      ? await createSvmPaymentPayload(
+          required,
+          requirement,
+          solana as X402SolanaOptions,
+        )
+      : await createPaymentPayload(
+          required,
+          requirement,
+          signer as X402TypedDataSigner,
+        );
 
     const headers = new Headers(request.headers);
     headers.set(PAYMENT_SIGNATURE_HEADER, encodeHeader(payload));
