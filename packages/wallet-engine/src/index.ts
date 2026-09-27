@@ -107,6 +107,12 @@ export type {
 } from "./storage/security";
 export { assessStorageSecurity } from "./storage/security";
 export { IndexedDbStorageAdapter } from "./storage/indexed-db";
+export {
+  type KeyStoreStorageOptions,
+  KeyStoreStorageAdapter,
+  type WalletBlobStore,
+  type WalletKeyStore,
+} from "./storage/key-store";
 export { LocalStorageAdapter } from "./storage/local-storage";
 export type {
   StorageAdapter,

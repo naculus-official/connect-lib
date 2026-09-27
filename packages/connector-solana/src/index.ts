@@ -5,6 +5,7 @@ import type {
 } from "@naculus/connect-core";
 import {
   createEmptySession,
+  detectPlatform,
   isValidAddress,
   logger,
   WalletError,
@@ -163,9 +164,16 @@ class SolanaConnectorImpl implements UniversalConnector {
    */
   registerWallet(wallet: WalletStandardWallet): () => void {
     this.registerWalletStandardWallet(wallet);
+    const registered = wallet?.name
+      ? this.discoveredWallets.get(walletStandardId(wallet.name))
+      : undefined;
     return () => {
       if (!wallet?.name) return;
-      this.discoveredWallets.delete(walletStandardId(wallet.name));
+      const id = walletStandardId(wallet.name);
+      // Only the entry this call added: a same-named wallet registered later
+      // is not this caller's to remove.
+      if (!registered || this.discoveredWallets.get(id) !== registered) return;
+      this.discoveredWallets.delete(id);
       this.notifyListeners();
     };
   }
@@ -442,11 +450,9 @@ class SolanaConnectorImpl implements UniversalConnector {
             capabilities: {},
           },
         },
-        platform:
-          typeof navigator !== "undefined" &&
-          /mobile|android|iphone/i.test(navigator.userAgent)
-            ? "mobile-web"
-            : "desktop-web",
+        // As every other connector: a native app's declared platform, or the
+        // browser's (React Native has no userAgent to test).
+        platform: detectPlatform(),
       });
 
       this.activeSession = { wallet, publicKey, session };
