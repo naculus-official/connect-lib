@@ -84,13 +84,6 @@ function resolveLocalStorage(): Storage | null {
   return getGlobalStorage("localStorage");
 }
 
-function resolveSessionStorage(): Storage | null {
-  if (typeof window !== "undefined" && window.sessionStorage) {
-    return window.sessionStorage;
-  }
-  return getGlobalStorage("sessionStorage");
-}
-
 export class LocalStorageAdapter implements StorageAdapter {
   private prefix: string;
   private _available: boolean | null = null;

@@ -7,7 +7,7 @@
  * - Short-lived (configurable expiry, default 24h)
  * - Scoped (limits on value, gas, contracts, methods, chain)
  * - Revocable (local revoke instantly invalidates)
- * - Encrypted at rest (AES-256-CTR-HMAC via @noble/hashes)
+ * - Encrypted at rest (AES-256-GCM via @noble/ciphers, PBKDF2-SHA256 key)
  *
  * Uses standard secp256k1 key pairs generated client-side.
  * Private keys are encrypted before storage and decrypted only in memory.
