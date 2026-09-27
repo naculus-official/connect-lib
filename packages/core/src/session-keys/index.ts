@@ -40,6 +40,7 @@ export type {
 
 export { DEFAULT_SESSION_KEY_CONFIG } from "./types";
 export {
+  recoverTypedDataSigner,
   sessionKeyAddress,
   typedDataDigest,
   validateTypedDataRequest,

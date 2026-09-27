@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MemoryStorageAdapter } from "../../storage";
 import { SessionKeyManager } from "../SessionKeyManager";
 import {
+  recoverTypedDataSigner,
   type SessionKeyTypedDataRequest,
   sessionKeyAddress,
   typedDataAsTransaction,
@@ -412,5 +413,47 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
     await expect(m.getSessionBundle(info.id)).rejects.toMatchObject({
       code: "session_key_scope_exceeded",
     });
+  });
+});
+
+describe("recoverTypedDataSigner", () => {
+  const key = new Uint8Array(32).fill(4);
+  const from = sessionKeyAddress(
+    `0x${bytesToHex(secp256k1.getPublicKey(key, true))}`,
+  );
+  function signed(): { req: SessionKeyTypedDataRequest; sig: string } {
+    const req = request(from);
+    const raw = secp256k1.sign(hexToBytes(typedDataDigest(req).slice(2)), key, {
+      prehash: false,
+      format: "recovered",
+    });
+    const v = ((raw[0] as number) + 27).toString(16);
+    return { req, sig: `0x${bytesToHex(raw.subarray(1))}${v}` };
+  }
+
+  it("recovers the signer of a TransferWithAuthorization", () => {
+    const { req, sig } = signed();
+    expect(recoverTypedDataSigner(req, sig)).toBe(from);
+    expect(recoverTypedDataSigner(request(from, { value: "2" }), sig)).not.toBe(
+      from,
+    );
+  });
+
+  it("refuses what FiatToken would refuse", () => {
+    const { req, sig } = signed();
+    const r = sig.slice(2, 66);
+    const s = BigInt(`0x${sig.slice(66, 130)}`);
+    const v = sig.slice(130);
+    const n = secp256k1.Point.CURVE().n;
+    const highS = (n - s).toString(16).padStart(64, "0");
+    const flipped = v === "1b" ? "1c" : "1b";
+    expect(recoverTypedDataSigner(req, `0x${r}${highS}${flipped}`)).toBeNull();
+    expect(
+      recoverTypedDataSigner(req, `0x${r}${sig.slice(66, 130)}00`),
+    ).toBeNull();
+    expect(recoverTypedDataSigner(req, sig.slice(0, 130))).toBeNull();
+    expect(
+      recoverTypedDataSigner({ ...req, primaryType: "Permit" } as never, sig),
+    ).toBeNull();
   });
 });
