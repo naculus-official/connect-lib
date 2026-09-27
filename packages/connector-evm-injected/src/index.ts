@@ -355,6 +355,24 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     this.announceHandler = null;
   }
 
+  /**
+   * Register an EIP-1193 provider the app holds, as if it had announced
+   * itself over EIP-6963 — on React Native there is no window event bus, so
+   * `@naculus/connect-native` passes Coinbase's Mobile Wallet Protocol
+   * provider here. Returns an unregister function.
+   */
+  registerProvider(
+    info: EIP6963ProviderInfo,
+    provider: Eip6963EthereumProvider,
+  ): () => void {
+    this.handleAnnouncement(info, provider);
+    return () => {
+      if (this.discoveredWallets.get(info.uuid)?.provider !== provider) return;
+      this.discoveredWallets.delete(info.uuid);
+      this.notifyListeners();
+    };
+  }
+
   private handleAnnouncement(
     info: EIP6963ProviderInfo,
     provider: Eip6963EthereumProvider,

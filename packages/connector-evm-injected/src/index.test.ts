@@ -111,6 +111,26 @@ describe("EIP6963Connector", () => {
     });
   });
 
+  describe("registerProvider", () => {
+    it("registers a provider the app holds, and unregisters it", () => {
+      const c = new EIP6963Connector();
+      const mwp = createMockProvider();
+      const info = {
+        uuid: "coinbase-mwp",
+        name: "Coinbase Wallet",
+        icon: "data:image/svg+xml;base64,",
+        rdns: "com.coinbase.wallet",
+      };
+      const unregister = c.registerProvider(info, mwp as never);
+      expect(c.getDiscoveredWallets().map((w) => w.id)).toEqual([
+        "coinbase-mwp",
+      ]);
+      expect(c.getDiscoveredWallets()[0]?.provider).toBe(mwp);
+      unregister();
+      expect(c.getDiscoveredWallets()).toEqual([]);
+    });
+  });
+
   describe("getDiscoveredWallets", () => {
     it("should return empty array initially", () => {
       const c = new EIP6963Connector();
@@ -479,9 +499,7 @@ describe("EIP6963Connector", () => {
       provider.request.mockResolvedValue({ id: "0xbundle" });
       await connector.sendCalls(
         createSession(),
-        [
-          { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
-        ],
+        [{ to: "0x0000000000000000000000000000000000000001", value: "0x1" }],
         undefined,
         {
           paymasterService: {
@@ -504,9 +522,7 @@ describe("EIP6963Connector", () => {
       await expect(
         connector.sendCalls(
           createSession(),
-          [
-            { to: "0x0000000000000000000000000000000000000001", value: "0x1" },
-          ],
+          [{ to: "0x0000000000000000000000000000000000000001", value: "0x1" }],
           undefined,
           { paymasterService: { url: "https://paymaster.example" } },
         ),
