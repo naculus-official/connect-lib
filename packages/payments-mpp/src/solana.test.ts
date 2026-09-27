@@ -216,6 +216,24 @@ describe("MPP solana charge", () => {
     expect(tx.numRequiredSignatures).toBe(1);
   });
 
+  it("uses a random memo when the charge has no externalId", async () => {
+    const signer = wallet();
+    const req = request({}, { externalId: undefined });
+    await createMppFetch({
+      solana: { signer, rpc: rpc() },
+      fetch: server(header(req)).fetch,
+    })(URL_);
+    await createMppFetch({
+      solana: { signer, rpc: rpc() },
+      fetch: server(header(req)).fetch,
+    })(URL_);
+    const memos = signer.seen.map((w) =>
+      new TextDecoder().decode(parseSolanaTransaction(w).instructions[3]?.data),
+    );
+    expect(memos[0]).toMatch(/^[0-9a-f]{32}$/);
+    expect(memos[0]).not.toBe(memos[1]);
+  });
+
   it("ignores the server's recent blockhash for the checked RPC's", async () => {
     const signer = wallet();
     const { fetch } = server(

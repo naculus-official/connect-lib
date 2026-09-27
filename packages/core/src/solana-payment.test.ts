@@ -259,6 +259,61 @@ describe("readMint", () => {
     expect(readMint(SOLANA_PROGRAMS.token2022, mint).decimals).toBe(6);
   });
 
+  /** A Token-2022 mint with TLV extensions `[type, length]` (zeroed values). */
+  function token2022Mint(extensions: [number, number][]): Uint8Array {
+    const size = 166 + extensions.reduce((n, [, length]) => n + 4 + length, 0);
+    const data = new Uint8Array(size);
+    data.set(mint.subarray(0, 82));
+    data[165] = 1; // account type: mint
+    let offset = 166;
+    for (const [type, length] of extensions) {
+      data[offset] = type & 0xff;
+      data[offset + 1] = type >> 8;
+      data[offset + 2] = length & 0xff;
+      data[offset + 3] = length >> 8;
+      offset += 4 + length;
+    }
+    return data;
+  }
+
+  it("accepts Token-2022 mints whose extensions leave transfers unchanged", () => {
+    // MetadataPointer (18), PermanentDelegate (12), InterestBearingConfig (10).
+    const data = token2022Mint([
+      [18, 64],
+      [12, 32],
+      [10, 52],
+    ]);
+    expect(readMint(SOLANA_PROGRAMS.token2022, data).decimals).toBe(6);
+  });
+
+  it.each([
+    [1, "TransferFeeConfig"],
+    [9, "NonTransferable"],
+    [14, "TransferHook"],
+    [16, "ConfidentialTransferFee"],
+    [26, "PausableConfig"],
+  ])("refuses a Token-2022 mint with extension %i (%s)", (type, name) => {
+    const data = token2022Mint([
+      [18, 64],
+      [type, 8],
+    ]);
+    expect(() => readMint(SOLANA_PROGRAMS.token2022, data)).toThrow(
+      new RegExp(name),
+    );
+  });
+
+  it("refuses a malformed Token-2022 mint", () => {
+    const data = token2022Mint([[18, 64]]);
+    data[165] = 2; // not a mint
+    expect(() => readMint(SOLANA_PROGRAMS.token2022, data)).toThrow(
+      /malformed/,
+    );
+    const truncated = token2022Mint([[18, 64]]).slice(0, 190);
+    expect(() => readMint(SOLANA_PROGRAMS.token2022, truncated)).toThrow(
+      /malformed/,
+    );
+  });
+
   it("refuses another owner or an uninitialized account", () => {
     expect(() => readMint(SOLANA_PROGRAMS.memo, mint)).toThrow(/not a token/);
     expect(() => readMint(SOLANA_PROGRAMS.token, new Uint8Array(82))).toThrow(

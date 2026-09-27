@@ -488,3 +488,57 @@ describe("SolanaSessionKeyManager: review follow-ups", () => {
     ).toThrow(/not signed by/);
   });
 });
+
+describe("SolanaSessionKeyManager: record integrity", () => {
+  it.each([
+    [
+      "an added recipient",
+      (r: Record<string, any>) => r.scope.allowedRecipients.push(OTHER),
+    ],
+    [
+      "a raised budget",
+      (r: Record<string, any>) => (r.scope.budget = { __bigint__: "999999" }),
+    ],
+    ["a later expiry", (r: Record<string, any>) => (r.scope.expiry += 86400)],
+    ["another owner", (r: Record<string, any>) => (r.owner = OTHER)],
+  ])(
+    "refuses to sign after %s is written into storage",
+    async (_name, edit) => {
+      const { m, info, adapter } = await activeKey();
+      const raw = await adapter.get<unknown>("solana_session_keys");
+      const records = JSON.parse(
+        typeof raw === "string" ? raw : JSON.stringify(raw),
+      );
+      edit(records[0]);
+      await adapter.set(
+        "solana_session_keys",
+        JSON.stringify(records) as never,
+      );
+      await expect(
+        m.signPayment(info.id, payment({ recipient: PAY_TO }), rpc()),
+      ).rejects.toThrow(/altered record/);
+    },
+  );
+
+  it("refuses to prepare or attach an approval for a record altered before approval", async () => {
+    const adapter = new MemoryStorageAdapter();
+    const m = manager(adapter);
+    const info = await m.createSessionKey(scope(), OWNER, rpc());
+    const { transaction, recentBlockhash } = await m.prepareApproval(
+      info.id,
+      rpc(),
+    );
+    const raw = await adapter.get<unknown>("solana_session_keys");
+    const records = JSON.parse(
+      typeof raw === "string" ? raw : JSON.stringify(raw),
+    );
+    records[0].scope.budget = { __bigint__: "1000000" };
+    await adapter.set("solana_session_keys", JSON.stringify(records) as never);
+    await expect(m.prepareApproval(info.id, rpc())).rejects.toThrow(
+      /altered record/,
+    );
+    await expect(
+      m.attachApproval(info.id, ownerSigns(transaction), recentBlockhash),
+    ).rejects.toThrow(/altered record/);
+  });
+});

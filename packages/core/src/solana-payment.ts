@@ -135,7 +135,44 @@ export function readMint(
   if (data.length < 82 || data[45] !== 1) {
     fail("The mint account is not an initialized mint.");
   }
+  if (owner === SOLANA_PROGRAMS.token2022) screenMintExtensions(data);
   return { tokenProgram: owner, decimals: data[44] as number };
+}
+
+/**
+ * Token-2022 mint extensions that change what a TransferChecked of `amount`
+ * does, or make it fail: a transfer fee (the payee gets less than the
+ * challenge's amount), a transfer hook (runs another program, needs extra
+ * accounts), non-transferable, confidential transfer fees, pausable. Numbers
+ * from `ExtensionType` in @solana-program/token-2022.
+ */
+const REFUSED_MINT_EXTENSIONS: Record<number, string> = {
+  1: "TransferFeeConfig",
+  9: "NonTransferable",
+  14: "TransferHook",
+  16: "ConfidentialTransferFee",
+  26: "PausableConfig",
+};
+
+/** Base mint 82 bytes, padding to 165, account type (1 = mint), then TLV. */
+function screenMintExtensions(data: Uint8Array): void {
+  if (data.length === 82) return;
+  if (data.length < 166 || data[165] !== 1) {
+    fail("The Token-2022 mint account is malformed.");
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let offset = 166;
+  while (offset + 4 <= data.length) {
+    const type = view.getUint16(offset, true);
+    const length = view.getUint16(offset + 2, true);
+    if (type === 0) break; // uninitialized: the rest is unused space
+    const refused = REFUSED_MINT_EXTENSIONS[type];
+    if (refused) {
+      fail(`The mint's ${refused} extension is not supported for payments.`);
+    }
+    offset += 4 + length;
+  }
+  if (offset > data.length) fail("The Token-2022 mint account is malformed.");
 }
 
 // ── Wire encoding ───────────────────────────────────────────────────

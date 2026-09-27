@@ -1,5 +1,11 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import {
+  bytesToHex,
+  hexToBytes,
+  randomBytes,
+  utf8ToBytes,
+} from "@noble/hashes/utils.js";
 import { base58 } from "@scure/base";
 import { isValidAddress } from "../address-validation";
 import { WalletError } from "../errors";
@@ -119,6 +125,40 @@ function isAddress(value: unknown): value is string {
 
 function toHex(bytes: Uint8Array): `0x${string}` {
   return `0x${bytesToHex(bytes)}`;
+}
+
+/**
+ * What the sealed private key is bound to (its AES-GCM associated data):
+ * the record's fixed facts. Editing any of them in storage — a wider scope,
+ * another recipient, a later expiry — makes decryption fail, so the key
+ * cannot sign under terms the owner did not approve. Status and spend are
+ * not bound: they change with use (the chain caps the total regardless).
+ */
+function recordBinding(key: {
+  id: string;
+  address: string;
+  owner: string;
+  scope: SolanaSessionKeyScope;
+  tokenProgram: string;
+  decimals: number;
+}): `0x${string}` {
+  const { scope } = key;
+  const facts = JSON.stringify([
+    "naculus-solana-session-key/v1",
+    key.id,
+    key.address,
+    key.owner,
+    scope.cluster,
+    scope.mint,
+    key.tokenProgram,
+    key.decimals,
+    scope.budget.toString(),
+    scope.maxPerPayment.toString(),
+    scope.allowedRecipients,
+    scope.expiry,
+    scope.maxTxCount ?? null,
+  ]);
+  return toHex(sha256(utf8ToBytes(facts)));
 }
 
 export class SolanaSessionKeyManager {
@@ -251,24 +291,34 @@ export class SolanaSessionKeyManager {
 
     const secret = randomBytes(32);
     const publicKey = ed25519.getPublicKey(secret);
+    const id = crypto.randomUUID();
+    const address = base58.encode(publicKey);
+    const fixedScope = {
+      ...scope,
+      allowedRecipients: [...scope.allowedRecipients],
+    };
     const keyPair = encryptPrivateKey(
       toHex(secret),
       this.config.encryptionKey,
       undefined,
       this.config.pbkdf2Iterations,
-      toHex(publicKey),
+      recordBinding({
+        id,
+        address,
+        owner,
+        scope: fixedScope,
+        tokenProgram,
+        decimals,
+      }),
       { unsafeAllowWeakKdf: this.config.unsafeAllowWeakKdf },
     );
     secret.fill(0);
     const now = Date.now();
     const stored: StoredSolanaSessionKey = {
-      id: crypto.randomUUID(),
-      address: base58.encode(publicKey),
+      id,
+      address,
       owner,
-      scope: {
-        ...scope,
-        allowedRecipients: [...scope.allowedRecipients],
-      },
+      scope: fixedScope,
       tokenProgram,
       decimals,
       status: "pending",
@@ -289,6 +339,28 @@ export class SolanaSessionKeyManager {
       },
     );
     return this.info(stored);
+  }
+
+  /**
+   * The key's secret, which decrypts only if the record's fixed facts are
+   * the ones it was sealed with (see recordBinding). Zero it after use.
+   */
+  private open(key: StoredSolanaSessionKey): Uint8Array {
+    let sealed: `0x${string}`;
+    try {
+      sealed = decryptPrivateKey(
+        { ...key.keyPair, publicKey: recordBinding(key) },
+        this.config.encryptionKey,
+      );
+    } catch {
+      fail("The stored key does not open: wrong password or altered record.");
+    }
+    return hexToBytes(sealed.slice(2));
+  }
+
+  /** Refuse a record whose fixed facts were changed after sealing. */
+  private assertIntact(key: StoredSolanaSessionKey): void {
+    this.open(key).fill(0);
   }
 
   private approvalFor(
@@ -325,6 +397,9 @@ export class SolanaSessionKeyManager {
   ): Promise<{ transaction: Uint8Array; recentBlockhash: string }> {
     const key = await this.get(id);
     if (key.status !== "pending") fail("This key is not awaiting approval.");
+    // The owner is about to approve scope.budget on chain: it must be the
+    // budget the key was created with.
+    this.assertIntact(key);
     await assertSolanaCluster(rpc, key.scope.cluster);
     const recentBlockhash = await rpc.getLatestBlockhash();
     return {
@@ -348,6 +423,7 @@ export class SolanaSessionKeyManager {
   ): Promise<string> {
     return this.update(id, (key, all) => {
       if (key.status !== "pending") fail("This key is not awaiting approval.");
+      this.assertIntact(key);
       const transaction = verifySignedOwnerTransaction(signed, {
         kind: "approve",
         approval: this.approvalFor(key, recentBlockhash),
@@ -442,9 +518,7 @@ export class SolanaSessionKeyManager {
       const wire = buildSplTransferTransaction(built);
       const tx = parseSolanaTransaction(wire);
       const slot = tx.accountKeys.indexOf(key.address);
-      const secret = hexToBytes(
-        decryptPrivateKey(key.keyPair, this.config.encryptionKey).slice(2),
-      );
+      const secret = this.open(key);
       try {
         if (base58.encode(ed25519.getPublicKey(secret)) !== key.address) {
           fail("The stored key does not match its address.");

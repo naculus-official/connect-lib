@@ -226,7 +226,9 @@ export async function createSolanaChargeCredential(
     decimals: mint.decimals,
     recipient: request.recipient,
     amount: BigInt(request.amount),
-    memo: request.externalId ?? null,
+    // externalId when given; otherwise a nonce, so identical charges
+    // do not produce identical transactions.
+    memo: request.externalId ?? randomMemo(),
     // Never the server's recentBlockhash (the spec makes it advisory): the
     // cluster check covers this RPC, and a blockhash from another cluster
     // would make the wallet sign a transfer valid there.
@@ -292,7 +294,9 @@ async function payWithSessionKey(
       recipient: request.recipient,
       amount: BigInt(request.amount),
       feePayer: request.feePayerKey as string,
-      memo: request.externalId ?? null,
+      // externalId when given; otherwise a nonce, so identical charges
+      // do not produce identical transactions.
+      memo: request.externalId ?? randomMemo(),
     },
     rpc,
   );
@@ -301,4 +305,9 @@ async function payWithSessionKey(
     payload: { type: "transaction", transaction },
     source: `did:pkh:${request.network}:${info.address}`,
   });
+}
+
+function randomMemo(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
