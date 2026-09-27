@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FeeEstimationError, isFeeEstimationError } from "./errors";
 import {
   clearChainFeeEstimators,
@@ -531,5 +531,174 @@ describe("isFeeEstimationError", () => {
     expect(isFeeEstimationError(new Error("regular"))).toBe(false);
     expect(isFeeEstimationError(null)).toBe(false);
     expect(isFeeEstimationError({})).toBe(false);
+  });
+});
+
+// ─── RPC transport regression (#13 dedupe) ─────────────────────────────
+//
+// Pins the observable transport contract of the fee-estimation RPC helper so
+// routing it through the shared transport cannot change what callers see:
+// request shape, the 10s timeout (covering the body read), and which errors
+// are wrapped in FeeEstimationError versus passed through untouched.
+
+describe("fee-estimation RPC transport", () => {
+  const RPC_URL = "https://rpc.example.com";
+  const realFetch = globalThis.fetch;
+
+  function abortError() {
+    return new DOMException("This operation was aborted", "AbortError");
+  }
+
+  /** fetch that never answers until its signal aborts */
+  function hangingFetch() {
+    return vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<never>((_, reject) => {
+          init.signal?.addEventListener("abort", () => reject(abortError()));
+        }),
+    ) as unknown as typeof fetch;
+  }
+
+  /** fetch that answers headers but whose body never finishes until abort */
+  function hangingBodyFetch() {
+    return vi.fn(async (_url: string, init: RequestInit) => ({
+      ok: true,
+      status: 200,
+      json: () =>
+        new Promise<never>((_, reject) => {
+          init.signal?.addEventListener("abort", () => reject(abortError()));
+        }),
+    })) as unknown as typeof fetch;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    globalThis.fetch = realFetch;
+  });
+
+  it("POSTs a JSON-RPC 2.0 envelope with an abort signal", async () => {
+    const spy = mockRpcResponse("0x1");
+    globalThis.fetch = spy;
+
+    await getGasPrice(RPC_URL);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(RPC_URL);
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(init.body as string)).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_gasPrice",
+      params: [],
+    });
+  });
+
+  it("wraps a non-ok HTTP status in FeeEstimationError(fee_rpc_error)", async () => {
+    globalThis.fetch = mockRpcError(503);
+
+    const err = await getGasPrice(RPC_URL).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(FeeEstimationError);
+    expect(err).toMatchObject({
+      name: "FeeEstimationError",
+      code: "fee_rpc_error",
+      message: "RPC returned status 503",
+      details: undefined,
+    });
+  });
+
+  it("wraps a JSON-RPC error in FeeEstimationError with the rpc code", async () => {
+    globalThis.fetch = mockRpcResponse(null, {
+      code: -32601,
+      message: "method not found",
+    });
+
+    const err = await getGasPrice(RPC_URL).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(FeeEstimationError);
+    expect(err).toMatchObject({
+      code: "fee_rpc_error",
+      message: "method not found",
+      details: { code: -32601 },
+    });
+  });
+
+  it("passes network errors through unwrapped", async () => {
+    const network = new TypeError("fetch failed");
+    globalThis.fetch = vi.fn().mockRejectedValue(network);
+
+    await expect(getGasPrice(RPC_URL)).rejects.toBe(network);
+  });
+
+  it("aborts a request that has not answered after 10s", async () => {
+    globalThis.fetch = hangingFetch();
+
+    let settled = false;
+    const result = getGasPrice(RPC_URL).catch((e: unknown) => {
+      settled = true;
+      return e;
+    });
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const err = await result;
+    expect(err).not.toBeInstanceOf(FeeEstimationError);
+    expect(err).toMatchObject({ name: "AbortError" });
+  });
+
+  it("keeps the 10s timeout armed while the body is read", async () => {
+    globalThis.fetch = hangingBodyFetch();
+
+    let settled = false;
+    const result = getGasPrice(RPC_URL).catch((e: unknown) => {
+      settled = true;
+      return e;
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // Assert before awaiting so a missing timeout fails instead of hanging.
+    expect(settled).toBe(true);
+    expect(await result).toMatchObject({ name: "AbortError" });
+  });
+
+  it("clears the timeout on success and on every error path", async () => {
+    globalThis.fetch = mockRpcResponse("0x1");
+    await getGasPrice(RPC_URL);
+    expect(vi.getTimerCount()).toBe(0);
+
+    globalThis.fetch = mockRpcError(500);
+    await getGasPrice(RPC_URL).catch(() => {});
+    expect(vi.getTimerCount()).toBe(0);
+
+    globalThis.fetch = mockRpcResponse(null, { code: -1, message: "x" });
+    await getGasPrice(RPC_URL).catch(() => {});
+    expect(vi.getTimerCount()).toBe(0);
+
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("down"));
+    await getGasPrice(RPC_URL).catch(() => {});
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("surfaces a timed-out legacy fallback as fee_estimation_failed", async () => {
+    globalThis.fetch = hangingFetch();
+
+    const result = estimateFees({ rpcUrl: RPC_URL }).catch((e: unknown) => e);
+    // eth_maxPriorityFeePerGas times out, then eth_gasPrice times out
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    const err = await result;
+    expect(isFeeEstimationError(err, "fee_estimation_failed")).toBe(true);
+    expect((err as FeeEstimationError).details).toMatchObject({
+      error: { name: "AbortError" },
+    });
   });
 });
