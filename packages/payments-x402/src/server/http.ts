@@ -20,16 +20,21 @@ export interface X402PaywallOptions {
   deps: X402ServerDeps;
 }
 
+/**
+ * `verified: true` means the payment checked out, not that it was paid:
+ * serve nothing until `settlePayment` reports `success: true`.
+ */
 export type X402PaywallResult =
-  | { paid: true; payment: X402VerifiedPayment }
-  | { paid: false; response: Response; reason?: string };
+  | { verified: true; payment: X402VerifiedPayment }
+  | { verified: false; response: Response; reason?: string };
 
 /**
  * Gate a Fetch API `Request` behind x402, framework-neutral: without a valid
  * `PAYMENT-SIGNATURE` it answers with the `Response` to return (402 with a
  * `PAYMENT-REQUIRED` challenge, or 400 when the header is not base64 JSON);
- * with one it returns the verified payment. Settle it with `settlePayment`
- * before serving, and put the settlement's `header` on the response as
+ * with one it returns the verified payment. Nothing is paid yet: settle it
+ * with `settlePayment`, serve the resource only when the settlement reports
+ * `success: true`, and put the settlement's `header` on the response as
  * `PAYMENT-RESPONSE`.
  */
 export async function requirePayment(
@@ -41,7 +46,7 @@ export async function requirePayment(
     url: options.resource?.url ?? request.url,
   };
   const challenge = (status: number, error: string, reason?: string) => ({
-    paid: false as const,
+    verified: false as const,
     ...(reason ? { reason } : {}),
     response: new Response("{}", {
       status,
@@ -69,5 +74,5 @@ export async function requirePayment(
   }
   const result = await verifyPayment(header, options.accepts, options.deps);
   if (!result.ok) return challenge(402, result.reason, result.reason);
-  return { paid: true, payment: result };
+  return { verified: true, payment: result };
 }

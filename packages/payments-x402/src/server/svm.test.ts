@@ -19,6 +19,7 @@ import {
   type X402PaymentRequirements,
   type X402SolanaSigner,
 } from "../index";
+import { encodeBase58 } from "./common";
 import {
   memorySettlementStore,
   requirePayment,
@@ -595,6 +596,189 @@ describe("settlePayment, SVM exact", () => {
   });
 });
 
+describe("settlePayment, SVM security regressions", () => {
+  const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+
+  /** `rpc`, answering another cluster's genesis from its `from`th call on. */
+  function switching(rpc: Required<SolanaPaymentRpc>, from: number) {
+    let calls = 0;
+    return {
+      ...rpc,
+      getGenesisHash: async () =>
+        ++calls >= from ? DEVNET_GENESIS : MAINNET_GENESIS,
+    };
+  }
+
+  function countingSigner() {
+    const networks: string[] = [];
+    return {
+      networks,
+      sign: async (wire: Uint8Array, network: string) => {
+        networks.push(network);
+        return signAsFeePayer(wire);
+      },
+    };
+  }
+
+  it.each([
+    ["before the fee payer signs", 2, 0, 0],
+    ["before the simulation", 3, 1, 0],
+    ["before the send", 4, 1, 1],
+  ])("re-checks the cluster %s", async (_when, from, signs, simulations) => {
+    const chain = cluster();
+    const signer = countingSigner();
+    const store = memorySettlementStore();
+    const d = deps({
+      rpc: { solana: switching(chain.rpc, from) },
+      signAsFeePayer: signer.sign,
+      store,
+    });
+    const verified = await verifyPayment(pay(), [requirement()], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect((await settlePayment(verified, d)).settlement).toMatchObject({
+      success: false,
+      errorReason: "invalid_network",
+      network: SOLANA_MAINNET,
+    });
+    expect(signer.networks).toHaveLength(signs);
+    expect(chain.simulated).toHaveLength(simulations);
+    expect(chain.sent).toHaveLength(0);
+
+    // Nothing was broadcast, so the claim was released.
+    const healthy = deps({ rpc: { solana: chain.rpc }, store });
+    expect((await settlePayment(verified, healthy)).settlement.success).toBe(
+      true,
+    );
+    expect(chain.sent).toHaveLength(1);
+  });
+
+  it("names a transaction exactly as base58 does", () => {
+    for (const bytes of [
+      new Uint8Array(0),
+      new Uint8Array(3),
+      new Uint8Array([0, 0, 1, 255]),
+      ed25519.sign(new Uint8Array([1]), PAYER_SEED),
+      new Uint8Array(64).fill(255),
+    ]) {
+      expect(encodeBase58(bytes)).toBe(base58.encode(bytes));
+    }
+  });
+
+  it("settles on the verified network, whatever the caller changes afterwards", async () => {
+    const chain = cluster();
+    const signer = countingSigner();
+    const d = deps({
+      rpc: { solana: chain.rpc },
+      signAsFeePayer: signer.sign,
+    });
+    const offered = requirement();
+    const verified = await verifyPayment(pay(), [offered], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    offered.network = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+    expect(Object.isFrozen(verified.requirement)).toBe(true);
+    expect(() => {
+      (verified.requirement as { network: string }).network = offered.network;
+    }).toThrow(TypeError);
+    const { settlement } = await settlePayment(verified, d);
+    expect(settlement).toMatchObject({
+      success: true,
+      network: SOLANA_MAINNET,
+    });
+    expect(signer.networks).toEqual([SOLANA_MAINNET]);
+  });
+
+  it("refuses a send that answers with another signature and keeps the claim", async () => {
+    const chain = cluster();
+    const store = memorySettlementStore();
+    const lying = {
+      ...chain.rpc,
+      sendTransaction: async (tx: string) => {
+        await chain.rpc.sendTransaction(tx);
+        return base58.encode(new Uint8Array(64).fill(1));
+      },
+    };
+    const d = deps({ rpc: { solana: lying }, store });
+    const verified = await verifyPayment(pay(), [requirement()], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect((await settlePayment(verified, d)).settlement).toMatchObject({
+      success: false,
+      errorReason: "unexpected_settle_error",
+      transaction: "",
+    });
+    expect(chain.sent).toHaveLength(1);
+
+    // The transaction may have landed: no second broadcast.
+    const again = deps({ rpc: { solana: chain.rpc }, store });
+    expect((await settlePayment(verified, again)).settlement).toMatchObject({
+      success: false,
+      errorReason: "duplicate_settlement",
+    });
+    expect(chain.sent).toHaveLength(1);
+  });
+
+  it("keeps the claim when the send fails with an unknown outcome", async () => {
+    const chain = cluster();
+    const store = memorySettlementStore();
+    const flaky = {
+      ...chain.rpc,
+      sendTransaction: async (tx: string) => {
+        chain.sent.push(tx);
+        throw new Error("socket hang up");
+      },
+    };
+    const d = deps({ rpc: { solana: flaky }, store });
+    const verified = await verifyPayment(pay(), [requirement()], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect((await settlePayment(verified, d)).settlement.success).toBe(false);
+    const again = deps({ rpc: { solana: chain.rpc }, store });
+    expect((await settlePayment(verified, again)).settlement).toMatchObject({
+      success: false,
+      errorReason: "duplicate_settlement",
+    });
+    expect(chain.sent).toHaveLength(1);
+  });
+
+  it("releases the claim when the simulation or the fee payer's signer fails", async () => {
+    const store = memorySettlementStore();
+    const failing = cluster({ simulationError: { InstructionError: [2, 1] } });
+    const header = pay();
+    const v1 = await verifyPayment(
+      header,
+      [requirement()],
+      deps({ rpc: { solana: failing.rpc }, store }),
+    );
+    if (!v1.ok) throw new Error(v1.detail);
+    expect(
+      (await settlePayment(v1, deps({ rpc: { solana: failing.rpc }, store })))
+        .settlement,
+    ).toMatchObject({
+      success: false,
+      errorReason: "invalid_transaction_state",
+    });
+
+    const throwing = deps({
+      store,
+      signAsFeePayer: async () => {
+        throw new Error("HSM offline");
+      },
+    });
+    expect((await settlePayment(v1, throwing)).settlement.success).toBe(false);
+
+    const healthy = cluster();
+    const d = deps({ rpc: { solana: healthy.rpc }, store });
+    expect((await settlePayment(v1, d)).settlement.success).toBe(true);
+    expect(failing.sent).toHaveLength(0);
+    expect(healthy.sent).toHaveLength(1);
+
+    // Settled and committed: the same payload is refused from now on.
+    expect((await settlePayment(v1, d)).settlement).toMatchObject({
+      success: false,
+      errorReason: "duplicate_settlement",
+    });
+    expect(healthy.sent).toHaveLength(1);
+  });
+});
+
 describe("round trip with createX402Fetch, SVM", () => {
   function wallet(): X402SolanaSigner {
     return {
@@ -622,7 +806,7 @@ describe("round trip with createX402Fetch, SVM", () => {
         accepts: [offered],
         deps: serverDeps,
       });
-      if (!gate.paid) return gate.response;
+      if (!gate.verified) return gate.response;
       const { settlement, header } = await settlePayment(
         gate.payment,
         serverDeps,

@@ -43,6 +43,8 @@ export interface EvmAuthorization {
 
 export interface VerifiedEvm {
   kind: "evm";
+  /** The verified requirement's CAIP-2 network. */
+  network: string;
   chainId: number;
   asset: `0x${string}`;
   authorization: EvmAuthorization;
@@ -202,6 +204,7 @@ export async function verifyEvmPayload(
   const token = requirement.asset as `0x${string}`;
   const verified: VerifiedEvm = {
     kind: "evm",
+    network: requirement.network,
     chainId,
     asset: token,
     authorization: auth,

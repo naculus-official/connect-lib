@@ -249,13 +249,20 @@ dependency). Specs read at coinbase/x402
   `deps.submit`, which holds the facilitator key and resolves once mined.
   SVM: `deps.signAsFeePayer` adds the fee payer's signature (the message must
   come back unchanged and both signatures verify), then simulate and send
-  through `deps.rpc.solana`. Both claim the payload in an injectable
-  `X402SettlementStore` first (default: one in-memory store per process,
-  120 s, per the spec's duplicate-settlement mitigation; EVM keys live until
-  `validBefore` if that is later).
+  through `deps.rpc.solana`. The RPC's cluster is re-checked against the
+  verified network before signing, simulating and sending, and the send must
+  answer with base58 of the transaction's first signature. Settlement reads
+  the network and payer from the verified details, never from the public
+  result, whose requirement is a frozen snapshot. Both claim the payload in
+  an injectable `X402SettlementStore` first (default: one in-memory store
+  per process, 120 s, per the spec's duplicate-settlement mitigation; EVM
+  keys live until `validBefore` if that is later). The claim is released
+  only when nothing can have been broadcast, committed on success, and kept
+  until its TTL when a broadcast's outcome is unknown.
 - `requirePayment(request, { accepts, deps })` gates a Fetch API `Request`:
-  402 with a challenge (400 when the header is not base64 JSON), or the
-  verified payment.
+  402 with a challenge (400 when the header is not base64 JSON), or
+  `{ verified: true, payment }`. Verified is not paid: only a successful
+  `settlePayment` is.
 
 Core gained `recoverTypedDataSigner`, `verifySolanaSignature`,
 `readTokenAccount` and `SolanaPaymentRpc.simulateTransaction`. Out of scope:

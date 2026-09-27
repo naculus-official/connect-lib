@@ -79,3 +79,47 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 export function unixNow(now?: () => number): number {
   return now ? now() : Math.floor(Date.now() / 1000);
 }
+
+const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/** Bitcoin-alphabet base58, as Solana writes keys and signatures. */
+export function encodeBase58(bytes: Uint8Array): string {
+  const digits: number[] = [];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let i = 0; i < digits.length; i++) {
+      carry += (digits[i] as number) << 8;
+      digits[i] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let out = "";
+  for (const byte of bytes) {
+    if (byte !== 0) break;
+    out += "1";
+  }
+  for (let i = digits.length - 1; i >= 0; i--)
+    out += BASE58[digits[i] as number];
+  return out;
+}
+
+/**
+ * Freeze `value` and every plain object and array reachable from it; returns
+ * `value`. Byte arrays cannot be frozen and are left as they are.
+ */
+export function deepFreeze<T>(value: T): T {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !ArrayBuffer.isView(value) &&
+    !Object.isFrozen(value)
+  ) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}

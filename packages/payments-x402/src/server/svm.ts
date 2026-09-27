@@ -36,6 +36,8 @@ const MAX_COMPUTE_UNIT_LIMIT = 1_400_000;
 
 export interface VerifiedSvm {
   kind: "svm";
+  /** The verified cluster's CAIP-2 id; settlement re-checks the RPC serves it. */
+  network: string;
   wire: Uint8Array;
   message: Uint8Array;
   feePayer: string;
@@ -365,6 +367,7 @@ export async function verifySvmPayload(
   }
   return {
     kind: "svm",
+    network: requirement.network,
     wire,
     message: tx.message,
     feePayer,

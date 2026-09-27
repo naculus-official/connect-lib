@@ -12,6 +12,7 @@ import {
   type X402ResourceInfo,
 } from "../wire";
 import {
+  deepFreeze,
   exactKeys,
   type Failure,
   failure,
@@ -66,10 +67,14 @@ export interface X402ServerDeps {
   maxComputeUnitPrice?: bigint;
 }
 
-/** A payment that passed `verifyPayment`, ready for `settlePayment`. */
+/**
+ * A payment that passed `verifyPayment`, ready for `settlePayment`. Verified
+ * is not paid: nothing has moved until `settlePayment` reports success.
+ * Frozen, and settlement reads none of it.
+ */
 export interface X402VerifiedPayment {
   readonly ok: true;
-  /** The offered requirement the payment matched. */
+  /** A frozen snapshot of the offered requirement the payment matched. */
   readonly requirement: X402PaymentRequirements;
   /** The paying address: EIP-3009 `from`, or the SPL transfer authority. */
   readonly payer: string;
@@ -78,7 +83,10 @@ export interface X402VerifiedPayment {
 
 export type X402VerifyResult = X402VerifiedPayment | Failure;
 
-/** What `settlePayment` needs, kept out of reach of callers. */
+/**
+ * What `settlePayment` needs, kept out of reach of callers: settlement reads
+ * the network, payer and payload from here, never from the public result.
+ */
 export type VerifiedDetails = VerifiedEvm | VerifiedSvm;
 
 const verified = new WeakMap<X402VerifiedPayment, VerifiedDetails>();
@@ -188,13 +196,18 @@ export async function verifyPayment(
   ) {
     return failure("invalid_payload", "The payload is not a PaymentPayload.");
   }
-  const requirement = offered.find((r) => jsonEqual(r, decoded.accepted));
-  if (!requirement) {
+  const match = offered.find((r) => jsonEqual(r, decoded.accepted));
+  if (!match) {
     return failure(
       "invalid_payment_requirements",
       "accepted is not one of the offered requirements.",
     );
   }
+  // Verify against a snapshot, so the caller changing an offered
+  // requirement mid-verification or afterwards changes nothing here. The
+  // decoded `accepted` equals `match` and is a fresh JSON value.
+  deepFreeze(decoded);
+  const requirement = decoded.accepted as unknown as X402PaymentRequirements;
   const reason = checkOffered(requirement);
   if (reason) return failure("invalid_payment_requirements", reason);
 
@@ -220,6 +233,7 @@ export async function verifyPayment(
     );
   }
   if (isFailure(details)) return details;
+  deepFreeze(details);
 
   const result: X402VerifiedPayment = Object.freeze({
     ok: true as const,
@@ -236,12 +250,33 @@ export async function verifyPayment(
 
 /**
  * Remembers payloads being settled so the same one cannot be settled twice
- * while the first is in flight (`scheme_exact_svm.md`, "Duplicate Settlement
- * Mitigation"). `claim` must be atomic: true the first time a key is seen
- * within `ttlSeconds`, false after.
+ * (`scheme_exact_svm.md`, "Duplicate Settlement Mitigation").
+ *
+ * The lifecycle of a key, all under the `reservation` id `settlePayment`
+ * picks per attempt:
+ * - `claim` reserves it: atomically true the first time the key is seen
+ *   within `ttlSeconds`, false while any reservation or commit holds it.
+ * - `release` drops the reservation, so the payload can be settled again.
+ *   `settlePayment` calls it only when nothing can have been broadcast.
+ *   It must remove the key only while `reservation` still holds it.
+ * - `commit` records a settlement that was broadcast and confirmed: the key
+ *   stays for `ttlSeconds` from now and no `release` removes it.
+ *
+ * When the outcome of a broadcast is unknown, `settlePayment` calls neither,
+ * and the claim holds until its TTL.
  */
 export interface X402SettlementStore {
-  claim(key: string, ttlSeconds: number): boolean | Promise<boolean>;
+  claim(
+    key: string,
+    ttlSeconds: number,
+    reservation: string,
+  ): boolean | Promise<boolean>;
+  release(key: string, reservation: string): void | Promise<void>;
+  commit(
+    key: string,
+    reservation: string,
+    ttlSeconds: number,
+  ): void | Promise<void>;
 }
 
 /** The spec's recommendation: 120 s, about twice a blockhash's lifetime. */
@@ -251,16 +286,39 @@ export const X402_SETTLEMENT_TTL_SECONDS = 120;
 export function memorySettlementStore(
   options: { now?: () => number } = {},
 ): X402SettlementStore {
-  const expiries = new Map<string, number>();
+  // `holder` is the reservation id, or null once committed.
+  const entries = new Map<string, { expiry: number; holder: string | null }>();
+  const clock = () => (options.now ? options.now() * 1000 : Date.now());
+  const live = (key: string, now: number) => {
+    for (const [k, entry] of entries) {
+      if (entry.expiry <= now) entries.delete(k);
+    }
+    return entries.get(key);
+  };
   return {
-    claim(key, ttlSeconds) {
-      const now = options.now ? options.now() * 1000 : Date.now();
-      for (const [k, expiry] of expiries) {
-        if (expiry <= now) expiries.delete(k);
-      }
-      if (expiries.has(key)) return false;
-      expiries.set(key, now + ttlSeconds * 1000);
+    claim(key, ttlSeconds, reservation) {
+      const now = clock();
+      if (live(key, now)) return false;
+      entries.set(key, {
+        expiry: now + ttlSeconds * 1000,
+        holder: reservation,
+      });
       return true;
+    },
+    release(key, reservation) {
+      if (live(key, clock())?.holder === reservation) entries.delete(key);
+    },
+    commit(key, reservation, ttlSeconds) {
+      const now = clock();
+      const entry = live(key, now);
+      // Another reservation took the key after ours expired: leave it held.
+      if (entry && entry.holder !== reservation && entry.holder !== null) {
+        return;
+      }
+      entries.set(key, {
+        expiry: Math.max(entry?.expiry ?? 0, now + ttlSeconds * 1000),
+        holder: null,
+      });
     },
   };
 }

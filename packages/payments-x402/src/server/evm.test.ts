@@ -27,6 +27,7 @@ import {
   verifyPayment,
   type X402EvmCall,
   type X402ServerDeps,
+  type X402SettlementStore,
   type X402VerifiedPayment,
 } from "./index";
 
@@ -469,6 +470,183 @@ describe("settlePayment, EVM exact", () => {
   });
 });
 
+describe("security regressions, EVM", () => {
+  it("reports a verified payment from requirePayment, never a paid one", async () => {
+    const submitted: X402EvmCall[] = [];
+    const d = deps({
+      submit: async (tx) => {
+        submitted.push(tx);
+        return `0x${"44".repeat(32)}`;
+      },
+    });
+    const gate = await requirePayment(
+      new Request(URL_, {
+        headers: { [PAYMENT_SIGNATURE_HEADER]: pay().header },
+      }),
+      { accepts: [requirement()], deps: d },
+    );
+    expect(gate.verified).toBe(true);
+    expect("paid" in gate).toBe(false);
+    // Verification alone broadcasts nothing.
+    expect(submitted).toHaveLength(0);
+  });
+
+  it("settles what was verified, whatever the caller changes during or after verification", async () => {
+    const offered = requirement();
+    const { rpc } = chain();
+    const submitted: X402EvmCall[] = [];
+    const d = deps({
+      rpc: {
+        evm: {
+          async call(request) {
+            // Mid-verification: point the offer at another chain and token.
+            offered.network = "eip155:1";
+            offered.asset = OTHER;
+            return rpc.call(request);
+          },
+        },
+      },
+      submit: async (tx) => {
+        submitted.push(tx);
+        return `0x${"55".repeat(32)}`;
+      },
+    });
+    const verified = await verifyPayment(pay().header, [offered], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect(verified.requirement).toEqual(requirement());
+    expect(Object.isFrozen(verified.requirement)).toBe(true);
+    expect(Object.isFrozen(verified.requirement.extra)).toBe(true);
+    expect(Object.isFrozen(verified.payload)).toBe(true);
+    expect(() => {
+      (verified.requirement as { network: string }).network = "eip155:1";
+    }).toThrow(TypeError);
+
+    const { settlement } = await settlePayment(verified, d);
+    expect(settlement).toMatchObject({
+      success: true,
+      network: "eip155:84532",
+      payer: PAYER,
+    });
+    expect(submitted).toEqual([
+      expect.objectContaining({ chainId: 84532, to: USDC }),
+    ]);
+  });
+
+  /** A memory store that logs every lifecycle call. */
+  function loggingStore() {
+    const inner = memorySettlementStore({ now: () => NOW });
+    const log: string[] = [];
+    const store: X402SettlementStore = {
+      claim: (key, ttl, reservation) => {
+        log.push(`claim ${ttl}`);
+        return inner.claim(key, ttl, reservation);
+      },
+      release: (key, reservation) => {
+        log.push("release");
+        return inner.release(key, reservation);
+      },
+      commit: (key, reservation, ttl) => {
+        log.push(`commit ${ttl}`);
+        return inner.commit(key, reservation, ttl);
+      },
+    };
+    return { store, log };
+  }
+
+  it("commits a settled claim and keeps one whose submit outcome is unknown", async () => {
+    const ok = loggingStore();
+    const d = deps({
+      store: ok.store,
+      submit: async () => `0x${"66".repeat(32)}`,
+    });
+    const verified = await verifyPayment(pay().header, [requirement()], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect((await settlePayment(verified, d)).settlement.success).toBe(true);
+    expect(ok.log).toEqual(["claim 120", "commit 120"]);
+
+    for (const submit of [
+      async () => {
+        throw new Error("timeout");
+      },
+      async () => "pending",
+    ]) {
+      const unknown = loggingStore();
+      let submits = 0;
+      const d2 = deps({
+        store: unknown.store,
+        submit: async () => {
+          submits++;
+          return submit();
+        },
+      });
+      expect((await settlePayment(verified, d2)).settlement.success).toBe(
+        false,
+      );
+      expect(unknown.log).toEqual(["claim 120"]);
+      expect((await settlePayment(verified, d2)).settlement).toMatchObject({
+        success: false,
+        errorReason: "duplicate_settlement",
+      });
+      expect(submits).toBe(1);
+    }
+  });
+
+  it("settles even when the store fails to commit", async () => {
+    const inner = memorySettlementStore({ now: () => NOW });
+    const d = deps({
+      store: {
+        claim: inner.claim,
+        release: inner.release,
+        commit: () => {
+          throw new Error("store down");
+        },
+      },
+      submit: async () => `0x${"77".repeat(32)}`,
+    });
+    const verified = await verifyPayment(pay().header, [requirement()], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect((await settlePayment(verified, d)).settlement.success).toBe(true);
+    expect((await settlePayment(verified, d)).settlement).toMatchObject({
+      errorReason: "duplicate_settlement",
+    });
+  });
+});
+
+describe("memorySettlementStore", () => {
+  it("claims once, releases only for the holder, and commits for good", () => {
+    let now = NOW;
+    const store = memorySettlementStore({ now: () => now });
+    expect(store.claim("k", 120, "a")).toBe(true);
+    expect(store.claim("k", 120, "b")).toBe(false);
+    store.release("k", "b");
+    expect(store.claim("k", 120, "b")).toBe(false);
+    store.release("k", "a");
+    expect(store.claim("k", 120, "b")).toBe(true);
+
+    // A committed key outlives a stale holder's release and its own claim TTL.
+    store.commit("k", "b", 600);
+    store.release("k", "b");
+    now += 300;
+    expect(store.claim("k", 120, "c")).toBe(false);
+    now += 301;
+    expect(store.claim("k", 120, "c")).toBe(true);
+  });
+
+  it("never lets an expired reservation release or commit over a newer one", () => {
+    let now = NOW;
+    const store = memorySettlementStore({ now: () => now });
+    expect(store.claim("k", 120, "old")).toBe(true);
+    now += 121;
+    expect(store.claim("k", 120, "new")).toBe(true);
+    store.release("k", "old");
+    store.commit("k", "old", 600);
+    expect(store.claim("k", 120, "other")).toBe(false);
+    // "new" still holds it and can release it.
+    store.release("k", "new");
+    expect(store.claim("k", 120, "other")).toBe(true);
+  });
+});
+
 describe("round trip with createX402Fetch", () => {
   async function sessionKeySigner() {
     const manager = new SessionKeyManager(
@@ -514,7 +692,7 @@ describe("round trip with createX402Fetch", () => {
         deps: serverDeps,
         resource: { url: URL_, description: "Premium data" },
       });
-      if (!gate.paid) return gate.response;
+      if (!gate.verified) return gate.response;
       const { settlement, header } = await settlePayment(
         gate.payment,
         serverDeps,
@@ -561,8 +739,8 @@ describe("round trip with createX402Fetch", () => {
       accepts: [requirement()],
       deps: deps(),
     });
-    expect(gate.paid).toBe(false);
-    if (gate.paid) return;
+    expect(gate.verified).toBe(false);
+    if (gate.verified) return;
     expect(gate.response.status).toBe(402);
     expect(
       decodeHeader(gate.response.headers.get(PAYMENT_REQUIRED_HEADER) ?? ""),
@@ -571,7 +749,10 @@ describe("round trip with createX402Fetch", () => {
       new Request(URL_, { headers: { [PAYMENT_SIGNATURE_HEADER]: "%%%" } }),
       { accepts: [requirement()], deps: deps() },
     );
-    expect(garbage).toMatchObject({ paid: false, reason: "invalid_payload" });
-    if (!garbage.paid) expect(garbage.response.status).toBe(400);
+    expect(garbage).toMatchObject({
+      verified: false,
+      reason: "invalid_payload",
+    });
+    if (!garbage.verified) expect(garbage.response.status).toBe(400);
   });
 });

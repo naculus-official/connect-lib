@@ -98,7 +98,8 @@ const deps = {
 
 export async function handler(request: Request): Promise<Response> {
   const gate = await requirePayment(request, { accepts, deps });
-  if (!gate.paid) return gate.response; // 402 with PAYMENT-REQUIRED
+  if (!gate.verified) return gate.response; // 402 with PAYMENT-REQUIRED
+  // Verified is not paid: serve only after a successful settlement.
   const { settlement, header } = await settlePayment(gate.payment, deps);
   if (!settlement.success) {
     return new Response("{}", { status: 402, headers: { "PAYMENT-RESPONSE": header } });
@@ -112,5 +113,9 @@ then applies the `exact` scheme rules (EIP-3009 signature, payee, amount,
 validity window, unused nonce, balance and a simulated transfer on EVM; the
 spec's facilitator rules on Solana). `settlePayment` only settles what
 `verifyPayment` returned, and refuses the same payload twice within 120 s
-(pass `store` to share that cache across processes). Permit2, ERC-7710 and
-EIP-1271 payers are not supported.
+(pass `store` to share that cache across processes). A claim is released
+only when nothing can have been broadcast; after a broadcast whose outcome
+is unknown it is kept until its TTL. On Solana the RPC must still serve the
+verified cluster before signing, simulating and sending, and must answer
+with the transaction's own signature. Permit2, ERC-7710 and EIP-1271 payers
+are not supported.
