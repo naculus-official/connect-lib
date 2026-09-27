@@ -103,6 +103,13 @@ async function settleEvm(
   return hash;
 }
 
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", bytes.slice()),
+  );
+  return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Refuse unless `rpc` still serves the verified cluster. */
 async function onCluster(
   rpc: SolanaPaymentRpc,
@@ -129,11 +136,13 @@ async function settleSvm(
     refuse("unexpected_settle_error");
   }
   const { network } = details;
-  // Keyed on the decoded bytes, so two encodings of one transaction collide.
+  // Keyed on the signed message alone, never on signatures or the wire that
+  // carries them: the payer can sign one message again with another valid
+  // signature, and that must still be the same payment.
   const claimed = await claim(
     attempt,
     deps,
-    `svm:${encodeBase64(details.wire)}`,
+    `svm:${await sha256Hex(details.message)}`,
     X402_SETTLEMENT_TTL_SECONDS,
   );
   // The RPC may have been swapped since verification: re-check the cluster

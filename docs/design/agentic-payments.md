@@ -256,9 +256,12 @@ dependency). Specs read at coinbase/x402
   result, whose requirement is a frozen snapshot. Both claim the payload in
   an injectable `X402SettlementStore` first (default: one in-memory store
   per process, 120 s, per the spec's duplicate-settlement mitigation; EVM
-  keys live until `validBefore` if that is later). The claim is released
-  only when nothing can have been broadcast, committed on success, and kept
-  until its TTL when a broadcast's outcome is unknown.
+  keys live until `validBefore` if that is later). Solana keys are the
+  SHA-256 of the canonical message bytes, never a signature or the wire,
+  so the payer re-signing the same message is still a duplicate. The
+  claim is released only when nothing can have been broadcast, committed
+  on success, and kept until its TTL when a broadcast's outcome is
+  unknown.
 - `requirePayment(request, { accepts, deps })` gates a Fetch API `Request`:
   402 with a challenge (400 when the header is not base64 JSON), or
   `{ verified: true, payment }`. Verified is not paid: only a successful

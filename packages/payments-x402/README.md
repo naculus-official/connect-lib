@@ -113,7 +113,9 @@ then applies the `exact` scheme rules (EIP-3009 signature, payee, amount,
 validity window, unused nonce, balance and a simulated transfer on EVM; the
 spec's facilitator rules on Solana). `settlePayment` only settles what
 `verifyPayment` returned, and refuses the same payload twice within 120 s
-(pass `store` to share that cache across processes). A claim is released
+(pass `store` to share that cache across processes). A Solana payment is
+keyed on the hash of its message, so the payer signing the same message
+again is still a duplicate. A claim is released
 only when nothing can have been broadcast; after a broadcast whose outcome
 is unknown it is kept until its TTL. On Solana the RPC must still serve the
 verified cluster before signing, simulating and sending, and must answer

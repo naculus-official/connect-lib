@@ -8,6 +8,7 @@ import {
   type SplTransferPayment,
 } from "@naculus/connect-core";
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { sha512 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import {
@@ -649,6 +650,57 @@ describe("settlePayment, SVM security regressions", () => {
     expect((await settlePayment(verified, healthy)).settlement.success).toBe(
       true,
     );
+    expect(chain.sent).toHaveLength(1);
+  });
+
+  /**
+   * A second valid Ed25519 signature by `seed` over `message`: a random nonce
+   * instead of RFC 8032's deterministic one. Verifiers accept either.
+   */
+  function resign(message: Uint8Array, seed: Uint8Array): Uint8Array {
+    const { scalar, pointBytes } = ed25519.utils.getExtendedPublicKey(seed);
+    const order = ed25519.Point.Fn.ORDER;
+    const le = (bytes: Uint8Array) =>
+      bytes.reduceRight((n, b) => (n << 8n) | BigInt(b), 0n);
+    const r = (le(ed25519.utils.randomSecretKey()) % (order - 1n)) + 1n;
+    const R = ed25519.Point.BASE.multiply(r).toBytes();
+    const k = le(sha512(new Uint8Array([...R, ...pointBytes, ...message])));
+    let S = (r + (k % order) * scalar) % order;
+    const out = new Uint8Array(64);
+    out.set(R, 0);
+    for (let i = 32; i < 64; i++) {
+      out[i] = Number(S & 0xffn);
+      S >>= 8n;
+    }
+    return out;
+  }
+
+  it("treats the same message under another valid payer signature as a duplicate", async () => {
+    const chain = cluster();
+    const d = deps({ rpc: { solana: chain.rpc } });
+    const header = pay();
+    const decoded = decodeHeader(header) as {
+      payload: { transaction: string };
+    };
+    const wire = base64.decode(decoded.payload.transaction);
+    const tx = parseSolanaTransaction(wire);
+    const other = wire.slice();
+    other.set(resign(tx.message, PAYER_SEED), 1 + 64);
+    expect(other).not.toEqual(wire);
+    const replay = encodeHeader({
+      ...decoded,
+      payload: { transaction: base64.encode(other) },
+    });
+
+    const a = await verifyPayment(header, [requirement()], d);
+    const b = await verifyPayment(replay, [requirement()], d);
+    // Both signatures are valid: verification alone cannot tell them apart.
+    if (!a.ok || !b.ok) throw new Error("verify");
+    expect((await settlePayment(a, d)).settlement.success).toBe(true);
+    expect((await settlePayment(b, d)).settlement).toMatchObject({
+      success: false,
+      errorReason: "duplicate_settlement",
+    });
     expect(chain.sent).toHaveLength(1);
   });
 
