@@ -1,3 +1,4 @@
+import type { Platform } from "./platform";
 import { logger } from "./logger";
 import type { StorageAdapter } from "./storage";
 import { LocalStorageAdapter } from "./storage";
@@ -27,7 +28,7 @@ export interface UniversalWalletSession {
   walletId: string;
   walletType: "walletconnect" | "eip6963" | "xrpl" | string;
   namespaces: Record<Namespace, SessionNamespace>;
-  platform: "desktop-web" | "mobile-web" | "in-app-browser";
+  platform: Platform;
   auth?: {
     method: "siwe" | "siws" | "none";
     issuedAt?: string;

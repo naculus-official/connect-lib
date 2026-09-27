@@ -1,6 +1,6 @@
 /// <reference types="vitest" />
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUTO_RECONNECT_TIMEOUT_MS,
   DEFAULT_EVM_CHAIN,
@@ -26,7 +26,13 @@ import {
   XRPL_MAINNET,
   XRPL_TESTNET,
 } from "./constants";
-import { detectPlatform, isMobileBrowser } from "./platform";
+import {
+  detectPlatform,
+  isMobileBrowser,
+  isMobileDevice,
+  isReactNative,
+  setPlatformOverride,
+} from "./platform";
 
 describe("platform utilities", () => {
   describe("detectPlatform", () => {
@@ -68,8 +74,7 @@ describe("EVM chain constants", () => {
     expect(EIP155_MAINNET).toBe("eip155:1");
   });
 
-  it("should have correct Goerli chain ID", () => {
-  });
+  it("should have correct Goerli chain ID", () => {});
 
   it("should have correct Sepolia chain ID", () => {
     expect(EIP155_SEPOLIA).toBe("eip155:11155111");
@@ -118,7 +123,9 @@ describe("default chain constants", () => {
   });
 
   it("should default Solana cluster to mainnet", () => {
-    expect(DEFAULT_SOLANA_CLUSTER).toBe("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
+    expect(DEFAULT_SOLANA_CLUSTER).toBe(
+      "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    );
   });
 
   it("should default XRPL network to mainnet", () => {
@@ -153,5 +160,39 @@ describe("session timeout values", () => {
 
   it("should have correct auto-reconnect timeout", () => {
     expect(AUTO_RECONNECT_TIMEOUT_MS).toBe(30 * 1000); // 30 seconds
+  });
+});
+
+describe("platform on React Native", () => {
+  afterEach(() => {
+    setPlatformOverride(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("does not crash without a userAgent, and is not a mobile browser", () => {
+    vi.stubGlobal("navigator", { product: "ReactNative" });
+    expect(isReactNative()).toBe(true);
+    expect(detectPlatform()).toBe("desktop-web");
+    expect(isMobileBrowser()).toBe(false);
+    expect(isMobileDevice()).toBe(false);
+  });
+
+  it("reports the declared native platform as a mobile device", () => {
+    vi.stubGlobal("navigator", { product: "ReactNative" });
+    setPlatformOverride("native-android");
+    expect(detectPlatform()).toBe("native-android");
+    expect(isMobileBrowser()).toBe(false);
+    expect(isMobileDevice()).toBe(true);
+    setPlatformOverride(null);
+    expect(detectPlatform()).toBe("desktop-web");
+  });
+
+  it("keeps browser detection unchanged", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+    });
+    expect(detectPlatform()).toBe("mobile-web");
+    expect(isMobileBrowser()).toBe(true);
+    expect(isMobileDevice()).toBe(true);
   });
 });

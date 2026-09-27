@@ -26,6 +26,12 @@ export interface CoinbaseConnectorConfig {
   onQRCodeResponse?: (url: string) => void;
   /** Override default RPC URLs by CAIP-2 chain ID */
   overrideRpcUrl?: Record<string, string>;
+  /**
+   * An EIP-1193 provider to use instead of the web SDK's — on React Native,
+   * Coinbase's Mobile Wallet Protocol client (`@mobile-wallet-protocol/client`
+   * `EIP1193Provider`). `preference` and the SDK options are then unused.
+   */
+  provider?: ProviderInterface;
 }
 
 /**

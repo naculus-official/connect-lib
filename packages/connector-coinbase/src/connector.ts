@@ -275,6 +275,7 @@ export class CoinbaseConnector implements UniversalConnector {
     preference: Preference["options"];
     onQRCodeResponse?: (url: string) => void;
     overrideRpcUrl?: Record<string, string>;
+    provider?: ProviderInterface;
   };
 
   private sdk?: CoinbaseWalletSDK;
@@ -304,6 +305,7 @@ export class CoinbaseConnector implements UniversalConnector {
       preference: config.preference ?? "all",
       onQRCodeResponse: config.onQRCodeResponse,
       overrideRpcUrl: config.overrideRpcUrl,
+      provider: config.provider,
     };
   }
 
@@ -328,13 +330,13 @@ export class CoinbaseConnector implements UniversalConnector {
    * Get the provider from the SDK with the configured preference.
    */
   private getProvider(): ProviderInterface {
-    const sdk = this.getSDK();
-
-    const preference: Preference = {
-      options: this.config.preference,
-    };
-
-    const provider = sdk.makeWeb3Provider(preference);
+    // An app-supplied EIP-1193 provider (Coinbase Mobile Wallet Protocol on
+    // React Native) replaces the web SDK; everything after is the same.
+    const provider =
+      this.config.provider ??
+      this.getSDK().makeWeb3Provider({
+        options: this.config.preference,
+      } satisfies Preference);
 
     // Replacing the adapter without cleaning it up first discarded its record
     // of what was attached while leaving the handlers on the provider. Every

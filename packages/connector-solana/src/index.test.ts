@@ -786,6 +786,16 @@ describe("SolanaConnector — Wallet Standard discovery", () => {
     vi.unstubAllGlobals();
   });
 
+  it("registers a wallet the app holds, without window (React Native)", async () => {
+    vi.stubGlobal("window", undefined);
+    const unregister = connector.registerWallet(walletStandardWallet("Mobile"));
+    expect(connector.getDiscoveredWallets().map((w) => w.name)).toEqual([
+      "Mobile",
+    ]);
+    unregister();
+    expect(connector.getDiscoveredWallets()).toEqual([]);
+  });
+
   it("announces itself so already-loaded wallets can register", () => {
     // The half that was missing. A wallet present before the dApp runs never
     // fires register-wallet; it waits for this.

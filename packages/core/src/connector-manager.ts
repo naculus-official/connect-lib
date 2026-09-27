@@ -13,7 +13,7 @@ import type {
   WalletCapabilities,
 } from "./connector";
 import { WalletError } from "./errors";
-import { isMobileBrowser } from "./platform";
+import { isMobileDevice } from "./platform";
 import type { UniversalWalletSession } from "./session";
 
 export type ConnectorId = string;
@@ -269,7 +269,9 @@ export class ConnectorManager {
       throw new Error("No active session");
     }
     if (this.activeSession && _session !== this.activeSession) {
-      throw new Error("sendCalls: provided session does not match active session");
+      throw new Error(
+        "sendCalls: provided session does not match active session",
+      );
     }
 
     const connector = this.connectors.get(this.activeConnectorId);
@@ -287,7 +289,9 @@ export class ConnectorManager {
       throw new Error("No active session");
     }
     if (this.activeSession && _session !== this.activeSession) {
-      throw new Error("getCapabilities: provided session does not match active session");
+      throw new Error(
+        "getCapabilities: provided session does not match active session",
+      );
     }
 
     const connector = this.connectors.get(this.activeConnectorId);
@@ -317,7 +321,7 @@ export class ConnectorManager {
       }
     }
 
-    const isMobile = isMobileBrowser();
+    const isMobile = isMobileDevice();
 
     for (const entry of available) {
       const support = entry.connector.supports;

@@ -408,6 +408,27 @@ describe("WalletConnectConnector Integration Tests", () => {
       );
     });
 
+    it("opens the deep link with a supplied opener (React Native)", async () => {
+      const mockClient = createMockSignClient();
+      mockClient.connect.mockResolvedValue({
+        uri: "wc://test-uri",
+        approval: vi.fn(),
+      });
+      const openUrl = vi.fn();
+      const connector = new WalletConnectConnector({
+        projectId: TEST_PROJECT_ID,
+        metadata: TEST_METADATA,
+        client: mockClient as any,
+        openUrl,
+      });
+      await connector.startPairing();
+      await connector.deepLink("mywallet://wc");
+      expect(openUrl).toHaveBeenCalledWith(
+        "mywallet://wc?uri=wc%3A%2F%2Ftest-uri",
+      );
+      expect(window.location.assign).not.toHaveBeenCalled();
+    });
+
     it("should throw when URI is not available", async () => {
       const mockClient = createMockSignClient();
       const connector = new WalletConnectConnector({

@@ -116,3 +116,36 @@ Unity / native SDKs.
 This is a 0.3.x / 0.4.0 line of work, not a patch. Step 1 is a Codex
 package once the peer dependencies are approved and the example-app
 location is chosen.
+
+## Decisions (user, 2026-09-27)
+
+- Home: connect-appkit `packages/native` (`@naculus/connect-native`),
+  riding appkit's release train. Example: tester `examples/expo`.
+- Optional peers, all approved: `react-native`,
+  `@react-native-async-storage/async-storage`,
+  `@walletconnect/react-native-compat`,
+  `@solana-mobile/mobile-wallet-adapter-protocol-kit` (the Kit flavour, to
+  match `connector-solana-kit`), `@mobile-wallet-protocol/client` (Coinbase's
+  current MWP client; `@coinbase/wallet-mobile-sdk` is unmaintained since
+  2025-03), and for step 4 `expo-secure-store`.
+- Embedded wallet on device: in-thread signing (no Web Worker on RN), with
+  the wallet's encryption key held in iOS Keychain / Android Keystore via
+  `expo-secure-store`. Documented as weaker isolation than the web worker.
+- Verification: unit tests, plus the Expo example built and run on the
+  Android emulator (MWA against the fake wallet), iOS simulator build;
+  WalletConnect against the real relay with a user-provided projectId.
+
+## Boundary (all steps)
+
+- Allowed: new `connect-appkit/packages/native/**`; tester
+  `examples/expo/**`; in connect-lib only the additive hooks the design
+  lists — `Platform` values + RN detection in core, a caller-supplied
+  Wallet-Standard wallet in `connector-solana`, pluggable storage / URI
+  opener in `connector-walletconnect`, an injectable key store for
+  `wallet-engine`'s in-thread mode.
+- Not allowed: changing signing bytes, chain-id handling or session routing
+  in any connector; policy in the RN package (it wires existing connectors
+  and managers only); bundling any peer; key material outside
+  wallet-engine; any change to the web behavior of existing packages.
+- Default-deny: an unknown platform stays `desktop`/`mobile-web` behavior;
+  a missing peer throws a clear error only when that connector is used.

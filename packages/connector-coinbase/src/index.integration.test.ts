@@ -44,6 +44,31 @@ describe("CoinbaseConnector Integration", () => {
     });
   });
 
+  it("uses an app-supplied EIP-1193 provider instead of the web SDK", async () => {
+    const provider = {
+      request: vi
+        .fn()
+        .mockResolvedValueOnce(["0x1234567890abcdef1234567890abcdef12345678"])
+        .mockResolvedValueOnce("0x1"),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+      disconnect: vi.fn(),
+    };
+    mockMakeWeb3Provider.mockClear();
+    const native = new CoinbaseConnector({
+      appName: "Native",
+      provider: provider as never,
+    });
+    const session = await native.connect();
+    expect(mockMakeWeb3Provider).not.toHaveBeenCalled();
+    expect(provider.request).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "eth_requestAccounts" }),
+    );
+    expect(session.namespaces.eip155?.accounts[0]).toBe(
+      "eip155:1:0x1234567890abcdef1234567890abcdef12345678",
+    );
+  });
+
   describe("Full connect -> transaction -> disconnect flow", () => {
     it("should complete a full wallet lifecycle", async () => {
       // Step 1: Connect

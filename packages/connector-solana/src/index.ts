@@ -156,6 +156,21 @@ class SolanaConnectorImpl implements UniversalConnector {
   private walletStandardHandler: ((event: Event) => void) | undefined;
 
   /**
+   * Register a Wallet Standard wallet the app holds itself — on React Native
+   * there is no `window` event bus, so `@naculus/connect-native` passes its
+   * Mobile Wallet Adapter wallet here. Treated exactly like a discovered
+   * wallet. Returns an unregister function.
+   */
+  registerWallet(wallet: WalletStandardWallet): () => void {
+    this.registerWalletStandardWallet(wallet);
+    return () => {
+      if (!wallet?.name) return;
+      this.discoveredWallets.delete(walletStandardId(wallet.name));
+      this.notifyListeners();
+    };
+  }
+
+  /**
    * Register one Wallet Standard wallet.
    *
    * Shared by both halves of the handshake, so a wallet that arrives by event

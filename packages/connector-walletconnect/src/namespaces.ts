@@ -27,8 +27,16 @@ export type WalletConnectConfig = {
   relayUrl?: string;
   /** Application metadata for WalletConnect pairing */
   metadata: WalletConnectMetadata;
-  /** Pre-initialized SignClient instance (for testing) */
+  /**
+   * Pre-initialized SignClient instance: for tests, or on React Native,
+   * where it is built with a native key-value storage.
+   */
   client?: SignClient;
+  /**
+   * Opens a wallet deep link (`deepLink(target)`). Defaults to
+   * `window.location.assign`; React Native passes `Linking.openURL`.
+   */
+  openUrl?: (url: string) => void | Promise<void>;
 };
 
 /**

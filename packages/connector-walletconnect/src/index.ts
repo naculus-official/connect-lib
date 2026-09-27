@@ -1415,7 +1415,8 @@ export class WalletConnectConnector implements UniversalConnector {
   }
 
   async deepLink(target: string): Promise<void> {
-    if (typeof window === "undefined") {
+    const openUrl = this.config.openUrl;
+    if (!openUrl && typeof window === "undefined") {
       return;
     }
 
@@ -1428,6 +1429,10 @@ export class WalletConnectConnector implements UniversalConnector {
     }
 
     const url = `${target}${target.includes("?") ? "&" : "?"}uri=${encodeURIComponent(uri)}`;
+    if (openUrl) {
+      await openUrl(url);
+      return;
+    }
     window.location.assign(url);
   }
 
