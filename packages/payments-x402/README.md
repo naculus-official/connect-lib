@@ -80,3 +80,37 @@ per-payment limit, budget (also capped on chain by the delegate approval),
 expiry and count, and only when the facilitator pays the fee. Approving
 replaces any delegate the owner's token account already had.
 `keys.prepareRevocation(id, rpc)` builds the owner's `Revoke`.
+
+## Server side (`@naculus/payments-x402/server`)
+
+Challenge, verify and settle x402 payments in a resource server or a
+facilitator. No private key is held here: EVM settlement goes to your
+`submit`, Solana fee-payer signing to your `signAsFeePayer`.
+
+```ts
+import { requirePayment, settlePayment } from "@naculus/payments-x402/server";
+
+const deps = {
+  rpc: { evm: { call: ethCall }, solana: solanaPaymentRpc(rpcUrl) },
+  submit: async ({ chainId, to, data }) => sendAndWait(chainId, to, data),
+  signAsFeePayer: async (wire) => facilitatorKey.sign(wire),
+};
+
+export async function handler(request: Request): Promise<Response> {
+  const gate = await requirePayment(request, { accepts, deps });
+  if (!gate.paid) return gate.response; // 402 with PAYMENT-REQUIRED
+  const { settlement, header } = await settlePayment(gate.payment, deps);
+  if (!settlement.success) {
+    return new Response("{}", { status: 402, headers: { "PAYMENT-RESPONSE": header } });
+  }
+  return new Response(data, { headers: { "PAYMENT-RESPONSE": header } });
+}
+```
+
+`verifyPayment` requires `accepted` to equal one offered requirement exactly,
+then applies the `exact` scheme rules (EIP-3009 signature, payee, amount,
+validity window, unused nonce, balance and a simulated transfer on EVM; the
+spec's facilitator rules on Solana). `settlePayment` only settles what
+`verifyPayment` returned, and refuses the same payload twice within 120 s
+(pass `store` to share that cache across processes). Permit2, ERC-7710 and
+EIP-1271 payers are not supported.
