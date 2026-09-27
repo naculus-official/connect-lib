@@ -210,6 +210,40 @@ export function typedDataAsTransaction(
   };
 }
 
+/**
+ * The address whose key signed `req`: ecrecover over its EIP-712 digest, as
+ * the token contract does. Null when the request is invalid or the signature
+ * is not 65 bytes with `v` 27/28 and a low `s` (EIP-2; USDC's `ECRecover`
+ * refuses the rest), so a caller comparing the result to `from` fails closed.
+ * Contract signers (EIP-1271) are not recovered.
+ */
+export function recoverTypedDataSigner(
+  req: SessionKeyTypedDataRequest,
+  signature: string,
+): `0x${string}` | null {
+  const copy = snapshotTypedDataRequest(req);
+  if (validateTypedDataRequest(copy) !== null) return null;
+  if (
+    typeof signature !== "string" ||
+    !/^0x[0-9a-fA-F]{130}$/.test(signature)
+  ) {
+    return null;
+  }
+  const sig = hexToBytes(signature.slice(2));
+  const v = sig[64] as number;
+  if (v !== 27 && v !== 28) return null;
+  try {
+    const parsed = secp256k1.Signature.fromBytes(sig.slice(0, 64), "compact");
+    if (parsed.hasHighS()) return null;
+    const point = parsed
+      .addRecoveryBit(v - 27)
+      .recoverPublicKey(hexToBytes(typedDataDigest(copy).slice(2)));
+    return sessionKeyAddress(`0x${point.toHex(true)}`);
+  } catch {
+    return null;
+  }
+}
+
 /** The EVM address a session key's public key controls. */
 export function sessionKeyAddress(publicKeyHex: `0x${string}`): `0x${string}` {
   const point = secp256k1.Point.fromHex(publicKeyHex.slice(2));

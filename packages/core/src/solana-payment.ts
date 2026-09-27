@@ -703,6 +703,35 @@ export function parseSolanaTransaction(
   };
 }
 
+/**
+ * Whether `signer` is a required signer of `tx` and its slot holds a valid
+ * ed25519 signature over the message. False for anything else, including an
+ * empty slot or an address that is not base58.
+ */
+export function hasValidSolanaSignature(
+  tx: ParsedSolanaTransaction,
+  signer: string,
+): boolean {
+  const i = tx.accountKeys.indexOf(signer);
+  if (i < 0 || i >= tx.numRequiredSignatures) return false;
+  try {
+    return ed25519.verify(
+      tx.signatures[i] as Uint8Array,
+      tx.message,
+      key(signer, "signer"),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** A transaction's id: its first (fee payer) signature, base58. */
+export function solanaTransactionId(tx: ParsedSolanaTransaction): string {
+  const first = tx.signatures[0];
+  if (!first) fail("Transaction has no signatures.");
+  return base58.encode(first);
+}
+
 function isWritable(tx: ParsedSolanaTransaction, address: string): boolean {
   const i = tx.accountKeys.indexOf(address);
   if (i < 0) return false;

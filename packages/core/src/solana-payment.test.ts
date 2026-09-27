@@ -6,11 +6,13 @@ import {
   assertSolanaCluster,
   associatedTokenAddress,
   buildSplTransferTransaction,
+  hasValidSolanaSignature,
   parseSolanaTransaction,
   readMint,
   SOLANA_PROGRAMS,
   type SplTransferPayment,
   solanaPaymentRpc,
+  solanaTransactionId,
   verifySignedSplTransfer,
 } from "./solana-payment";
 
@@ -363,5 +365,36 @@ describe("solanaPaymentRpc", () => {
       "getGenesisHash",
       "getGenesisHash",
     ]);
+  });
+});
+
+describe("hasValidSolanaSignature / solanaTransactionId", () => {
+  it("checks each signer's slot over the message", () => {
+    const unsigned = buildSplTransferTransaction(payment());
+    const byPayer = parseSolanaTransaction(sign(unsigned));
+    expect(hasValidSolanaSignature(byPayer, PAYER)).toBe(true);
+    // The facilitator's slot is still empty.
+    expect(hasValidSolanaSignature(byPayer, FACILITATOR)).toBe(false);
+    // Not a signer at all.
+    expect(hasValidSolanaSignature(byPayer, PAY_TO)).toBe(false);
+    expect(hasValidSolanaSignature(byPayer, "not base58!")).toBe(false);
+    const both = parseSolanaTransaction(
+      sign(sign(unsigned), new Uint8Array(32).fill(9), FACILITATOR),
+    );
+    expect(hasValidSolanaSignature(both, FACILITATOR)).toBe(true);
+    expect(solanaTransactionId(both)).toBe(
+      base58.encode(both.signatures[0] as Uint8Array),
+    );
+  });
+
+  it("rejects a signature over another message", () => {
+    const a = parseSolanaTransaction(
+      sign(buildSplTransferTransaction(payment())),
+    );
+    const b = parseSolanaTransaction(
+      buildSplTransferTransaction(payment({ amount: 1001n })),
+    );
+    b.signatures[1] = a.signatures[1] as Uint8Array;
+    expect(hasValidSolanaSignature(b, PAYER)).toBe(false);
   });
 });
