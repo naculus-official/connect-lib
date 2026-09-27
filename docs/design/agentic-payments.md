@@ -213,3 +213,75 @@ the payer is refused (x402 forbids it; for MPP it contradicts `feePayer`).
 Refused for now: native SOL, splits, push mode, confidential transfers,
 `localnet`, Token-2022 transfer-fee / hook extensions beyond a plain
 `TransferChecked`.
+
+## Step 7: MPP server (2026-09-27)
+
+`@naculus/payments-mpp/server`, a subpath of the existing package (tsup
+entry + `exports`; no new package or dependency). Pinned against
+`tempoxyz/mpp-specs` @ `fe0d414` (`draft-httpauth-payment-01`,
+`draft-payment-intent-charge-00`, `draft-evm-charge-00`,
+`draft-solana-charge-00`; the spec text is unchanged since the client's
+`08e7dd8`) and the reference server `wevm/mppx` @ `dcf1589`
+(`src/Challenge.ts` `computeId`, `src/evm/server/Charge.ts`).
+
+**Challenges.** `createChallenge` JCS-serializes `request` (and `opaque`)
+and binds `id = base64url(HMAC-SHA256(secret, realm|method|intent|request|
+expires|digest[|header]|opaque))`; the three HMAC test vectors of the core
+spec are reproduced. `evm`/`solana` challenges must carry `expires` and a
+request the client side accepts (Solana additionally `tokenProgram`, from
+which the destination ATA is derived); parameter text is printable ASCII.
+
+**Verification** (`verifyCredential`), fail closed, in order: credential
+grammar (`Payment <base64url-nopad>`, ≤ 16 KiB, JSON with `challenge` and
+`payload`) → `malformed-credential`; id re-derived from the echoed
+parameters under the secret or a previous one, then realm and the field the
+challenge selected → `invalid-challenge`; method/intent → `method-unsupported`
+(400); expiry → `payment-expired`; body digest; the echoed method + request
+must equal one of the caller's `accept` offers (so a cheaper challenge of the
+same server cannot pay for this resource); optional early replay check; then
+the method:
+
+- `evm`, `type="authorization"`: payload shape → `invalid-payload`; token
+  domain known (built-in USDC or `tokenDomains` — the spec's "known to
+  implement EIP-3009"); `to`, `value`, `nonce = keccak256(id ‖ realm)`;
+  `validAfter ≤ now < validBefore ≤ expires`; ecrecover over the EIP-712
+  digest equals `from` (v 27/28, low s); `source` matches; injected
+  `rpc.authorizationState` is exactly `false` and `rpc.balanceOf` covers the
+  amount.
+- `solana`, `type="transaction"`: strict base64, v0 without lookup tables,
+  no duplicate accounts; signer count and fee payer per `feePayer`; only
+  ComputeBudget limit/price (once each), one `TransferChecked` (4 accounts,
+  mint, derived destination ATA, amount, decimals, authority = the signing
+  payer, writable source/destination) and at most one memo without accounts
+  (= `externalId` when set); sponsored: no instruction names the fee payer,
+  its slot is empty, priority fee ≤ `maxPriorityFeeLamports`; the payer's
+  ed25519 signature verifies; `source` matches.
+
+**Settlement** (`settleCredential`) takes only `verifyCredential` results,
+consumes the challenge id and the proof's replay token (EIP-3009
+`chain:token:from:nonce`, or the Solana payer signature, kept 24 h past the
+challenge so one transaction cannot pay two identical challenges) in the
+injected store before sending, then: EVM `deps.evm.submit` (resolves only
+once `transferWithAuthorization` succeeded on chain); Solana
+`deps.solana.signAsFeePayer` when sponsored (the result must differ only in
+the fee payer's slot, which must verify), `simulateTransaction`,
+`sendTransaction` (must report the expected signature), `confirmTransaction`.
+The receipt is `{status, method, timestamp, reference, challengeId}` plus
+`chainId` (EVM) and `externalId`, JCS base64url, sent with
+`Cache-Control: private`. Problems are RFC 9457 JSON with the spec's
+`https://paymentauth.org/problems/*` types; unexpected errors become
+`internal-payment-error` with a generic detail; a 402 always carries a fresh
+challenge and `Cache-Control: no-store`.
+
+**Core additions** (no new dependency): `recoverTypedDataSigner`,
+`hasValidSolanaSignature`, `solanaTransactionId`. payments-mpp has no
+secp256k1/ed25519/base58 of its own, and core already has all three.
+
+**Left out:** EVM `permit2`/`transaction`/`hash`, Solana push mode,
+bundles (confidential), native SOL, splits (and so ATA creation), legacy
+Solana messages; EIP-1271 contract signers; the post-confirmation
+`getTransaction` re-check of the Solana spec (the verified bytes are what was
+signed and sent, so the confirmed transaction is that one); a check that the
+settlement RPC serves the challenge's cluster (the server configures its own
+RPC); ready-made JSON-RPC adapters for `MppEvmRpc`/`MppSolanaSettleRpc`;
+`Accept-Payment` negotiation; framework middleware.
