@@ -7,6 +7,10 @@
  * @see SRS-001 §6.1
  */
 
+import {
+  type RpcErrorFactory,
+  rpcCall as sharedRpcCall,
+} from "../abortable-fetch";
 import { logger } from "../logger";
 import { FEE_ERROR_MESSAGES, FeeEstimationError } from "./errors";
 import type {
@@ -46,52 +50,24 @@ export function clearChainFeeEstimators(): void {
 
 // ─── Internal RPC helpers (exported for testing) ───────────────────────
 
+const feeRpcErrors: RpcErrorFactory = {
+  http: (status) =>
+    new FeeEstimationError("fee_rpc_error", `RPC returned status ${status}`),
+  rpc: (error) =>
+    new FeeEstimationError("fee_rpc_error", error.message, {
+      code: error.code,
+    }),
+};
+
 /**
  * Make a JSON-RPC call to the given endpoint with a 10-second timeout.
  */
-async function rpcCall<T>(
+function rpcCall<T>(
   rpcUrl: string,
   method: string,
   params: unknown[],
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10_000);
-
-  try {
-    const response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method,
-        params,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new FeeEstimationError(
-        "fee_rpc_error",
-        `RPC returned status ${response.status}`,
-      );
-    }
-
-    const json = (await response.json()) as {
-      result?: T;
-      error?: { code: number; message: string };
-    };
-
-    if (json.error) {
-      throw new FeeEstimationError("fee_rpc_error", json.error.message, {
-        code: json.error.code,
-      });
-    }
-
-    return json.result as T;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  return sharedRpcCall<T>(rpcUrl, method, params, { toError: feeRpcErrors });
 }
 
 /**
