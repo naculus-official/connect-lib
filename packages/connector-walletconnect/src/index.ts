@@ -22,7 +22,10 @@ import {
   scopeRequestFrom,
 } from "@naculus/connect-core";
 import { base58 } from "@scure/base";
-import SignClient from "@walletconnect/sign-client";
+// The named export: under Node ESM the default import is the module object
+// (no `init`), which only a bundler's CJS interop used to paper over.
+import { SignClient as SignClientImpl } from "@walletconnect/sign-client";
+import type SignClient from "@walletconnect/sign-client";
 import type { ProposalTypes } from "@walletconnect/types";
 import {
   type CAIP25NamespaceProposal,
@@ -625,7 +628,7 @@ export class WalletConnectConnector implements UniversalConnector {
       return this.client;
     }
 
-    this.client = await SignClient.init({
+    this.client = await SignClientImpl.init({
       projectId: this.config.projectId,
       relayUrl: this.config.relayUrl,
       metadata: this.config.metadata,
