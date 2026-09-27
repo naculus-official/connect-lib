@@ -99,6 +99,15 @@ function requireEvmAddress(value: unknown, field: string): string {
   return address;
 }
 
+/** A browser window with the DOM event API (React Native's `window` has none). */
+function hasWindowEvents(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.addEventListener === "function" &&
+    typeof window.dispatchEvent === "function"
+  );
+}
+
 /** Select the account explicitly approved for a requested EIP-155 chain. */
 function accountForChain(
   accounts: string[],
@@ -329,7 +338,9 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   private readonly chainSubscribers = new Set<(chainId: string) => void>();
 
   startDiscovery(): void {
-    if (typeof window === "undefined") return;
+    // React Native defines `window` without the DOM event API: there is no
+    // injected wallet to discover there (use registerProvider instead).
+    if (!hasWindowEvents()) return;
 
     const handler: (...args: unknown[]) => void = (event: unknown) => {
       if (!event || typeof event !== "object") return;
@@ -349,7 +360,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   }
 
   stopDiscovery(): void {
-    if (typeof window === "undefined" || !this.announceHandler) return;
+    if (!hasWindowEvents() || !this.announceHandler) return;
 
     window.removeEventListener(EIP6963_ANNOUNCE_EVENT, this.announceHandler);
     this.announceHandler = null;

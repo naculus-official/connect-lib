@@ -111,6 +111,21 @@ describe("EIP6963Connector", () => {
     });
   });
 
+  describe("on React Native (window without DOM events)", () => {
+    it("skips discovery instead of throwing, and still registers providers", () => {
+      vi.stubGlobal("window", {});
+      const c = new EIP6963Connector();
+      expect(() => c.startDiscovery()).not.toThrow();
+      expect(() => c.stopDiscovery()).not.toThrow();
+      c.registerProvider(
+        { uuid: "u", name: "n", icon: "data:,", rdns: "r" },
+        createMockProvider() as never,
+      );
+      expect(c.getDiscoveredWallets()).toHaveLength(1);
+      vi.unstubAllGlobals();
+    });
+  });
+
   describe("registerProvider", () => {
     it("registers a provider the app holds, and unregisters it", () => {
       const c = new EIP6963Connector();
