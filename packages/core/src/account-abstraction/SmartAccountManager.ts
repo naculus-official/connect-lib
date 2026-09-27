@@ -12,6 +12,10 @@
  * @see docs/features/account-abstraction.md
  */
 
+import {
+  type RpcErrorFactory,
+  rpcCall as sharedRpcCall,
+} from "../abortable-fetch";
 import { type AAErrorCode, AccountAbstractionError } from "./errors";
 import { PaymasterService } from "./paymaster";
 import {
@@ -451,52 +455,27 @@ async function isContractDeployed(
   return code !== "0x";
 }
 
+const aaRpcErrors: RpcErrorFactory = {
+  http: (status) =>
+    new AccountAbstractionError(
+      "aa_rpc_error",
+      `RPC returned status ${status}`,
+    ),
+  rpc: (error) =>
+    new AccountAbstractionError("aa_rpc_error", error.message, {
+      code: error.code,
+    }),
+};
+
 /**
- * Make a JSON-RPC call.
+ * Make a JSON-RPC call with a 10-second timeout.
  */
-async function rpcCall<T>(
+function rpcCall<T>(
   rpcUrl: string,
   method: string,
   params: unknown[],
 ): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10_000);
-
-  try {
-    const response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method,
-        params,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new AccountAbstractionError(
-        "aa_rpc_error",
-        `RPC returned status ${response.status}`,
-      );
-    }
-
-    const json = (await response.json()) as {
-      result?: T;
-      error?: { code: number; message: string };
-    };
-
-    if (json.error) {
-      throw new AccountAbstractionError("aa_rpc_error", json.error.message, {
-        code: json.error.code,
-      });
-    }
-
-    return json.result as T;
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  return sharedRpcCall<T>(rpcUrl, method, params, { toError: aaRpcErrors });
 }
 
 // ─── SmartAccountManager ───────────────────────────────────────────────

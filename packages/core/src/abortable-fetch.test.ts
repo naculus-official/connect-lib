@@ -9,7 +9,7 @@
  * - Stale response handling
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { abortableFetch, rpcCall } from "./abortable-fetch";
 
 describe("abortableFetch", () => {
@@ -147,5 +147,138 @@ describe("rpcCall", () => {
 
     expect(result.blockNumber).toBe("0x1234");
     expect(result.timestamp).toBe("0xabcdef");
+  });
+});
+
+describe("rpcCall transport contract", () => {
+  const RPC_URL = "https://rpc.example.com";
+
+  function abortError() {
+    return new DOMException("This operation was aborted", "AbortError");
+  }
+
+  class DomainError extends Error {
+    constructor(
+      message: string,
+      readonly details?: unknown,
+    ) {
+      super(message);
+      this.name = "DomainError";
+    }
+  }
+
+  const toError = {
+    http: (status: number) => new DomainError(`RPC returned status ${status}`),
+    rpc: (error: { code: number; message: string }) =>
+      new DomainError(error.message, { code: error.code }),
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("aborts after the default 10s when fetch never answers", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<never>((_, reject) => {
+            init.signal?.addEventListener("abort", () => reject(abortError()));
+          }),
+      ),
+    );
+
+    let settled = false;
+    const result = rpcCall(RPC_URL, "eth_chainId", []).catch((e: unknown) => {
+      settled = true;
+      return e;
+    });
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toMatchObject({ name: "AbortError" });
+  });
+
+  it("keeps the timeout armed while the body is read", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => ({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise<never>((_, reject) => {
+            init.signal?.addEventListener("abort", () => reject(abortError()));
+          }),
+      })),
+    );
+
+    let settled = false;
+    const result = rpcCall(RPC_URL, "eth_chainId", [], {
+      timeoutMs: 2_000,
+    }).catch((e: unknown) => {
+      settled = true;
+      return e;
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // Assert before awaiting so a missing timeout fails instead of hanging.
+    expect(settled).toBe(true);
+    expect(await result).toMatchObject({ name: "AbortError" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("maps HTTP errors through toError.http", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 502 }),
+    );
+
+    const err = await rpcCall(RPC_URL, "eth_chainId", [], { toError }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(DomainError);
+    expect(err).toMatchObject({
+      message: "RPC returned status 502",
+      details: undefined,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("maps JSON-RPC errors through toError.rpc", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ error: { code: -32005, message: "limit" } }),
+      }),
+    );
+
+    const err = await rpcCall(RPC_URL, "eth_chainId", [], { toError }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(DomainError);
+    expect(err).toMatchObject({ message: "limit", details: { code: -32005 } });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not map network errors or timeouts through toError", async () => {
+    const network = new TypeError("fetch failed");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(network));
+    const http = vi.fn(toError.http);
+    const rpc = vi.fn(toError.rpc);
+
+    await expect(
+      rpcCall(RPC_URL, "eth_chainId", [], { toError: { http, rpc } }),
+    ).rejects.toBe(network);
+    expect(http).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

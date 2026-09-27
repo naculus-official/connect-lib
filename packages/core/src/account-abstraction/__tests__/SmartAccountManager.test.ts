@@ -1730,3 +1730,186 @@ describe("bundler configuration", () => {
     ).rejects.toHaveProperty("code", "aa_no_bundler");
   });
 });
+
+// ─── RPC transport regression (#13 dedupe) ─────────────────────────────
+//
+// Pins the observable transport contract of the manager's JSON-RPC helper so
+// routing it through the shared transport cannot change what callers see:
+// request shape, the 10s timeout (covering the body read), and which errors
+// are wrapped in AccountAbstractionError versus passed through untouched.
+
+describe("SmartAccountManager RPC transport", () => {
+  const ADDRESS_RESULT =
+    "0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+  function abortError() {
+    return new DOMException("This operation was aborted", "AbortError");
+  }
+
+  function getAddress() {
+    return new SmartAccountManager(createTestConfig()).getAccountAddress(
+      createAccountConfig(),
+    );
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("POSTs a JSON-RPC 2.0 envelope to the configured rpcUrl", async () => {
+    const spy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ result: ADDRESS_RESULT }),
+    });
+    vi.stubGlobal("fetch", spy);
+
+    await getAddress();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(createTestConfig().rpcUrl);
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_call",
+    });
+  });
+
+  it("wraps a non-ok HTTP status in AccountAbstractionError(aa_rpc_error)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 429 }),
+    );
+
+    const err = await getAddress().catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AccountAbstractionError);
+    expect(err).toMatchObject({
+      code: "aa_rpc_error",
+      message: "RPC returned status 429",
+      cause: undefined,
+    });
+  });
+
+  it("wraps a JSON-RPC error in AccountAbstractionError with the rpc code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            error: { code: -32000, message: "execution reverted" },
+          }),
+      }),
+    );
+
+    const err = await getAddress().catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AccountAbstractionError);
+    expect(isAAError(err)).toBe(true);
+    expect(err).toMatchObject({
+      code: "aa_rpc_error",
+      message: "execution reverted",
+      cause: { code: -32000 },
+    });
+  });
+
+  it("passes network errors through unwrapped", async () => {
+    const network = new TypeError("fetch failed");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(network));
+
+    await expect(getAddress()).rejects.toBe(network);
+  });
+
+  it("aborts a request that has not answered after 10s", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<never>((_, reject) => {
+            init.signal?.addEventListener("abort", () => reject(abortError()));
+          }),
+      ),
+    );
+
+    let settled = false;
+    const result = getAddress().catch((e: unknown) => {
+      settled = true;
+      return e;
+    });
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const err = await result;
+    expect(err).not.toBeInstanceOf(AccountAbstractionError);
+    expect(err).toMatchObject({ name: "AbortError" });
+  });
+
+  it("keeps the 10s timeout armed while the body is read", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => ({
+        ok: true,
+        status: 200,
+        json: () =>
+          new Promise<never>((_, reject) => {
+            init.signal?.addEventListener("abort", () => reject(abortError()));
+          }),
+      })),
+    );
+
+    let settled = false;
+    const result = getAddress().catch((e: unknown) => {
+      settled = true;
+      return e;
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // Assert before awaiting so a missing timeout fails instead of hanging.
+    expect(settled).toBe(true);
+    expect(await result).toMatchObject({ name: "AbortError" });
+  });
+
+  it("clears the timeout on success and on every error path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ result: ADDRESS_RESULT }),
+      }),
+    );
+    await getAddress();
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 500 }),
+    );
+    await getAddress().catch(() => {});
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ error: { code: -1, message: "x" } }),
+      }),
+    );
+    await getAddress().catch(() => {});
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("down")));
+    await getAddress().catch(() => {});
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
