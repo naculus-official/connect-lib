@@ -11,6 +11,14 @@ export type { SessionKeyErrorCode } from "./errors";
 export { createSessionKeyError, SESSION_KEY_ERROR_MESSAGES } from "./errors";
 export { SessionKeyManager } from "./SessionKeyManager";
 export {
+  type SolanaSessionKeyConfig,
+  type SolanaSessionKeyInfo,
+  SolanaSessionKeyManager,
+  type SolanaSessionKeyScope,
+  type SolanaSessionKeyStatus,
+  type SolanaSessionPayment,
+} from "./solana-session-keys";
+export {
   decryptPrivateKey,
   encryptPrivateKey,
   SessionKeyStorage,

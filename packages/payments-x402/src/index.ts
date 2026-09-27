@@ -11,7 +11,9 @@ export {
 export {
   createSvmPaymentPayload,
   svmUnsupportedReason,
+  sessionKeyMismatch,
   type X402SolanaOptions,
+  type X402SolanaSessionKey,
   type X402SolanaSigner,
 } from "./svm-exact";
 export {

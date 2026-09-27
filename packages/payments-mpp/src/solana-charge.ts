@@ -7,6 +7,7 @@ import {
   SOLANA_MAINNET,
   SOLANA_PROGRAMS,
   type SolanaPaymentRpc,
+  type SolanaSessionKeyManager,
   type SplTransferPayment,
   verifySignedSplTransfer,
 } from "@naculus/connect-core";
@@ -49,11 +50,24 @@ export interface MppSolanaSigner {
 
 export type MppSolanaNetwork = "mainnet" | "devnet";
 
-export interface MppSolanaOptions {
-  signer: MppSolanaSigner;
+/** A Solana session key (connect-core `SolanaSessionKeyManager`) that pays. */
+export interface MppSolanaSessionKey {
+  manager: SolanaSessionKeyManager;
+  id: string;
+}
+
+/**
+ * Who pays `solana` charges: the connected wallet (`signer`, a prompt per
+ * payment) or a session key (`sessionKey`, promptless; sponsored charges
+ * only, bounded by its delegate approval and scope).
+ */
+export type MppSolanaOptions = {
   /** Reads the mint, a blockhash and the cluster; `solanaPaymentRpc(url)`. */
   rpc: SolanaPaymentRpc;
-}
+} & (
+  | { signer: MppSolanaSigner; sessionKey?: undefined }
+  | { sessionKey: MppSolanaSessionKey; signer?: undefined }
+);
 
 const CLUSTERS: Record<MppSolanaNetwork, string> = {
   mainnet: SOLANA_MAINNET,
@@ -176,6 +190,9 @@ export async function createSolanaChargeCredential(
   request: SolanaChargeRequest,
   solana: MppSolanaOptions,
 ): Promise<{ header: string; value: string }> {
+  if (solana.sessionKey) {
+    return payWithSessionKey(challenge, request, solana.sessionKey, solana.rpc);
+  }
   const payer = solana.signer.address;
   if (request.feePayerKey === payer) {
     throw new MppError(
@@ -228,5 +245,60 @@ export async function createSolanaChargeCredential(
     challenge: challenge.params,
     payload: { type: "transaction", transaction },
     source: `did:pkh:${request.network}:${payer}`,
+  });
+}
+
+/** Why `key` cannot pay `request`, or null. */
+export async function sessionKeyMismatch(
+  request: SolanaChargeRequest,
+  key: MppSolanaSessionKey,
+): Promise<string | null> {
+  const info = (await key.manager.listSessions()).find((s) => s.id === key.id);
+  if (!info) return `Solana session key ${key.id} not found`;
+  if (request.network !== info.scope.cluster) {
+    return "the charge is not on the session key's cluster";
+  }
+  if (request.currency !== info.scope.mint) {
+    return "the charge is not in the session key's mint";
+  }
+  if (request.decimals !== info.decimals) {
+    return `the mint has ${info.decimals} decimals, not ${request.decimals}`;
+  }
+  if (request.tokenProgram && request.tokenProgram !== info.tokenProgram) {
+    return "the mint is not owned by the charge's token program";
+  }
+  if (!request.feePayerKey) {
+    return "a session key pays only charges whose fee the server sponsors";
+  }
+  return null;
+}
+
+async function payWithSessionKey(
+  challenge: MppChallenge,
+  request: SolanaChargeRequest,
+  key: MppSolanaSessionKey,
+  rpc: SolanaPaymentRpc,
+): Promise<{ header: string; value: string }> {
+  const mismatch = await sessionKeyMismatch(request, key);
+  if (mismatch) throw new MppError("no_acceptable_challenge", mismatch);
+  const info = (await key.manager.listSessions()).find(
+    (s) => s.id === key.id,
+  ) as { address: string };
+  // The manager checks recipient, amount, budget, expiry, sponsor and
+  // cluster, builds the transfer itself and takes the blockhash from `rpc`.
+  const transaction = await key.manager.signPayment(
+    key.id,
+    {
+      recipient: request.recipient,
+      amount: BigInt(request.amount),
+      feePayer: request.feePayerKey as string,
+      memo: request.externalId ?? null,
+    },
+    rpc,
+  );
+  return encodeCredential({
+    challenge: challenge.params,
+    payload: { type: "transaction", transaction },
+    source: `did:pkh:${request.network}:${info.address}`,
   });
 }

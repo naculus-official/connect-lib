@@ -4,6 +4,7 @@ import {
   isValidAddress,
   readMint,
   type SolanaPaymentRpc,
+  type SolanaSessionKeyManager,
   type SplTransferPayment,
   verifySignedSplTransfer,
 } from "@naculus/connect-core";
@@ -35,11 +36,24 @@ export interface X402SolanaSigner {
   signTransaction(transaction: Uint8Array): Promise<Uint8Array>;
 }
 
-export interface X402SolanaOptions {
-  signer: X402SolanaSigner;
+/** A Solana session key (connect-core `SolanaSessionKeyManager`) that pays. */
+export interface X402SolanaSessionKey {
+  manager: SolanaSessionKeyManager;
+  id: string;
+}
+
+/**
+ * Who pays Solana requirements: the connected wallet (`signer`, a prompt per
+ * payment) or a session key (`sessionKey`, promptless, bounded by its
+ * delegate approval and scope).
+ */
+export type X402SolanaOptions = {
   /** Reads the mint, a blockhash and the cluster; `solanaPaymentRpc(url)`. */
   rpc: SolanaPaymentRpc;
-}
+} & (
+  | { signer: X402SolanaSigner; sessionKey?: undefined }
+  | { sessionKey: X402SolanaSessionKey; signer?: undefined }
+);
 
 const DECIMAL = /^(?:0|[1-9][0-9]*)$/;
 const U64_MAX = (1n << 64n) - 1n;
@@ -99,6 +113,14 @@ export async function createSvmPaymentPayload(
   const reason = svmUnsupportedReason(requirement);
   if (reason) throw new X402Error("no_acceptable_requirement", reason);
   const extra = requirement.extra as { feePayer: string; memo?: string };
+  if (solana.sessionKey) {
+    return payWithSessionKey(
+      required,
+      requirement,
+      solana.sessionKey,
+      solana.rpc,
+    );
+  }
   if (extra.feePayer === solana.signer.address) {
     throw new X402Error(
       "invalid_challenge",
@@ -130,6 +152,52 @@ export async function createSvmPaymentPayload(
     buildSplTransferTransaction(payment),
   );
   const transaction = verifySignedSplTransfer(signed, payment);
+  return {
+    x402Version: X402_VERSION,
+    resource: required.resource,
+    accepted: requirement,
+    payload: { transaction },
+    ...(required.extensions ? { extensions: required.extensions } : {}),
+  };
+}
+
+/** Why `key` cannot pay `requirement`, or null. */
+export async function sessionKeyMismatch(
+  requirement: X402PaymentRequirements,
+  key: X402SolanaSessionKey,
+): Promise<string | null> {
+  const info = (await key.manager.listSessions()).find((s) => s.id === key.id);
+  if (!info) return `Solana session key ${key.id} not found`;
+  if (requirement.network !== info.scope.cluster) {
+    return `network ${requirement.network} is not the session key's cluster`;
+  }
+  if (requirement.asset !== info.scope.mint) {
+    return `asset ${requirement.asset} is not the session key's mint`;
+  }
+  return null;
+}
+
+async function payWithSessionKey(
+  required: X402PaymentRequired,
+  requirement: X402PaymentRequirements,
+  key: X402SolanaSessionKey,
+  rpc: SolanaPaymentRpc,
+): Promise<X402PaymentPayload> {
+  const mismatch = await sessionKeyMismatch(requirement, key);
+  if (mismatch) throw new X402Error("no_acceptable_requirement", mismatch);
+  const extra = requirement.extra as { feePayer: string; memo?: string };
+  // The manager checks recipient, amount, budget, expiry, sponsor and
+  // cluster, builds the transfer itself and takes the blockhash from `rpc`.
+  const transaction = await key.manager.signPayment(
+    key.id,
+    {
+      recipient: requirement.payTo,
+      amount: BigInt(requirement.amount),
+      feePayer: extra.feePayer,
+      memo: extra.memo ?? randomMemo(),
+    },
+    rpc,
+  );
   return {
     x402Version: X402_VERSION,
     resource: required.resource,

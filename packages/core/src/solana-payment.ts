@@ -47,8 +47,13 @@ const MAX_INSTRUCTIONS = 6;
 export interface SplTransferPayment {
   /** Pays the fee and signs first; a facilitator, or `authority` itself. */
   feePayer: string;
-  /** The payer: owner of the source token account, signs the transfer. */
+  /** Signs the transfer: the source account's owner, or its delegate. */
   authority: string;
+  /**
+   * Owner of the source token account when `authority` spends as its SPL
+   * delegate (a session key). Omitted: `authority` owns the source.
+   */
+  sourceOwner?: string;
   mint: string;
   /** `SOLANA_PROGRAMS.token` or `SOLANA_PROGRAMS.token2022`. */
   tokenProgram: string;
@@ -184,7 +189,10 @@ function checkPayment(p: SplTransferPayment): {
   if (p.amount <= 0n || p.amount > U64_MAX) {
     fail("amount is not a positive u64.");
   }
-  if (p.recipient === p.authority) fail("The payer cannot pay itself.");
+  if (p.recipient === p.authority || p.recipient === p.sourceOwner) {
+    fail("The payer cannot pay itself.");
+  }
+  if (p.sourceOwner !== undefined) key(p.sourceOwner, "sourceOwner");
   const computeUnitLimit = p.computeUnitLimit ?? SPL_PAYMENT_COMPUTE_UNIT_LIMIT;
   const computeUnitPrice = p.computeUnitPrice ?? SPL_PAYMENT_COMPUTE_UNIT_PRICE;
   if (
@@ -211,7 +219,11 @@ function checkPayment(p: SplTransferPayment): {
 
 function paymentInstructions(p: SplTransferPayment): Instruction[] {
   const { computeUnitLimit, computeUnitPrice } = checkPayment(p);
-  const source = associatedTokenAddress(p.authority, p.mint, p.tokenProgram);
+  const source = associatedTokenAddress(
+    p.sourceOwner ?? p.authority,
+    p.mint,
+    p.tokenProgram,
+  );
   const destination = associatedTokenAddress(
     p.recipient,
     p.mint,
@@ -308,6 +320,244 @@ export function buildSplTransferTransaction(p: SplTransferPayment): Uint8Array {
     fail("The payment transaction exceeds the Solana size limit.");
   }
   return wire;
+}
+
+// ── Owner-signed delegate approval ──────────────────────────────────
+
+/** An SPL delegate approval: `owner` lets `delegate` spend up to `amount`. */
+export interface SplDelegateApproval {
+  owner: string;
+  mint: string;
+  tokenProgram: string;
+  decimals: number;
+  /** The session key. */
+  delegate: string;
+  /** Token base units; the chain decrements it on every delegated transfer. */
+  amount: bigint;
+  recentBlockhash: string;
+}
+
+interface Meta {
+  address: string;
+  signer: boolean;
+  writable: boolean;
+}
+
+/** Compile a v0 transaction with `feePayer` first and no lookup tables. */
+function compileV0(
+  feePayer: string,
+  instructions: { program: string; accounts: Meta[]; data: Uint8Array }[],
+  recentBlockhash: string,
+): Uint8Array {
+  const metas = new Map<string, Meta>();
+  const add = (m: Meta) => {
+    const seen = metas.get(m.address);
+    metas.set(m.address, {
+      address: m.address,
+      signer: m.signer || (seen?.signer ?? false),
+      writable: m.writable || (seen?.writable ?? false),
+    });
+  };
+  add({ address: feePayer, signer: true, writable: true });
+  for (const ix of instructions) {
+    for (const a of ix.accounts) add(a);
+    add({ address: ix.program, signer: false, writable: false });
+  }
+  const all = [...metas.values()];
+  const group = (signer: boolean, writable: boolean) =>
+    all.filter((m) => m.signer === signer && m.writable === writable);
+  const ordered = [
+    ...group(true, true),
+    ...group(true, false),
+    ...group(false, true),
+    ...group(false, false),
+  ].map((m) => m.address);
+  const signers = group(true, true).length + group(true, false).length;
+  const index = (a: string) => ordered.indexOf(a);
+  const message = concatBytes(
+    new Uint8Array([
+      0x80,
+      signers,
+      group(true, false).length,
+      group(false, false).length,
+    ]),
+    shortVec(ordered.length),
+    ...ordered.map((k) => key(k, "account")),
+    key(recentBlockhash, "recentBlockhash"),
+    shortVec(instructions.length),
+    ...instructions.map((ix) =>
+      concatBytes(
+        new Uint8Array([index(ix.program)]),
+        shortVec(ix.accounts.length),
+        new Uint8Array(ix.accounts.map((a) => index(a.address))),
+        shortVec(ix.data.length),
+        ix.data,
+      ),
+    ),
+    shortVec(0),
+  );
+  return concatBytes(shortVec(signers), new Uint8Array(64 * signers), message);
+}
+
+function approvalInstruction(a: SplDelegateApproval): Instruction {
+  checkPayment({
+    feePayer: a.owner,
+    authority: a.owner,
+    mint: a.mint,
+    tokenProgram: a.tokenProgram,
+    decimals: a.decimals,
+    recipient: a.delegate,
+    amount: a.amount,
+    memo: null,
+    recentBlockhash: a.recentBlockhash,
+  });
+  return {
+    program: a.tokenProgram,
+    accounts: [
+      associatedTokenAddress(a.owner, a.mint, a.tokenProgram),
+      a.mint,
+      a.delegate,
+      a.owner,
+    ],
+    // ApproveChecked: 13, amount u64 LE, decimals.
+    data: concatBytes(
+      new Uint8Array([13]),
+      u64(a.amount),
+      new Uint8Array([a.decimals]),
+    ),
+  };
+}
+
+/** The owner's `ApproveChecked` for a session key, unsigned (owner pays). */
+export function buildApproveDelegateTransaction(
+  a: SplDelegateApproval,
+): Uint8Array {
+  const ix = approvalInstruction(a);
+  const [source, mint, delegate, owner] = ix.accounts as [
+    string,
+    string,
+    string,
+    string,
+  ];
+  return compileV0(
+    a.owner,
+    [
+      {
+        program: ix.program,
+        accounts: [
+          { address: source, signer: false, writable: true },
+          { address: mint, signer: false, writable: false },
+          { address: delegate, signer: false, writable: false },
+          { address: owner, signer: true, writable: false },
+        ],
+        data: ix.data,
+      },
+    ],
+    a.recentBlockhash,
+  );
+}
+
+function revocationInstruction(
+  a: Omit<SplDelegateApproval, "delegate" | "amount" | "decimals">,
+): Instruction {
+  if (
+    a.tokenProgram !== SOLANA_PROGRAMS.token &&
+    a.tokenProgram !== SOLANA_PROGRAMS.token2022
+  ) {
+    fail("tokenProgram is not SPL Token or Token-2022.");
+  }
+  return {
+    program: a.tokenProgram,
+    accounts: [
+      associatedTokenAddress(a.owner, a.mint, a.tokenProgram),
+      a.owner,
+    ],
+    data: new Uint8Array([5]), // Revoke
+  };
+}
+
+/** The owner's `Revoke` of any delegate on its token account, unsigned. */
+export function buildRevokeDelegateTransaction(
+  a: Omit<SplDelegateApproval, "delegate" | "amount" | "decimals">,
+): Uint8Array {
+  const ix = revocationInstruction(a);
+  const [source, owner] = ix.accounts as [string, string];
+  return compileV0(
+    a.owner,
+    [
+      {
+        program: ix.program,
+        accounts: [
+          { address: source, signer: false, writable: true },
+          { address: owner, signer: true, writable: false },
+        ],
+        data: ix.data,
+      },
+    ],
+    a.recentBlockhash,
+  );
+}
+
+/**
+ * Check an owner-signed approval or revocation returned by the owner's
+ * wallet, and return it base64-encoded for `sendTransaction`: the owner pays
+ * and signs alone, same blockhash, exactly one instruction for the token
+ * program and it is ours; the wallet may add only ComputeBudget and
+ * Lighthouse instructions.
+ */
+export function verifySignedOwnerTransaction(
+  wire: Uint8Array,
+  expected:
+    | { kind: "approve"; approval: SplDelegateApproval }
+    | {
+        kind: "revoke";
+        revocation: Omit<
+          SplDelegateApproval,
+          "delegate" | "amount" | "decimals"
+        >;
+      },
+): string {
+  const want =
+    expected.kind === "approve"
+      ? approvalInstruction(expected.approval)
+      : revocationInstruction(expected.revocation);
+  const base =
+    expected.kind === "approve" ? expected.approval : expected.revocation;
+  const tx = parseSolanaTransaction(wire);
+  if (tx.accountKeys[0] !== base.owner || tx.numRequiredSignatures !== 1) {
+    fail("The owner must pay for and alone sign this transaction.");
+  }
+  if (tx.recentBlockhash !== base.recentBlockhash) {
+    fail("The wallet changed the blockhash.");
+  }
+  if (tx.instructions.length > MAX_INSTRUCTIONS) {
+    fail("The wallet added too many instructions.");
+  }
+  let ours = 0;
+  for (const ix of tx.instructions) {
+    if (ix.program === want.program) {
+      ours++;
+      if (
+        ix.accounts.length !== want.accounts.length ||
+        ix.accounts.some((a, i) => a !== want.accounts[i]) ||
+        !equal(ix.data, want.data)
+      ) {
+        fail("The wallet changed the token instruction.");
+      }
+    } else if (
+      ix.program !== SOLANA_PROGRAMS.computeBudget &&
+      ix.program !== SOLANA_PROGRAMS.lighthouse
+    ) {
+      fail(`The wallet added an instruction for ${ix.program}.`);
+    }
+  }
+  if (ours !== 1)
+    fail("The transaction must hold exactly one token instruction.");
+  const signature = tx.signatures[0] as Uint8Array;
+  if (!ed25519.verify(signature, tx.message, key(base.owner, "owner"))) {
+    fail(`The transaction is not signed by ${base.owner}.`);
+  }
+  return base64.encode(wire);
 }
 
 // ── Parsing ─────────────────────────────────────────────────────────
@@ -547,6 +797,8 @@ export interface SolanaPaymentRpc {
   getAccountInfo(
     address: string,
   ): Promise<{ owner: string; data: Uint8Array } | null>;
+  /** Broadcast a signed base64 transaction; resolves to its signature. */
+  sendTransaction?(transaction: string): Promise<string>;
 }
 
 /** A `SolanaPaymentRpc` over a JSON-RPC endpoint. */
@@ -609,6 +861,16 @@ export function solanaPaymentRpc(
         throw new WalletError("rpc_error", "Unreadable account info.");
       }
       return { owner: value.owner, data: base64.decode(value.data[0]) };
+    },
+    async sendTransaction(transaction) {
+      const result = await call("sendTransaction", [
+        transaction,
+        { encoding: "base64", preflightCommitment: "confirmed" },
+      ]);
+      if (typeof result !== "string") {
+        throw new WalletError("rpc_error", "No signature in the reply.");
+      }
+      return result;
     },
   };
 }

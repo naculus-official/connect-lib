@@ -228,7 +228,7 @@ export function decryptPrivateKey(
 /**
  * BigInt-aware JSON serialization: converts BigInt to "__bigint__" strings.
  */
-function bigintReplacer(_key: string, value: unknown): unknown {
+export function bigintReplacer(_key: string, value: unknown): unknown {
   if (typeof value === "bigint") {
     return { __bigint__: value.toString() };
   }
@@ -238,7 +238,7 @@ function bigintReplacer(_key: string, value: unknown): unknown {
 /**
  * BigInt-aware JSON deserialization: restores "__bigint__" strings to BigInt.
  */
-function bigintReviver(_key: string, value: unknown): unknown {
+export function bigintReviver(_key: string, value: unknown): unknown {
   if (
     value !== null &&
     typeof value === "object" &&
@@ -247,6 +247,54 @@ function bigintReviver(_key: string, value: unknown): unknown {
     return BigInt((value as Record<string, string>).__bigint__);
   }
   return value;
+}
+
+/**
+ * Serialize `operation` under `processKey` within this runtime (per storage
+ * adapter) and under the Web Lock `webLockName` across browser tabs, where
+ * navigator.locks exists. Shared by the EVM and Solana session-key stores.
+ */
+export async function withAdapterLock<T>(
+  adapter: StorageAdapter,
+  processKey: string,
+  webLockName: string,
+  operation: AsyncOperation<T>,
+): Promise<T> {
+  const runInProcess = async (): Promise<T> => {
+    let locks = processLocks.get(adapter);
+    if (!locks) {
+      locks = new Map();
+      processLocks.set(adapter, locks);
+    }
+
+    const previous = locks.get(processKey) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    locks.set(processKey, gate);
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (locks.get(processKey) === gate) locks.delete(processKey);
+    }
+  };
+
+  const locks = (
+    globalThis as typeof globalThis & {
+      navigator?: {
+        locks?: {
+          request<T>(name: string, callback: () => Promise<T>): Promise<T>;
+        };
+      };
+    }
+  ).navigator?.locks;
+  if (locks) {
+    return locks.request(webLockName, runInProcess);
+  }
+  return runInProcess();
 }
 
 /**
@@ -316,41 +364,7 @@ export class SessionKeyStorage {
     webLockName: string,
     operation: AsyncOperation<T>,
   ): Promise<T> {
-    const runInProcess = async (): Promise<T> => {
-      let locks = processLocks.get(this.adapter);
-      if (!locks) {
-        locks = new Map();
-        processLocks.set(this.adapter, locks);
-      }
-
-      const previous = locks.get(processKey) ?? Promise.resolve();
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      locks.set(processKey, gate);
-      await previous.catch(() => undefined);
-      try {
-        return await operation();
-      } finally {
-        release();
-        if (locks.get(processKey) === gate) locks.delete(processKey);
-      }
-    };
-
-    const locks = (
-      globalThis as typeof globalThis & {
-        navigator?: {
-          locks?: {
-            request<T>(name: string, callback: () => Promise<T>): Promise<T>;
-          };
-        };
-      }
-    ).navigator?.locks;
-    if (locks) {
-      return locks.request(webLockName, runInProcess);
-    }
-    return runInProcess();
+    return withAdapterLock(this.adapter, processKey, webLockName, operation);
   }
 
   /**

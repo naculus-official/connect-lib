@@ -19,8 +19,10 @@ export {
   createSolanaChargeCredential,
   type MppSolanaNetwork,
   type MppSolanaOptions,
+  type MppSolanaSessionKey,
   type MppSolanaSigner,
   readSolanaRequest,
+  sessionKeyMismatch,
   type SolanaChargeRequest,
 } from "./solana-charge";
 export {

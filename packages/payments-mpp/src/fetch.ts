@@ -9,6 +9,9 @@ import {
   createSolanaChargeCredential,
   type MppSolanaNetwork,
   type MppSolanaOptions,
+  type MppSolanaSessionKey,
+  readSolanaRequest,
+  sessionKeyMismatch,
 } from "./solana-charge";
 import {
   MppError,
@@ -140,8 +143,22 @@ export function createMppFetch(options: MppFetchOptions) {
     const { challenges, rejected } = parsePaymentChallenges(
       first.headers.get(WWW_AUTHENTICATE_HEADER),
     );
+    // A session key can pay only its own cluster, mint and sponsored fees.
+    const payable = solana?.sessionKey
+      ? await filterAsync(challenges, async (c) => {
+          if (c.params.method !== "solana") return true;
+          const request = readSolanaRequest(c.request, solana.networks);
+          return (
+            typeof request !== "string" &&
+            (await sessionKeyMismatch(
+              request,
+              solana.sessionKey as MppSolanaSessionKey,
+            )) === null
+          );
+        })
+      : challenges;
     const selected = selectCharge(
-      challenges,
+      payable,
       {
         ...(options.chainIds ? { chainIds: options.chainIds } : {}),
         ...(options.tokenDomains ? { tokenDomains: options.tokenDomains } : {}),
@@ -191,4 +208,12 @@ export function createMppFetch(options: MppFetchOptions) {
     }
     return { response: second, paid: selected, receipt };
   };
+}
+
+async function filterAsync<T>(
+  items: readonly T[],
+  keep: (item: T) => Promise<boolean>,
+): Promise<T[]> {
+  const kept = await Promise.all(items.map(keep));
+  return items.filter((_, i) => kept[i]);
 }

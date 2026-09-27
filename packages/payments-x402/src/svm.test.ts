@@ -1,20 +1,24 @@
 import {
   associatedTokenAddress,
+  MemoryStorageAdapter,
   parseSolanaTransaction,
   SOLANA_MAINNET,
   SOLANA_PROGRAMS,
   type SolanaPaymentRpc,
+  SolanaSessionKeyManager,
 } from "@naculus/connect-core";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { base58, base64 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import {
+  createSvmPaymentPayload,
   createX402Fetch,
   decodeHeader,
   encodeHeader,
   PAYMENT_REQUIRED_HEADER,
   PAYMENT_SIGNATURE_HEADER,
   selectRequirement,
+  sessionKeyMismatch,
   svmUnsupportedReason,
   type X402PaymentPayload,
   type X402PaymentRequirements,
@@ -247,3 +251,109 @@ function indexOf(haystack: Uint8Array, needle: Uint8Array): number {
   }
   return -1;
 }
+
+describe("x402 exact on Solana, paid by a session key", () => {
+  async function sessionKey(over = {}) {
+    const manager = new SolanaSessionKeyManager(
+      { encryptionKey: "k", pbkdf2Iterations: 1_000, unsafeAllowWeakKdf: true },
+      new MemoryStorageAdapter(),
+    );
+    const info = await manager.createSessionKey(
+      {
+        cluster: SOLANA_MAINNET,
+        mint: USDC,
+        budget: 5_000n,
+        maxPerPayment: 2_000n,
+        allowedRecipients: [PAY_TO],
+        expiry: Math.floor(Date.now() / 1000) + 3600,
+        ...over,
+      },
+      PAYER,
+      rpc(),
+    );
+    const { transaction, recentBlockhash } = await manager.prepareApproval(
+      info.id,
+      rpc(),
+    );
+    const tx = parseSolanaTransaction(transaction);
+    const signed = transaction.slice();
+    signed.set(ed25519.sign(tx.message, SEED), 1);
+    await manager.attachApproval(info.id, signed, recentBlockhash);
+    return { manager, info };
+  }
+
+  it("pays without a prompt, with a delegated transfer from the owner's account", async () => {
+    const { manager, info } = await sessionKey();
+    const { fetch, seen } = paywall();
+    const result = await createX402Fetch({
+      solana: { sessionKey: { manager, id: info.id }, rpc: rpc() },
+      fetch,
+    })(URL_);
+    expect(result.response.status).toBe(200);
+    const payload = decodeHeader(
+      seen[1]?.headers.get(PAYMENT_SIGNATURE_HEADER) ?? "",
+    ) as X402PaymentPayload;
+    const tx = parseSolanaTransaction(
+      base64.decode(payload.payload.transaction as string),
+    );
+    expect(tx.accountKeys[0]).toBe(FEE_PAYER);
+    const transfer = tx.instructions[2];
+    expect(transfer?.accounts[0]).toBe(
+      associatedTokenAddress(PAYER, USDC, SOLANA_PROGRAMS.token),
+    );
+    expect(transfer?.accounts[3]).toBe(info.address);
+    expect(new TextDecoder().decode(tx.instructions[3]?.data)).toBe(
+      "pi_3abc123def456",
+    );
+    expect((await manager.listSessions())[0]?.spent).toBe(1000n);
+  });
+
+  it("refuses a mismatched requirement even when called directly", async () => {
+    const { manager, info } = await sessionKey();
+    const key = { manager, id: info.id };
+    for (const req of [
+      requirement({ asset: FEE_PAYER }),
+      requirement({ network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" }),
+    ]) {
+      expect(await sessionKeyMismatch(req, key)).not.toBeNull();
+      await expect(
+        createSvmPaymentPayload(
+          { x402Version: 2, resource: { url: URL_ }, accepts: [req] },
+          req,
+          { sessionKey: key, rpc: rpc() },
+        ),
+      ).rejects.toMatchObject({ code: "no_acceptable_requirement" });
+    }
+    // The owner as the facilitator's fee payer is refused by the key.
+    const ownerPays = requirement({ extra: { feePayer: PAYER } });
+    await expect(
+      createSvmPaymentPayload(
+        { x402Version: 2, resource: { url: URL_ }, accepts: [ownerPays] },
+        ownerPays,
+        { sessionKey: key, rpc: rpc() },
+      ),
+    ).rejects.toMatchObject({ code: "session_scope_exceeded" });
+    expect((await manager.listSessions())[0]?.spent).toBe(0n);
+  });
+
+  it("skips requirements for another mint, and refuses what the key's scope forbids", async () => {
+    const { manager, info } = await sessionKey();
+    const other = requirement({ asset: FEE_PAYER });
+    await expect(
+      createX402Fetch({
+        solana: { sessionKey: { manager, id: info.id }, rpc: rpc() },
+        fetch: paywall([other]).fetch,
+      })(URL_),
+    ).rejects.toMatchObject({ code: "no_acceptable_requirement" });
+    // Over the per-payment limit: the manager refuses, nothing is sent.
+    const big = requirement({ amount: "2001" });
+    const { fetch, seen } = paywall([big]);
+    await expect(
+      createX402Fetch({
+        solana: { sessionKey: { manager, id: info.id }, rpc: rpc() },
+        fetch,
+      })(URL_),
+    ).rejects.toMatchObject({ code: "session_scope_exceeded" });
+    expect(seen).toHaveLength(1);
+  });
+});

@@ -1,6 +1,7 @@
 # Solana session keys (STATE thread 18)
 
-Status: **proposal, awaiting approval** (2026-09-27).
+Status: **approved 2026-09-27** — decisions (a) SPL delegate, sponsored fees only,
+one mint per key, separate `SolanaSessionKeyManager`. Packages 1–2 implemented.
 
 ## Goal
 
@@ -79,11 +80,10 @@ cluster, and the blockhash comes from that RPC, never from the server.
 4. Optional: a devnet end-to-end run (approve, pay a local x402 facilitator,
    revoke) — needs a funded devnet account.
 
-## Decisions needed
+## Decisions (user, 2026-09-27)
 
-1. Spending power: **(a) SPL delegate** or (b) funded key.
-2. Fees: sponsored only (recommended) or also self-funded (the key would
-   need SOL).
-3. Scope: one mint per key (recommended) or several.
-4. Placement: separate `SolanaSessionKeyManager` (recommended) or extend the
-   EVM manager.
+1. Spending power: **(a) SPL delegate**.
+2. Fees: sponsored only.
+3. Scope: one mint per key.
+4. Placement: separate `SolanaSessionKeyManager`; the EVM manager's store
+   only had its lock extracted (`withAdapterLock`), behavior unchanged.

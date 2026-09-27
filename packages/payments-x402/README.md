@@ -54,3 +54,29 @@ requirement's cluster (genesis hash) and the mint must be an SPL Token /
 Token-2022 mint. What the wallet returns is checked before it is sent — same
 transfer, fee payer, blockhash and memo; only Lighthouse assertions may be
 added; the payer's signature must verify.
+
+### Promptless, with a Solana session key
+
+```ts
+import { SolanaSessionKeyManager, solanaPaymentRpc } from "@naculus/connect-core";
+
+const rpc = solanaPaymentRpc(rpcUrl);
+const keys = new SolanaSessionKeyManager({ encryptionKey }, storage);
+const key = await keys.createSessionKey(
+  { cluster, mint, budget, maxPerPayment, allowedRecipients, expiry },
+  owner,
+  rpc,
+);
+// Once: the owner's wallet signs ApproveChecked (delegate = the key).
+const { transaction, recentBlockhash } = await keys.prepareApproval(key.id, rpc);
+const signed = await solanaRoles.signer.signTransaction(transaction);
+await rpc.sendTransaction?.(await keys.attachApproval(key.id, signed, recentBlockhash));
+
+const pay = createX402Fetch({ solana: { sessionKey: { manager: keys, id: key.id }, rpc } });
+```
+
+The key pays only its cluster and mint, only allowed payees, within its
+per-payment limit, budget (also capped on chain by the delegate approval),
+expiry and count, and only when the facilitator pays the fee. Approving
+replaces any delegate the owner's token account already had.
+`keys.prepareRevocation(id, rpc)` builds the owner's `Revoke`.

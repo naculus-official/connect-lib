@@ -71,3 +71,7 @@ comes from your RPC (the server's advisory `recentBlockhash` is ignored), and
 the wallet's result is checked as for x402 — except that wallets adding
 Lighthouse assertions (Phantom, Solflare) are refused, because MPP servers
 reject such transactions.
+
+A Solana session key (`solana: { sessionKey: { manager, id }, rpc }`, see the
+payments-x402 README) pays `solana` charges without a prompt, within its
+scope — and only charges whose fee the server sponsors (`feePayer: true`).

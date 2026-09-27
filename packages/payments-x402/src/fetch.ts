@@ -4,7 +4,12 @@ import {
   selectRequirement,
   type X402TypedDataSigner,
 } from "./evm-exact";
-import { createSvmPaymentPayload, type X402SolanaOptions } from "./svm-exact";
+import {
+  createSvmPaymentPayload,
+  sessionKeyMismatch,
+  type X402SolanaOptions,
+  type X402SolanaSessionKey,
+} from "./svm-exact";
 import {
   encodeHeader,
   PAYMENT_REQUIRED_HEADER,
@@ -111,11 +116,25 @@ export function createX402Fetch(options: X402FetchOptions) {
       );
     }
 
-    const requirement = selectRequirement(required, {
-      ...(options.networks ? { networks: options.networks } : {}),
-      evm: Boolean(signer),
-      solana: Boolean(solana),
-    });
+    // A session key can pay only its own cluster and mint.
+    const accepts = solana?.sessionKey
+      ? await filterAsync(required.accepts, async (r) =>
+          r.network.startsWith("solana:")
+            ? (await sessionKeyMismatch(
+                r,
+                solana.sessionKey as X402SolanaSessionKey,
+              )) === null
+            : true,
+        )
+      : required.accepts;
+    const requirement = selectRequirement(
+      { ...required, accepts },
+      {
+        ...(options.networks ? { networks: options.networks } : {}),
+        evm: Boolean(signer),
+        solana: Boolean(solana),
+      },
+    );
     if (options.approve && !(await options.approve(requirement, required))) {
       throw new X402Error("payment_rejected", "Payment declined by approve().");
     }
@@ -155,4 +174,12 @@ export function createX402Fetch(options: X402FetchOptions) {
     }
     return { response: second, paid: requirement, settlement };
   };
+}
+
+async function filterAsync<T>(
+  items: readonly T[],
+  keep: (item: T) => Promise<boolean>,
+): Promise<T[]> {
+  const kept = await Promise.all(items.map(keep));
+  return items.filter((_, i) => kept[i]);
 }

@@ -1,9 +1,11 @@
 import {
+  MemoryStorageAdapter,
   parseSolanaTransaction,
   SOLANA_DEVNET,
   SOLANA_MAINNET,
   SOLANA_PROGRAMS,
   type SolanaPaymentRpc,
+  SolanaSessionKeyManager,
 } from "@naculus/connect-core";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { base58, base64 } from "@scure/base";
@@ -15,8 +17,10 @@ import {
   type MppCredential,
   type MppSolanaSigner,
   parsePaymentChallenges,
+  createSolanaChargeCredential,
   readSolanaRequest,
   selectCharge,
+  sessionKeyMismatch,
   unsupportedReason,
 } from "./index";
 
@@ -305,5 +309,120 @@ describe("MPP solana charge", () => {
 
   it("needs at least one signer", () => {
     expect(() => createMppFetch({} as never)).toThrow(/needs a signer/);
+  });
+});
+
+describe("MPP solana charge, paid by a session key", () => {
+  async function sessionKey() {
+    const manager = new SolanaSessionKeyManager(
+      { encryptionKey: "k", pbkdf2Iterations: 1_000, unsafeAllowWeakKdf: true },
+      new MemoryStorageAdapter(),
+    );
+    const info = await manager.createSessionKey(
+      {
+        cluster: SOLANA_MAINNET,
+        mint: USDC,
+        budget: 500_000n,
+        maxPerPayment: 300_000n,
+        allowedRecipients: [RECIPIENT],
+        expiry: Math.floor(Date.now() / 1000) + 3600,
+      },
+      PAYER,
+      rpc(),
+    );
+    const { transaction, recentBlockhash } = await manager.prepareApproval(
+      info.id,
+      rpc(),
+    );
+    const tx = parseSolanaTransaction(transaction);
+    const signed = transaction.slice();
+    signed.set(ed25519.sign(tx.message, SEED), 1);
+    await manager.attachApproval(info.id, signed, recentBlockhash);
+    return { manager, info };
+  }
+
+  it("pays a sponsored charge without a prompt", async () => {
+    const { manager, info } = await sessionKey();
+    const { fetch, seen } = server(header());
+    const result = await createMppFetch({
+      solana: { sessionKey: { manager, id: info.id }, rpc: rpc() },
+      fetch,
+    })(URL_);
+    expect(result.response.status).toBe(200);
+    const c = credential(seen[1] as Request);
+    expect(c.source).toBe(`did:pkh:${SOLANA_MAINNET}:${info.address}`);
+    const tx = parseSolanaTransaction(
+      base64.decode(c.payload.transaction as string),
+    );
+    expect(tx.accountKeys[0]).toBe(FEE_PAYER);
+    expect(tx.instructions[2]?.accounts[3]).toBe(info.address);
+    expect(new TextDecoder().decode(tx.instructions[3]?.data)).toBe("order-42");
+    expect((await manager.listSessions())[0]?.spent).toBe(250_000n);
+  });
+
+  it.each([
+    ["another mint", request({}, { currency: FEE_PAYER })],
+    ["other decimals", request({ decimals: 9 })],
+    [
+      "another token program",
+      request({ tokenProgram: SOLANA_PROGRAMS.token2022 }),
+    ],
+    ["another cluster", request({ network: "devnet" })],
+    [
+      "no fee sponsor",
+      request({ feePayer: undefined, feePayerKey: undefined }),
+    ],
+  ])(
+    "reports %s as a mismatch, and refuses it even when called directly",
+    async (_name, req) => {
+      const { manager, info } = await sessionKey();
+      const read = readSolanaRequest(req);
+      if (typeof read === "string") throw new Error(read);
+      const key = { manager, id: info.id };
+      expect(await sessionKeyMismatch(read, key)).not.toBeNull();
+      const { challenges } = parsePaymentChallenges(header(req));
+      await expect(
+        createSolanaChargeCredential(challenges[0]!, read, {
+          sessionKey: key,
+          rpc: rpc(),
+        }),
+      ).rejects.toMatchObject({ code: "no_acceptable_challenge" });
+      expect((await manager.listSessions())[0]?.spent).toBe(0n);
+    },
+  );
+
+  it("refuses the owner as the server's fee payer", async () => {
+    const { manager, info } = await sessionKey();
+    await expect(
+      createMppFetch({
+        solana: { sessionKey: { manager, id: info.id }, rpc: rpc() },
+        fetch: server(header(request({ feePayerKey: PAYER }))).fetch,
+      })(URL_),
+    ).rejects.toThrow();
+    expect((await manager.listSessions())[0]?.spent).toBe(0n);
+  });
+
+  it("spends nothing when approve() declines", async () => {
+    const { manager, info } = await sessionKey();
+    await expect(
+      createMppFetch({
+        solana: { sessionKey: { manager, id: info.id }, rpc: rpc() },
+        fetch: server(header()).fetch,
+        approve: () => false,
+      })(URL_),
+    ).rejects.toMatchObject({ code: "payment_rejected" });
+    expect((await manager.listSessions())[0]?.spent).toBe(0n);
+  });
+
+  it("does not pay a charge whose fee the server does not sponsor", async () => {
+    const { manager, info } = await sessionKey();
+    const req = request({ feePayer: undefined, feePayerKey: undefined });
+    await expect(
+      createMppFetch({
+        solana: { sessionKey: { manager, id: info.id }, rpc: rpc() },
+        fetch: server(header(req)).fetch,
+      })(URL_),
+    ).rejects.toMatchObject({ code: "no_acceptable_challenge" });
+    expect((await manager.listSessions())[0]?.spent).toBe(0n);
   });
 });
