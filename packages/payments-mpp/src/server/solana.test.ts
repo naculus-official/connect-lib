@@ -7,6 +7,7 @@ import {
   type SplTransferPayment,
 } from "@naculus/connect-core";
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { sha512 } from "@noble/hashes/sha2.js";
 import { base58, base64 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import {
@@ -539,6 +540,62 @@ describe("verifyCredential, solana pull mode", () => {
       expires: new Date(Date.now() + 90_000),
     });
     const second = await verifyCredential(crafted(later, wire), options());
+    const { rpc, sent } = settleRpc();
+    const p = await refusal(
+      settleCredential(second, { replay, solana: { rpc, signAsFeePayer } }),
+    );
+    expect(p.code).toBe("invalid-challenge");
+    expect(sent).toEqual([]);
+  });
+
+  /**
+   * A second valid Ed25519 signature by `seed` over `message`: a random nonce
+   * instead of RFC 8032's deterministic one. Verifiers accept either.
+   */
+  function resign(message: Uint8Array, seed: Uint8Array): Uint8Array {
+    const { scalar, pointBytes } = ed25519.utils.getExtendedPublicKey(seed);
+    const order = ed25519.Point.Fn.ORDER;
+    const le = (bytes: Uint8Array) =>
+      bytes.reduceRight((n, b) => (n << 8n) | BigInt(b), 0n);
+    const r = (le(ed25519.utils.randomSecretKey()) % (order - 1n)) + 1n;
+    const R = ed25519.Point.BASE.multiply(r).toBytes();
+    const k = le(sha512(new Uint8Array([...R, ...pointBytes, ...message])));
+    let S = (r + (k % order) * scalar) % order;
+    const out = new Uint8Array(64);
+    out.set(R, 0);
+    for (let i = 32; i < 64; i++) {
+      out[i] = Number(S & 0xffn);
+      S >>= 8n;
+    }
+    return out;
+  }
+
+  it("refuses the same message under another valid payer signature", async () => {
+    // One payment, two byte forms: the payer re-signs the message with a
+    // different nonce. Both signatures verify; only one may settle.
+    const wire = sign(buildSplTransferTransaction(payment()));
+    const tx = parseSolanaTransaction(wire);
+    const payerSlot = tx.accountKeys.indexOf(PAYER);
+    const other = wire.slice();
+    other.set(resign(tx.message, SEED), 1 + 64 * payerSlot);
+    expect(other).not.toEqual(wire);
+    expect(
+      ed25519.verify(
+        other.slice(1 + 64 * payerSlot, 1 + 64 * (payerSlot + 1)),
+        tx.message,
+        base58.decode(PAYER),
+      ),
+    ).toBe(true);
+    const replay = memoryReplayStore();
+    const first = await verifyCredential(crafted(challenge(), wire), options());
+    await settleCredential(first, {
+      replay,
+      solana: { rpc: settleRpc().rpc, signAsFeePayer },
+    });
+    const later = challenge(SPONSORED, {
+      expires: new Date(Date.now() + 90_000),
+    });
+    const second = await verifyCredential(crafted(later, other), options());
     const { rpc, sent } = settleRpc();
     const p = await refusal(
       settleCredential(second, { replay, solana: { rpc, signAsFeePayer } }),

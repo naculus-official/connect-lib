@@ -254,8 +254,12 @@ describe("verifyCredential, evm authorization", () => {
       ["opaque (added)", (c) => Object.assign(c.challenge, { opaque: "e30" })],
       [
         "id",
+        // Always a different last character: the id varies per run, and
+        // one ending in "A" made a fixed "A" a no-op edit (1 run in 64).
         (c) =>
-          Object.assign(c.challenge, { id: `${c.challenge.id.slice(0, -1)}A` }),
+          Object.assign(c.challenge, {
+            id: `${c.challenge.id.slice(0, -1)}${c.challenge.id.endsWith("A") ? "B" : "A"}`,
+          }),
       ],
     ];
     it.each(cases)("%s", async (_name, change) => {

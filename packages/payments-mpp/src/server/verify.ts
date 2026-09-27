@@ -402,7 +402,7 @@ async function settle(
     extra.chainId = verified.request.chainId;
   } else {
     await consume(
-      `mpp:solana:${verified.solana.payerSignature}`,
+      `mpp:solana:${verified.solana.messageHash}`,
       verified.expiresAt + SIGNATURE_RETENTION_MS,
     );
     reference = await settleSolanaTransaction(

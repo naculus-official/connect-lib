@@ -6,6 +6,7 @@ import {
   SOLANA_PROGRAMS,
   solanaTransactionId,
 } from "@naculus/connect-core";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { SolanaChargeRequest } from "../solana-charge";
 import { problem } from "./problems";
@@ -103,8 +104,15 @@ export interface VerifiedSolanaPayment {
   /** The wire transaction as the client signed it. */
   transaction: Uint8Array;
   payer: string;
-  /** Hex of the payer's signature: the replay token known before sending. */
+  /** Hex of the payer's signature. */
   payerSignature: string;
+  /**
+   * Hex SHA-256 of the signed message: the replay token. Not the signature —
+   * the payer can sign one message again with another valid signature (any
+   * Ed25519 nonce verifies), and that is still the same payment. The parser
+   * refuses non-canonical encodings, so one message has one byte form.
+   */
+  messageHash: string;
 }
 
 /** Check a pull-mode payload against its (already bound) challenge. */
@@ -315,6 +323,7 @@ export function verifySolanaTransaction(
     transaction: wire as Uint8Array,
     payer,
     payerSignature: bytesToHex(tx.signatures[payerIndex] as Uint8Array),
+    messageHash: bytesToHex(sha256(tx.message)),
   };
 }
 
