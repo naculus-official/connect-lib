@@ -11,6 +11,7 @@ export * from "./connector";
 export * from "./connector-manager";
 export * from "./constants";
 export * from "./solana-payment";
+export * from "./solana-channel";
 export * from "./aead";
 export * from "./errors";
 export * from "./fee-estimation";
