@@ -75,3 +75,88 @@ reject such transactions.
 A Solana session key (`solana: { sessionKey: { manager, id }, rpc }`, see the
 payments-x402 README) pays `solana` charges without a prompt, within its
 scope — and only charges whose fee the server sponsors (`feePayer: true`).
+
+## Server: `@naculus/payments-mpp/server`
+
+The other side of the same charges: issue challenges, verify credentials,
+settle them and answer with a receipt or an RFC 9457 problem. The server's
+keys are never held here — settlement goes through functions you pass in.
+
+```ts
+import {
+  createChallenge,
+  memoryReplayStore,
+  paymentRequiredResponse,
+  problemResponse,
+  receiptHeaders,
+  settleCredential,
+  verifyCredential,
+} from "@naculus/payments-mpp/server";
+
+const offer = {
+  method: "evm",
+  request: {
+    amount: "10000",
+    currency: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    recipient: payee,
+    methodDetails: { chainId: 8453, credentialTypes: ["authorization"] },
+  },
+};
+const replay = memoryReplayStore(); // one process only; share it otherwise
+const fresh = () => [
+  createChallenge({
+    realm: "api.example.com",
+    intent: "charge",
+    ...offer,
+    expires: new Date(Date.now() + 5 * 60_000),
+    secret,
+  }),
+];
+
+async function handle(req: Request): Promise<Response> {
+  const credential = req.headers.get("Authorization");
+  if (!credential) return paymentRequiredResponse(fresh());
+  try {
+    const verified = await verifyCredential(credential, {
+      secret,
+      realm: "api.example.com",
+      accept: [offer], // what this resource charges
+      evm: { rpc }, // authorizationState + balanceOf
+      replay,
+    });
+    const { header } = await settleCredential(verified, {
+      replay,
+      evm: { submit }, // sends transferWithAuthorization, awaits the receipt
+    });
+    return new Response(body, { headers: receiptHeaders(header) });
+  } catch (error) {
+    return problemResponse(error, fresh());
+  }
+}
+```
+
+- **Challenge ids** are HMAC-SHA256 over the bound parameters exactly as
+  `draft-httpauth-payment-01` specifies (the spec's test vectors are
+  reproduced in the tests); any edited parameter fails verification.
+  `previousSecrets` keeps rotated secrets valid until their challenges
+  expire.
+- **`accept`** is required: a genuine challenge for a cheaper resource of the
+  same server is refused.
+- **EVM** (`type="authorization"`): `to`/`value` match the request, `nonce`
+  is `keccak256(id ‖ realm)`, the validity window sits inside the challenge,
+  the EIP-712 signature recovers to `from` (EOA signatures only), the token
+  is in `USDC_DOMAINS` or `evm.tokenDomains`, and `rpc` reports the nonce
+  unused and the balance sufficient.
+- **Solana** (`type="transaction"`, pull mode, SPL; the request must name
+  `tokenProgram`): the fee payer is the server's `feePayerKey` (slot empty)
+  or the payer (fully signed); only ComputeBudget limit/price, one
+  `TransferChecked` of exactly `amount`/`decimals` into the recipient's
+  associated token account, and at most one memo (equal to `externalId` when
+  there is one); a sponsored transaction never names the fee payer in an
+  instruction and pays at most `solana.maxPriorityFeeLamports` (default
+  10 000) in priority fees; the payer's signature verifies. Settlement calls
+  `signAsFeePayer` (sponsored only), checks that only the fee payer's slot
+  changed, simulates, sends and waits for confirmation through your `rpc`.
+- **Replay**: settlement consumes the challenge id, and the EIP-3009 nonce or
+  the Solana payer signature, before anything is sent. A shared store needs
+  an atomic `consume`.

@@ -722,6 +722,13 @@ export function verifySolanaSignature(
   }
 }
 
+/** A transaction's id: its first (fee payer) signature, base58. */
+export function solanaTransactionId(tx: ParsedSolanaTransaction): string {
+  const first = tx.signatures[0];
+  if (!first) fail("Transaction has no signatures.");
+  return base58.encode(first);
+}
+
 /** The base fields of an SPL Token or Token-2022 account. */
 export interface SplTokenAccount {
   mint: string;

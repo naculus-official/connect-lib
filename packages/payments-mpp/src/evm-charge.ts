@@ -167,7 +167,8 @@ export interface SelectedSolanaCharge {
 /** A challenge this client can pay. */
 export type SelectedCharge = SelectedEvmCharge | SelectedSolanaCharge;
 
-function readRequest(
+/** The request of an EVM charge, or why it cannot be paid with an authorization. */
+export function readEvmRequest(
   request: Record<string, unknown>,
 ): EvmChargeRequest | string {
   const { amount, currency, recipient, methodDetails, externalId } = request;
@@ -253,7 +254,7 @@ export function unsupportedReason(
     return typeof request === "string" ? request : null;
   }
   if (options.evm === false) return "no EVM signer is configured";
-  const request = readRequest(challenge.request);
+  const request = readEvmRequest(challenge.request);
   if (typeof request === "string") return request;
   if (options.chainIds && !options.chainIds.includes(request.chainId)) {
     return `chain ${request.chainId} is not in the allowed list`;
@@ -287,7 +288,7 @@ export function selectCharge(
         ) as SolanaChargeRequest,
       };
     }
-    const request = readRequest(challenge.request) as EvmChargeRequest;
+    const request = readEvmRequest(challenge.request) as EvmChargeRequest;
     return {
       method: "evm",
       challenge,
