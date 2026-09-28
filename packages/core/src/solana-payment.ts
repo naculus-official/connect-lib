@@ -704,22 +704,19 @@ export function parseSolanaTransaction(
 }
 
 /**
- * Whether `signer` is a required signer of `tx` and its slot holds a valid
- * ed25519 signature over the message. False for anything else, including an
- * empty slot or an address that is not base58.
+ * Whether `address` is a required signer of `tx` and its signature slot holds
+ * a valid ed25519 signature over the message. False for anything else,
+ * including an address that is not a base58 public key.
  */
-export function hasValidSolanaSignature(
+export function verifySolanaSignature(
   tx: ParsedSolanaTransaction,
-  signer: string,
+  address: string,
 ): boolean {
-  const i = tx.accountKeys.indexOf(signer);
-  if (i < 0 || i >= tx.numRequiredSignatures) return false;
+  const i = tx.accountKeys.indexOf(address);
+  const signature = tx.signatures[i];
+  if (i < 0 || i >= tx.numRequiredSignatures || !signature) return false;
   try {
-    return ed25519.verify(
-      tx.signatures[i] as Uint8Array,
-      tx.message,
-      key(signer, "signer"),
-    );
+    return ed25519.verify(signature, tx.message, key(address, "signer"));
   } catch {
     return false;
   }
@@ -730,6 +727,48 @@ export function solanaTransactionId(tx: ParsedSolanaTransaction): string {
   const first = tx.signatures[0];
   if (!first) fail("Transaction has no signatures.");
   return base58.encode(first);
+}
+
+/** The base fields of an SPL Token or Token-2022 account. */
+export interface SplTokenAccount {
+  mint: string;
+  /** The wallet that owns the tokens (not the token program). */
+  owner: string;
+  amount: bigint;
+  /** 1 initialized, 2 frozen. */
+  state: number;
+}
+
+/**
+ * Read a token account from its account's owner program and data. Refuses
+ * anything that is not an initialized or frozen account of SPL Token or
+ * Token-2022 (layout: mint 32, owner 32, amount 8, delegate 36, state 1).
+ */
+export function readTokenAccount(
+  programOwner: string,
+  data: Uint8Array,
+): SplTokenAccount {
+  if (
+    programOwner !== SOLANA_PROGRAMS.token &&
+    programOwner !== SOLANA_PROGRAMS.token2022
+  ) {
+    fail(`The token account is owned by ${programOwner}, not a token program.`);
+  }
+  const state = data[108];
+  if (data.length < 165 || (state !== 1 && state !== 2)) {
+    fail("The account is not an initialized token account.");
+  }
+  // Token-2022 puts the account type (2 = account) after the base layout.
+  if (programOwner === SOLANA_PROGRAMS.token2022 && data.length > 165) {
+    if (data[165] !== 2) fail("The account is not a token account.");
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return {
+    mint: base58.encode(data.slice(0, 32)),
+    owner: base58.encode(data.slice(32, 64)),
+    amount: view.getBigUint64(64, true),
+    state: state as number,
+  };
 }
 
 function isWritable(tx: ParsedSolanaTransaction, address: string): boolean {
@@ -865,6 +904,11 @@ export interface SolanaPaymentRpc {
   ): Promise<{ owner: string; data: Uint8Array } | null>;
   /** Broadcast a signed base64 transaction; resolves to its signature. */
   sendTransaction?(transaction: string): Promise<string>;
+  /**
+   * Simulate a signed base64 transaction with signature verification and
+   * its own blockhash; resolves to the simulation's error, or null.
+   */
+  simulateTransaction?(transaction: string): Promise<{ err: unknown }>;
 }
 
 /** A `SolanaPaymentRpc` over a JSON-RPC endpoint. */
@@ -937,6 +981,25 @@ export function solanaPaymentRpc(
         throw new WalletError("rpc_error", "No signature in the reply.");
       }
       return result;
+    },
+    async simulateTransaction(transaction) {
+      const result = (await call("simulateTransaction", [
+        transaction,
+        {
+          encoding: "base64",
+          sigVerify: true,
+          replaceRecentBlockhash: false,
+          commitment: "confirmed",
+        },
+      ])) as { value?: { err?: unknown } | null };
+      const value = result?.value;
+      if (!value || !("err" in value)) {
+        throw new WalletError(
+          "rpc_error",
+          "No simulation result in the reply.",
+        );
+      }
+      return { err: value.err ?? null };
     },
   };
 }

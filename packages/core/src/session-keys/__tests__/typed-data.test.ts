@@ -417,46 +417,40 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
 });
 
 describe("recoverTypedDataSigner", () => {
-  const priv = new Uint8Array(32).fill(3);
-  const address = sessionKeyAddress(
-    `0x${bytesToHex(secp256k1.getPublicKey(priv, true))}`,
+  const key = new Uint8Array(32).fill(4);
+  const from = sessionKeyAddress(
+    `0x${bytesToHex(secp256k1.getPublicKey(key, true))}`,
   );
-  function signed(req: SessionKeyTypedDataRequest): `0x${string}` {
-    const digest = hexToBytes(typedDataDigest(req).slice(2));
-    const sig = secp256k1.sign(digest, priv, {
+  function signed(): { req: SessionKeyTypedDataRequest; sig: string } {
+    const req = request(from);
+    const raw = secp256k1.sign(hexToBytes(typedDataDigest(req).slice(2)), key, {
       prehash: false,
       format: "recovered",
     });
-    // noble: recovery ‖ r ‖ s; EVM: r ‖ s ‖ v
-    return `0x${bytesToHex(sig.slice(1))}${(27 + (sig[0] as number)).toString(16)}`;
+    const v = ((raw[0] as number) + 27).toString(16);
+    return { req, sig: `0x${bytesToHex(raw.subarray(1))}${v}` };
   }
 
   it("recovers the signer of a TransferWithAuthorization", () => {
-    const req = request(address);
-    expect(recoverTypedDataSigner(req, signed(req))).toBe(address);
+    const { req, sig } = signed();
+    expect(recoverTypedDataSigner(req, sig)).toBe(from);
+    expect(recoverTypedDataSigner(request(from, { value: "2" }), sig)).not.toBe(
+      from,
+    );
   });
 
-  it("recovers someone else for an edited message", () => {
-    const req = request(address);
-    const sig = signed(req);
-    const edited = request(address, { value: "1500001" });
-    expect(recoverTypedDataSigner(edited, sig)).not.toBe(address);
-  });
-
-  it("refuses high-s, v outside 27/28 and malformed signatures", () => {
-    const req = request(address);
-    const sig = signed(req);
-    const bytes = hexToBytes(sig.slice(2));
+  it("refuses what FiatToken would refuse", () => {
+    const { req, sig } = signed();
+    const r = sig.slice(2, 66);
+    const s = BigInt(`0x${sig.slice(66, 130)}`);
+    const v = sig.slice(130);
     const n = secp256k1.Point.CURVE().n;
-    const s = BigInt(`0x${bytesToHex(bytes.slice(32, 64))}`);
-    const high = hexToBytes((n - s).toString(16).padStart(64, "0"));
-    const flipped = bytes.slice();
-    flipped.set(high, 32);
-    flipped[64] = (bytes[64] as number) === 27 ? 28 : 27;
-    expect(recoverTypedDataSigner(req, `0x${bytesToHex(flipped)}`)).toBeNull();
-    const v0 = bytes.slice();
-    v0[64] = (bytes[64] as number) - 27;
-    expect(recoverTypedDataSigner(req, `0x${bytesToHex(v0)}`)).toBeNull();
+    const highS = (n - s).toString(16).padStart(64, "0");
+    const flipped = v === "1b" ? "1c" : "1b";
+    expect(recoverTypedDataSigner(req, `0x${r}${highS}${flipped}`)).toBeNull();
+    expect(
+      recoverTypedDataSigner(req, `0x${r}${sig.slice(66, 130)}00`),
+    ).toBeNull();
     expect(recoverTypedDataSigner(req, sig.slice(0, 130))).toBeNull();
     expect(
       recoverTypedDataSigner({ ...req, primaryType: "Permit" } as never, sig),

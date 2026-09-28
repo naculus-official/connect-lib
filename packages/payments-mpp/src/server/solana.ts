@@ -1,6 +1,6 @@
 import {
   associatedTokenAddress,
-  hasValidSolanaSignature,
+  verifySolanaSignature,
   type ParsedSolanaTransaction,
   parseSolanaTransaction,
   SOLANA_PROGRAMS,
@@ -309,7 +309,7 @@ export function verifySolanaTransaction(
       );
     }
   }
-  if (!hasValidSolanaSignature(tx, payer)) {
+  if (!verifySolanaSignature(tx, payer)) {
     problem("verification-failed", "The payer's signature does not verify.");
   }
   if (
@@ -364,7 +364,7 @@ export async function settleSolanaTransaction(
       (after.signatures[1] as Uint8Array).some(
         (b, i) => b !== (before.signatures[1] as Uint8Array)[i],
       ) ||
-      !hasValidSolanaSignature(after, request.feePayerKey)
+      !verifySolanaSignature(after, request.feePayerKey)
     ) {
       throw new TypeError(
         "signAsFeePayer changed the transaction or did not sign it as the fee payer.",

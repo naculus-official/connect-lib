@@ -376,7 +376,18 @@
     "Sdbz",
     "sodk",
     "testnonce",
-    "XABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "XABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "bech",
+    "llms",
+    "lnbtc",
+    "lnurl",
+    "millisatoshis",
+    "modelcontextprotocol",
+    "msat",
+    "nostr",
+    "paymentauth",
+    "streamable",
+    "webln"
   ],
   "flagWords": [],
   "ignorePaths": [

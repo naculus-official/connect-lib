@@ -6,14 +6,15 @@ import {
   assertSolanaCluster,
   associatedTokenAddress,
   buildSplTransferTransaction,
-  hasValidSolanaSignature,
   parseSolanaTransaction,
   readMint,
+  readTokenAccount,
   SOLANA_PROGRAMS,
   type SplTransferPayment,
   solanaPaymentRpc,
   solanaTransactionId,
   verifySignedSplTransfer,
+  verifySolanaSignature,
 } from "./solana-payment";
 
 /**
@@ -368,20 +369,20 @@ describe("solanaPaymentRpc", () => {
   });
 });
 
-describe("hasValidSolanaSignature / solanaTransactionId", () => {
+describe("verifySolanaSignature / solanaTransactionId", () => {
   it("checks each signer's slot over the message", () => {
     const unsigned = buildSplTransferTransaction(payment());
     const byPayer = parseSolanaTransaction(sign(unsigned));
-    expect(hasValidSolanaSignature(byPayer, PAYER)).toBe(true);
+    expect(verifySolanaSignature(byPayer, PAYER)).toBe(true);
     // The facilitator's slot is still empty.
-    expect(hasValidSolanaSignature(byPayer, FACILITATOR)).toBe(false);
+    expect(verifySolanaSignature(byPayer, FACILITATOR)).toBe(false);
     // Not a signer at all.
-    expect(hasValidSolanaSignature(byPayer, PAY_TO)).toBe(false);
-    expect(hasValidSolanaSignature(byPayer, "not base58!")).toBe(false);
+    expect(verifySolanaSignature(byPayer, PAY_TO)).toBe(false);
+    expect(verifySolanaSignature(byPayer, "not base58!")).toBe(false);
     const both = parseSolanaTransaction(
       sign(sign(unsigned), new Uint8Array(32).fill(9), FACILITATOR),
     );
-    expect(hasValidSolanaSignature(both, FACILITATOR)).toBe(true);
+    expect(verifySolanaSignature(both, FACILITATOR)).toBe(true);
     expect(solanaTransactionId(both)).toBe(
       base58.encode(both.signatures[0] as Uint8Array),
     );
@@ -395,6 +396,96 @@ describe("hasValidSolanaSignature / solanaTransactionId", () => {
       buildSplTransferTransaction(payment({ amount: 1001n })),
     );
     b.signatures[1] = a.signatures[1] as Uint8Array;
-    expect(hasValidSolanaSignature(b, PAYER)).toBe(false);
+    expect(verifySolanaSignature(b, PAYER)).toBe(false);
+  });
+});
+
+describe("verifySolanaSignature", () => {
+  it("accepts the signer's valid signature and nothing else", () => {
+    const wire = sign(buildSplTransferTransaction(payment()));
+    const tx = parseSolanaTransaction(wire);
+    expect(verifySolanaSignature(tx, PAYER)).toBe(true);
+    // The fee payer's slot is still empty.
+    expect(verifySolanaSignature(tx, FACILITATOR)).toBe(false);
+    // Not a signer at all.
+    expect(verifySolanaSignature(tx, USDC)).toBe(false);
+    const tampered = wire.slice();
+    tampered[1 + 64 + 3] = (tampered[1 + 64 + 3] as number) ^ 1;
+    expect(verifySolanaSignature(parseSolanaTransaction(tampered), PAYER)).toBe(
+      false,
+    );
+  });
+});
+
+describe("readTokenAccount", () => {
+  function account(state = 1, length = 165): Uint8Array {
+    const data = new Uint8Array(length);
+    data.set(base58.decode(USDC), 0);
+    data.set(base58.decode(PAYER), 32);
+    new DataView(data.buffer).setBigUint64(64, 1234n, true);
+    data[108] = state;
+    return data;
+  }
+
+  it("reads mint, owner, amount and state", () => {
+    expect(readTokenAccount(SOLANA_PROGRAMS.token, account())).toEqual({
+      mint: USDC,
+      owner: PAYER,
+      amount: 1234n,
+      state: 1,
+    });
+    const extended = account(2, 170);
+    extended[165] = 2;
+    expect(readTokenAccount(SOLANA_PROGRAMS.token2022, extended).state).toBe(2);
+  });
+
+  it("refuses what is not a token account", () => {
+    expect(() => readTokenAccount(PAY_TO, account())).toThrow(/not a token/);
+    expect(() => readTokenAccount(SOLANA_PROGRAMS.token, account(0))).toThrow(
+      /not an initialized/,
+    );
+    expect(() =>
+      readTokenAccount(SOLANA_PROGRAMS.token, new Uint8Array(82)),
+    ).toThrow(/not an initialized/);
+    const mint = account(1, 170);
+    mint[165] = 1;
+    expect(() => readTokenAccount(SOLANA_PROGRAMS.token2022, mint)).toThrow(
+      /not a token account/,
+    );
+  });
+});
+
+describe("solanaPaymentRpc simulateTransaction", () => {
+  it("simulates with signature checks and reports the error", async () => {
+    const params: unknown[] = [];
+    let err: unknown = null;
+    const rpc = solanaPaymentRpc("https://rpc.invalid", (async (
+      _url: string,
+      init: RequestInit,
+    ) => {
+      const body = JSON.parse(init.body as string);
+      params.push(body.params);
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: { context: { slot: 1 }, value: { err, logs: [] } },
+        }),
+      );
+    }) as typeof fetch);
+    await expect(rpc.simulateTransaction?.("AAE=")).resolves.toEqual({
+      err: null,
+    });
+    err = { InstructionError: [2, { Custom: 1 }] };
+    await expect(rpc.simulateTransaction?.("AAE=")).resolves.toEqual({ err });
+    expect(params[0]).toEqual([
+      "AAE=",
+      {
+        encoding: "base64",
+        sigVerify: true,
+        replaceRecentBlockhash: false,
+        commitment: "confirmed",
+      },
+    ]);
   });
 });
