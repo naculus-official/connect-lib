@@ -253,7 +253,9 @@ export interface PocketConfig {
    * Memory isolation mode for sensitive data.
    * - undefined: default (EVMSigner, plaintext in memory)
    * - "worker": run signing in a Web Worker (IsolatedSigner)
-   * - "secure": encrypt in-memory secrets, zero-fill after use
+   * - "secure": **@deprecated** — never implemented; it used to fall back to
+   *   the default signer silently. The constructor now throws for it; use
+   *   "worker".
    */
   isolation?: "worker" | "secure";
 }
@@ -561,6 +563,14 @@ export class PocketWallet {
     // PocketWallet signs EVM transactions; reject malformed/non-EVM CAIP-2
     // values instead of silently parsing a prefix or a partial number.
     sim.parseChainIdNumber(configuredChainId);
+    // "secure" was documented but never implemented: accepting it would
+    // promise protection the wallet does not give.
+    if (config.isolation === "secure") {
+      throw new WalletError(
+        "invalid_input",
+        'isolation: "secure" is not implemented; use isolation: "worker" to keep keys out of the page.',
+      );
+    }
     this.cfg = {
       ...DEFAULTS,
       ...config,

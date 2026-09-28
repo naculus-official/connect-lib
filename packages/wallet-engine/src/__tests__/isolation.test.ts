@@ -70,6 +70,17 @@ describe("PocketWallet with isolation: worker", () => {
     expect(wallet["_signer"]).toBeInstanceOf(IsolatedSigner);
   });
 
+  it('refuses isolation: "secure", which was never implemented', () => {
+    expect(
+      () =>
+        new PocketWallet({
+          storage: new MockStorage(),
+          isolation: "secure",
+          autoSave: false,
+        }),
+    ).toThrow(/not implemented.*"worker"/);
+  });
+
   it("creates EVMSigner when isolation not specified", () => {
     const wallet = new PocketWallet({
       storage: new MockStorage(),
