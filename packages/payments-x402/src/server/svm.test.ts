@@ -128,6 +128,7 @@ function deps(over: Partial<X402ServerDeps> = {}): X402ServerDeps {
   return {
     rpc: { solana: cluster().rpc },
     signAsFeePayer,
+    confirmSolana: async () => true,
     store: memorySettlementStore(),
     ...over,
   };
@@ -788,6 +789,49 @@ describe("settlePayment, SVM security regressions", () => {
       errorReason: "duplicate_settlement",
     });
     expect(chain.sent).toHaveLength(1);
+  });
+
+  it("reports success only once the send is confirmed, and keeps the claim otherwise", async () => {
+    const chain = cluster();
+    const store = memorySettlementStore();
+    const asked: string[][] = [];
+    const d = deps({
+      rpc: { solana: chain.rpc },
+      store,
+      confirmSolana: async (signature, network) => {
+        asked.push([signature, network]);
+        return false;
+      },
+    });
+    const verified = await verifyPayment(pay(), [requirement()], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect((await settlePayment(verified, d)).settlement).toMatchObject({
+      success: false,
+      errorReason: "invalid_transaction_state",
+      transaction: "",
+    });
+    expect(chain.sent).toHaveLength(1);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.[1]).toBe(SOLANA_MAINNET);
+
+    // It was broadcast and may still land: the same payload stays refused.
+    const confirming = deps({ rpc: { solana: chain.rpc }, store });
+    expect(
+      (await settlePayment(verified, confirming)).settlement,
+    ).toMatchObject({ success: false, errorReason: "duplicate_settlement" });
+    expect(chain.sent).toHaveLength(1);
+  });
+
+  it("sends nothing without a way to confirm", async () => {
+    const chain = cluster();
+    const d = deps({ rpc: { solana: chain.rpc }, confirmSolana: undefined });
+    const verified = await verifyPayment(pay(), [requirement()], d);
+    if (!verified.ok) throw new Error(verified.detail);
+    expect((await settlePayment(verified, d)).settlement).toMatchObject({
+      success: false,
+      errorReason: "unexpected_settle_error",
+    });
+    expect(chain.sent).toHaveLength(0);
   });
 
   it("releases the claim when the simulation or the fee payer's signer fails", async () => {

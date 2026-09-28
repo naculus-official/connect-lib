@@ -131,8 +131,13 @@ async function settleSvm(
   attempt: Attempt,
 ): Promise<string> {
   const rpc = deps.rpc.solana;
-  const signAsFeePayer = deps.signAsFeePayer;
-  if (!signAsFeePayer || !rpc?.simulateTransaction || !rpc.sendTransaction) {
+  const { signAsFeePayer, confirmSolana } = deps;
+  if (
+    !signAsFeePayer ||
+    !confirmSolana ||
+    !rpc?.simulateTransaction ||
+    !rpc.sendTransaction
+  ) {
     refuse("unexpected_settle_error");
   }
   const { network } = details;
@@ -167,6 +172,11 @@ async function settleSvm(
   claimed.broadcast = true;
   const signature = await rpc.sendTransaction(wire);
   if (signature !== expected) refuse("unexpected_settle_error");
+  // Accepted by the node is not paid. A failed or unknown confirmation keeps
+  // the claim: the message may still land until its blockhash expires.
+  if ((await confirmSolana(signature, network)) !== true) {
+    refuse("invalid_transaction_state");
+  }
   return signature;
 }
 
@@ -189,7 +199,8 @@ async function quietly(action: () => void | Promise<void>): Promise<void> {
  * signs and sends it with the facilitator's key. Solana: `deps.signAsFeePayer`
  * adds the fee payer's signature, then the transaction is simulated and sent
  * through `deps.rpc.solana`, which must still serve the verified cluster and
- * must answer with the transaction's own signature.
+ * must answer with the transaction's own signature; success waits for
+ * `deps.confirmSolana`.
  *
  * Either way the payload is first claimed in the duplicate-settlement store,
  * and a second claim is refused. A failure before anything could be

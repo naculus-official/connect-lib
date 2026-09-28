@@ -85,7 +85,9 @@ replaces any delegate the owner's token account already had.
 
 Challenge, verify and settle x402 payments in a resource server or a
 facilitator. No private key is held here: EVM settlement goes to your
-`submit`, Solana fee-payer signing to your `signAsFeePayer`.
+`submit`, Solana fee-payer signing to your `signAsFeePayer`. Settlement
+reports success only after the transfer succeeded on chain: `submit` must
+resolve only then, and on Solana `confirmSolana` is asked after the send.
 
 ```ts
 import { requirePayment, settlePayment } from "@naculus/payments-x402/server";
@@ -94,6 +96,8 @@ const deps = {
   rpc: { evm: { call: ethCall }, solana: solanaPaymentRpc(rpcUrl) },
   submit: async ({ chainId, to, data }) => sendAndWait(chainId, to, data),
   signAsFeePayer: async (wire) => facilitatorKey.sign(wire),
+  // Solana: success only once the transaction is confirmed and succeeded.
+  confirmSolana: async (signature) => waitForConfirmed(signature),
 };
 
 export async function handler(request: Request): Promise<Response> {

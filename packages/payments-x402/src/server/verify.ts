@@ -59,6 +59,13 @@ export interface X402ServerDeps {
     transaction: Uint8Array,
     network: string,
   ) => Promise<Uint8Array>;
+  /**
+   * Wait for a sent Solana settlement to reach at least `confirmed`
+   * commitment on `network`. Resolve true only when it did and executed
+   * without error. Required to settle on Solana: `sendTransaction` answers
+   * once the node accepts the transaction, which is not payment.
+   */
+  confirmSolana?: (signature: string, network: string) => Promise<boolean>;
   /** Duplicate-settlement cache; defaults to one in-memory store per process. */
   store?: X402SettlementStore;
   /** Unix seconds; defaults to the system clock. */
@@ -259,8 +266,9 @@ export async function verifyPayment(
  * - `release` drops the reservation, so the payload can be settled again.
  *   `settlePayment` calls it only when nothing can have been broadcast.
  *   It must remove the key only while `reservation` still holds it.
- * - `commit` records a settlement that was broadcast and confirmed: the key
- *   stays for `ttlSeconds` from now and no `release` removes it.
+ * - `commit` records a settlement that succeeded on chain (`submit`
+ *   resolved, or `confirmSolana` answered true): the key stays for
+ *   `ttlSeconds` from now and no `release` removes it.
  *
  * When the outcome of a broadcast is unknown, `settlePayment` calls neither,
  * and the claim holds until its TTL.

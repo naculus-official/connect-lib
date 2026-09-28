@@ -251,7 +251,9 @@ dependency). Specs read at coinbase/x402
   come back unchanged and both signatures verify), then simulate and send
   through `deps.rpc.solana`. The RPC's cluster is re-checked against the
   verified network before signing, simulating and sending, and the send must
-  answer with base58 of the transaction's first signature. Settlement reads
+  answer with base58 of the transaction's first signature. Success then
+  waits for the required `deps.confirmSolana(signature, network)` (at least
+  `confirmed`, executed without error): accepted by the node is not paid. Settlement reads
   the network and payer from the verified details, never from the public
   result, whose requirement is a frozen snapshot. Both claim the payload in
   an injectable `X402SettlementStore` first (default: one in-memory store
