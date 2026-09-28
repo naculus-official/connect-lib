@@ -36,6 +36,9 @@
       ],
       "@naculus/payments-mpp": ["./packages/payments-mpp/src"],
       "@naculus/payments-x402": ["./packages/payments-x402/src"],
+      "@naculus/payments-x402/server": [
+        "./packages/payments-x402/src/server"
+      ],
       "@naculus/wallet-engine": ["./packages/wallet-engine/src"],
       "@naculus/test-utils": ["./test-utils"],
       "@naculus/test-utils/*": ["./test-utils/*"]

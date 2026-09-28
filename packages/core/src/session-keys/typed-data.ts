@@ -192,6 +192,38 @@ export function typedDataDigest(
 }
 
 /**
+ * The address that signed `req`, or null when `signature` is not a valid
+ * signature over its digest.
+ *
+ * Only what an EIP-3009 token accepts on chain is accepted here: 65 bytes
+ * `r ‖ s ‖ v` with v 27 or 28 and a low s (FiatToken's ECRecover rejects the
+ * rest), so a signature that recovers here is one `transferWithAuthorization`
+ * would take. Contract signers (EIP-1271) are not recovered.
+ */
+export function recoverTypedDataSigner(
+  req: SessionKeyTypedDataRequest,
+  signature: string,
+): `0x${string}` | null {
+  const snapshot = snapshotTypedDataRequest(req);
+  if (validateTypedDataRequest(snapshot) !== null) return null;
+  if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature))
+    return null;
+  const sig = hexToBytes(signature.slice(2));
+  const v = sig[64] as number;
+  if (v !== 27 && v !== 28) return null;
+  try {
+    const parsed = secp256k1.Signature.fromBytes(sig.slice(0, 64), "compact");
+    if (parsed.hasHighS()) return null;
+    const point = parsed
+      .addRecoveryBit(v - 27)
+      .recoverPublicKey(hexToBytes(typedDataDigest(snapshot).slice(2)));
+    return sessionKeyAddress(`0x${point.toHex(true)}`);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The transaction the typed data is equivalent to, for the existing scope
  * check: a `transfer(to, value)` on the token at `verifyingContract` on
  * `chainId`. Contract allowlist, forbidden selectors, token allowances,

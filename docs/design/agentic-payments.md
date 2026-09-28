@@ -213,3 +213,61 @@ the payer is refused (x402 forbids it; for MPP it contradicts `feePayer`).
 Refused for now: native SOL, splits, push mode, confidential transfers,
 `localnet`, Token-2022 transfer-fee / hook extensions beyond a plain
 `TransferChecked`.
+
+## Step 6: x402 server (2026-09-27)
+
+The resource-server / facilitator side, as the subpath export
+`@naculus/payments-x402/server` (a second tsup entry, no new package or
+dependency). Specs read at coinbase/x402
+`dd927a26cfefc98c24b3ec38b3a8f204dad0c60d`: `x402-specification-v2.md`,
+`transports-v2/http.md`, `schemes/exact/scheme_exact_evm.md`,
+`scheme_exact_svm.md`.
+
+- `buildPaymentRequired(resource, accepts)` encodes the `PAYMENT-REQUIRED`
+  header with the wire encoders the client already uses, and throws for any
+  requirement the verifier below would not accept (so a server never
+  advertises a payment it then refuses).
+- `verifyPayment(header, offered, deps)` → `{ ok: true, requirement, payer,
+  payload }` or `{ ok: false, reason, detail }`, `reason` an x402 error code.
+  `accepted` must deep-equal one offered requirement; unknown top-level or
+  payload fields are refused. EVM (EIP-3009 only): `to == payTo`,
+  `value == amount`, `validAfter <= now < validBefore`,
+  `validBefore - now <= maxTimeoutSeconds`, the EIP-712 signer over the
+  token's domain recovers to `from` (low-s, v 27/28, as FiatToken requires;
+  no EIP-1271), then `deps.rpc.evm` reads `authorizationState(from, nonce)`
+  (must be unused) and `balanceOf(from)` and simulates the settlement call.
+  SVM: every "Facilitator Verification Rules (MUST)" item, plus stricter
+  choices: exactly two signers, a single-signer `TransferChecked`, exactly
+  one memo with no accounts (clients MUST send one), the fee payer's ATA
+  and fee-payer-owned token accounts refused as source, and the mint read
+  through `readMint` (Token-2022 transfer fee / hook / pause refused). The
+  RPC must serve the requirement's cluster; source and destination must
+  exist (the allowed layout has no Create ATA).
+- `settlePayment(verified, deps)` accepts only results `verifyPayment`
+  produced (a `WeakMap` brand), never throws, and returns the settlement and
+  its `PAYMENT-RESPONSE` header. EVM: `transferWithAuthorization` calldata to
+  `deps.submit`, which holds the facilitator key and resolves once mined.
+  SVM: `deps.signAsFeePayer` adds the fee payer's signature (the message must
+  come back unchanged and both signatures verify), then simulate and send
+  through `deps.rpc.solana`. The RPC's cluster is re-checked against the
+  verified network before signing, simulating and sending, and the send must
+  answer with base58 of the transaction's first signature. Settlement reads
+  the network and payer from the verified details, never from the public
+  result, whose requirement is a frozen snapshot. Both claim the payload in
+  an injectable `X402SettlementStore` first (default: one in-memory store
+  per process, 120 s, per the spec's duplicate-settlement mitigation; EVM
+  keys live until `validBefore` if that is later). Solana keys are the
+  SHA-256 of the canonical message bytes, never a signature or the wire,
+  so the payer re-signing the same message is still a duplicate. The
+  claim is released only when nothing can have been broadcast, committed
+  on success, and kept until its TTL when a broadcast's outcome is
+  unknown.
+- `requirePayment(request, { accepts, deps })` gates a Fetch API `Request`:
+  402 with a challenge (400 when the header is not base64 JSON), or
+  `{ verified: true, payment }`. Verified is not paid: only a successful
+  `settlePayment` is.
+
+Core gained `recoverTypedDataSigner`, `verifySolanaSignature`,
+`readTokenAccount` and `SolanaPaymentRpc.simulateTransaction`. Out of scope:
+Permit2, ERC-7710, EIP-1271 payers, extensions (echoed, not validated), a
+facilitator `/verify` `/settle` HTTP API, a bundled EVM JSON-RPC client.

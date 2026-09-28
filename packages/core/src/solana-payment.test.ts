@@ -8,10 +8,12 @@ import {
   buildSplTransferTransaction,
   parseSolanaTransaction,
   readMint,
+  readTokenAccount,
   SOLANA_PROGRAMS,
   type SplTransferPayment,
   solanaPaymentRpc,
   verifySignedSplTransfer,
+  verifySolanaSignature,
 } from "./solana-payment";
 
 /**
@@ -362,6 +364,96 @@ describe("solanaPaymentRpc", () => {
       "getAccountInfo",
       "getGenesisHash",
       "getGenesisHash",
+    ]);
+  });
+});
+
+describe("verifySolanaSignature", () => {
+  it("accepts the signer's valid signature and nothing else", () => {
+    const wire = sign(buildSplTransferTransaction(payment()));
+    const tx = parseSolanaTransaction(wire);
+    expect(verifySolanaSignature(tx, PAYER)).toBe(true);
+    // The fee payer's slot is still empty.
+    expect(verifySolanaSignature(tx, FACILITATOR)).toBe(false);
+    // Not a signer at all.
+    expect(verifySolanaSignature(tx, USDC)).toBe(false);
+    const tampered = wire.slice();
+    tampered[1 + 64 + 3] = (tampered[1 + 64 + 3] as number) ^ 1;
+    expect(verifySolanaSignature(parseSolanaTransaction(tampered), PAYER)).toBe(
+      false,
+    );
+  });
+});
+
+describe("readTokenAccount", () => {
+  function account(state = 1, length = 165): Uint8Array {
+    const data = new Uint8Array(length);
+    data.set(base58.decode(USDC), 0);
+    data.set(base58.decode(PAYER), 32);
+    new DataView(data.buffer).setBigUint64(64, 1234n, true);
+    data[108] = state;
+    return data;
+  }
+
+  it("reads mint, owner, amount and state", () => {
+    expect(readTokenAccount(SOLANA_PROGRAMS.token, account())).toEqual({
+      mint: USDC,
+      owner: PAYER,
+      amount: 1234n,
+      state: 1,
+    });
+    const extended = account(2, 170);
+    extended[165] = 2;
+    expect(readTokenAccount(SOLANA_PROGRAMS.token2022, extended).state).toBe(2);
+  });
+
+  it("refuses what is not a token account", () => {
+    expect(() => readTokenAccount(PAY_TO, account())).toThrow(/not a token/);
+    expect(() => readTokenAccount(SOLANA_PROGRAMS.token, account(0))).toThrow(
+      /not an initialized/,
+    );
+    expect(() =>
+      readTokenAccount(SOLANA_PROGRAMS.token, new Uint8Array(82)),
+    ).toThrow(/not an initialized/);
+    const mint = account(1, 170);
+    mint[165] = 1;
+    expect(() => readTokenAccount(SOLANA_PROGRAMS.token2022, mint)).toThrow(
+      /not a token account/,
+    );
+  });
+});
+
+describe("solanaPaymentRpc simulateTransaction", () => {
+  it("simulates with signature checks and reports the error", async () => {
+    const params: unknown[] = [];
+    let err: unknown = null;
+    const rpc = solanaPaymentRpc("https://rpc.invalid", (async (
+      _url: string,
+      init: RequestInit,
+    ) => {
+      const body = JSON.parse(init.body as string);
+      params.push(body.params);
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: { context: { slot: 1 }, value: { err, logs: [] } },
+        }),
+      );
+    }) as typeof fetch);
+    await expect(rpc.simulateTransaction?.("AAE=")).resolves.toEqual({
+      err: null,
+    });
+    err = { InstructionError: [2, { Custom: 1 }] };
+    await expect(rpc.simulateTransaction?.("AAE=")).resolves.toEqual({ err });
+    expect(params[0]).toEqual([
+      "AAE=",
+      {
+        encoding: "base64",
+        sigVerify: true,
+        replaceRecentBlockhash: false,
+        commitment: "confirmed",
+      },
     ]);
   });
 });
