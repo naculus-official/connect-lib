@@ -368,7 +368,8 @@
     "decompiles",
     "promptless",
     "permissionless",
-    "secp"
+    "secp",
+    "unsponsored"
   ],
   "ignoreWords": [
     "eykt",
