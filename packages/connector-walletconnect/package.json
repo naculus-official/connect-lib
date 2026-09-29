@@ -23,7 +23,7 @@
     "@naculus/connect-core": "workspace:*",
     "@scure/base": "^2.4.0",
     "@walletconnect/sign-client": "^2.25.0",
-    "@walletconnect/types": "^2.24.0"
+    "@walletconnect/types": "^2.25.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",
