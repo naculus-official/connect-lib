@@ -23,8 +23,7 @@
   },
   "dependencies": {
     "@naculus/connect-core": "workspace:*",
-    "ripple-address-codec": "^5.0.1",
-    "xrpl": "^5.3.0"
+    "ripple-address-codec": "^5.0.1"
   },
   "devDependencies": {
     "@noble/curves": "^2.4.0",

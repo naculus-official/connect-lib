@@ -26,7 +26,6 @@
   "dependencies": {
     "@naculus/connect-core": "workspace:*",
     "@naculus/siwx": "workspace:*",
-    "@solana/web3.js": "^2.0.0",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {

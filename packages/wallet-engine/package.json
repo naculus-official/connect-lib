@@ -23,7 +23,6 @@
   },
   "dependencies": {
     "@naculus/connect-core": "workspace:*",
-    "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "@scure/base": "^2.4.0",

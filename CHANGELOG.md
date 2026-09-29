@@ -16,6 +16,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **Chain IDs from wallets and configuration go through connect-core** (`@naculus/connector-embedded`, `@naculus/connector-passkeys`, `@naculus/connector-evm-injected`) — each connector had its own copy. Chain IDs above `Number.MAX_SAFE_INTEGER` are now refused everywhere (`connector-passkeys` and `connector-evm-injected` accepted them before).
 
+- **Unused runtime dependencies removed** (`@naculus/connector-xrpl`, `@naculus/connector-solana`, `@naculus/wallet-engine`) — `xrpl`, `@solana/web3.js` and `@noble/ciphers` were declared but never imported (connector-xrpl talks to XRPL nodes directly; connector-solana uses plain `fetch`), so every install downloaded them for nothing. No behavior change.
+
 ### Fixed
 
 - **x402 with a Solana session key skips unsponsored requirements** (`@naculus/payments-x402`) — a requirement whose fee payer is the key or its owner is now skipped when choosing what to pay, so another acceptable requirement can be used; before, it was chosen and the key refused to sign (`session_scope_exceeded`). The key still refuses such a payment if asked directly.
