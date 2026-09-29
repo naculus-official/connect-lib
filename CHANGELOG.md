@@ -24,6 +24,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **x402 with a Solana session key skips unsponsored requirements** (`@naculus/payments-x402`) — a requirement whose fee payer is the key or its owner is now skipped when choosing what to pay, so another acceptable requirement can be used; before, it was chosen and the key refused to sign (`session_scope_exceeded`). The key still refuses such a payment if asked directly.
 - **`abiEncodeUint256` error message** (`@naculus/connect-core`) — an amount above 2^256 − 1 was reported as "negative".
+- **`SmartAccountManager` refuses a chainId it has no RPC for** (`@naculus/connect-core`) — the manager reads chain state through its one `rpcUrl`, so an account `chainId` different from the manager's `chainId` now throws `aa_invalid_input` before any RPC call instead of reading the wrong chain. Chain IDs are compared canonically (`eip155:01` is `eip155:1`); a malformed or unregistered foreign chain ID now reports the mismatch rather than `aa_no_entry_point`.
 
 ## 0.5.0 — 2026-09-28
 

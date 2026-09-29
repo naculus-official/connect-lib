@@ -1602,7 +1602,9 @@ describe("AA errors from private helpers", () => {
       entryPoint: undefined as unknown as Address,
     });
     await expect(
-      new SmartAccountManager(createTestConfig()).createAccount(config),
+      new SmartAccountManager(
+        createTestConfig({ chainId: "eip155:56" }),
+      ).createAccount(config),
     ).rejects.toHaveProperty("code", "aa_no_entry_point");
   });
 
@@ -1669,7 +1671,9 @@ describe("chain support boundary", () => {
    * the first holds — which is the point of having it.
    */
   it("refuses an unregistered EVM chain", async () => {
-    const manager = new SmartAccountManager(createTestConfig());
+    const manager = new SmartAccountManager(
+      createTestConfig({ chainId: "eip155:999999" }),
+    );
     await expect(
       manager.getAccountAddress(
         createAccountConfig({ chainId: "eip155:999999" }),
@@ -1680,7 +1684,9 @@ describe("chain support boundary", () => {
   it("refuses a non-EVM chain rather than coercing it into a BigInt", async () => {
     // BigInt("5eykt4Us…") throws an opaque SyntaxError; the caller should be
     // told the chain is unsupported instead.
-    const manager = new SmartAccountManager(createTestConfig());
+    const manager = new SmartAccountManager(
+      createTestConfig({ chainId: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" }),
+    );
     await expect(
       manager.getAccountAddress(
         createAccountConfig({
@@ -1910,5 +1916,151 @@ describe("SmartAccountManager RPC transport", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("down")));
     await getAddress().catch(() => {});
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// ─── One manager, one chain ─────────────────────────────────────
+
+describe("per-call chainId must be the manager's chain", () => {
+  const ACCOUNT = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const MANAGER_RPC = "https://eth.llamarpc.com";
+  const TEST_CALL: Call = {
+    to: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as Address,
+    value: 0n,
+    data: "0x",
+  };
+
+  /** Answers eth_call with the account address and eth_getCode as deployed. */
+  function stubChainReads() {
+    const spy = vi.fn().mockImplementation(async (_url: string, init) => {
+      const body = JSON.parse(init.body);
+      const result =
+        body.method === "eth_getCode"
+          ? "0x6080604052"
+          : `0x${"0".repeat(24)}${ACCOUNT.slice(2)}`;
+      return { ok: true, json: () => Promise.resolve({ result }) };
+    });
+    vi.stubGlobal("fetch", spy);
+    return spy;
+  }
+
+  function rpcUrlsCalled(spy: ReturnType<typeof vi.fn>): string[] {
+    return spy.mock.calls.map((call) => String(call[0]));
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const manager = () => new SmartAccountManager(createTestConfig());
+  const foreign = () => createAccountConfig({ chainId: "eip155:137" });
+  const omitted = () =>
+    createAccountConfig({ chainId: undefined as unknown as string });
+
+  const methods: Record<
+    string,
+    (m: SmartAccountManager, c: SmartAccountConfig) => Promise<unknown>
+  > = {
+    getAccountAddress: (m, c) => m.getAccountAddress(c),
+    createAccount: (m, c) => m.createAccount(c),
+    deployAccount: (m, c) => m.deployAccount(c),
+    getDeployCallData: (m, c) => m.getDeployCallData(c),
+    sendUserOperation: (m, c) =>
+      m.sendUserOperation(c, [TEST_CALL], { skipDeploy: true }),
+    sendBatch: (m, c) => m.sendBatch(c, [TEST_CALL], { skipDeploy: true }),
+  };
+
+  for (const [name, call] of Object.entries(methods)) {
+    it(`${name} throws for a different chainId before any RPC call`, async () => {
+      const spy = stubChainReads();
+      const error: unknown = await call(manager(), foreign()).catch((e) => e);
+      expect(isAAError(error)).toBe(true);
+      expect(error).toHaveProperty("code", "aa_invalid_input");
+      expect((error as Error).message).toContain("eip155:137");
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it(`${name} throws for a malformed chainId before any RPC call`, async () => {
+      const spy = stubChainReads();
+      for (const chainId of ["1", "0x1", "eip155:", "EIP155:1"]) {
+        await expect(
+          call(manager(), createAccountConfig({ chainId })),
+        ).rejects.toHaveProperty("code", "aa_invalid_input");
+      }
+      expect(spy).not.toHaveBeenCalled();
+    });
+  }
+
+  it("getAccountAddress: same, omitted or non-canonical same chain read the manager RPC", async () => {
+    for (const config of [
+      createAccountConfig(),
+      omitted(),
+      createAccountConfig({ chainId: "eip155:01" }),
+    ]) {
+      const spy = stubChainReads();
+      await expect(manager().getAccountAddress(config)).resolves.toBe(ACCOUNT);
+      expect(rpcUrlsCalled(spy)).toEqual([MANAGER_RPC]);
+    }
+  });
+
+  it("createAccount: same or omitted chainId is unchanged", async () => {
+    for (const config of [createAccountConfig(), omitted()]) {
+      const spy = stubChainReads();
+      await expect(manager().createAccount(config)).resolves.toEqual({
+        address: ACCOUNT,
+        isDeployed: true,
+        accountType: "simple",
+        owner: TEST_OWNER,
+      });
+      expect(rpcUrlsCalled(spy)).toEqual([MANAGER_RPC, MANAGER_RPC]);
+    }
+  });
+
+  it("deployAccount: same or omitted chainId is unchanged", async () => {
+    for (const config of [createAccountConfig(), omitted()]) {
+      const spy = stubChainReads();
+      await expect(manager().deployAccount(config)).resolves.toBe(ACCOUNT);
+      expect(rpcUrlsCalled(spy)).toEqual([MANAGER_RPC, MANAGER_RPC]);
+    }
+  });
+
+  it("getDeployCallData: same or omitted chainId is unchanged", async () => {
+    for (const config of [createAccountConfig(), omitted()]) {
+      const spy = stubChainReads();
+      const result = await manager().getDeployCallData(config);
+      expect(result.to).toBe(SIMPLE_ACCOUNT_FACTORY_V07);
+      expect(result.value).toBe(0n);
+      expect(spy).not.toHaveBeenCalled();
+    }
+  });
+
+  it("sendUserOperation / sendBatch: same or omitted chainId reach the manager RPC", async () => {
+    for (const send of [
+      (c: SmartAccountConfig) =>
+        manager().sendUserOperation(c, [TEST_CALL], { skipDeploy: true }),
+      (c: SmartAccountConfig) =>
+        manager().sendBatch(c, [TEST_CALL], { skipDeploy: true }),
+    ]) {
+      for (const config of [createAccountConfig(), omitted()]) {
+        // Only the address read succeeds; the op then fails on the nonce read,
+        // which is past the chain check.
+        const spy = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                result: `0x${"0".repeat(24)}${ACCOUNT.slice(2)}`,
+              }),
+          })
+          .mockResolvedValue({ ok: false, status: 500 });
+        vi.stubGlobal("fetch", spy);
+        await expect(send(config)).rejects.toHaveProperty(
+          "code",
+          "aa_rpc_error",
+        );
+        expect(rpcUrlsCalled(spy)[0]).toBe(MANAGER_RPC);
+      }
+    }
   });
 });

@@ -16,6 +16,7 @@ import {
   type RpcErrorFactory,
   rpcCall as sharedRpcCall,
 } from "../abortable-fetch";
+import { normalizeEip155ChainId } from "../caip";
 import { AccountAbstractionError } from "./errors";
 import { PaymasterService } from "./paymaster";
 import {
@@ -520,7 +521,7 @@ export class SmartAccountManager {
    * @returns The deterministic smart account address
    */
   async getAccountAddress(config: SmartAccountConfig): Promise<Address> {
-    const chainId = config.chainId ?? this.config.chainId;
+    const chainId = this.resolveChainId(config);
     this.validateAccountConfig(config, chainId);
     const factory = this.getFactory(chainId, config.accountType);
 
@@ -556,7 +557,7 @@ export class SmartAccountManager {
    * @returns Smart account info
    */
   async createAccount(config: SmartAccountConfig): Promise<SmartAccountInfo> {
-    const chainId = config.chainId ?? this.config.chainId;
+    const chainId = this.resolveChainId(config);
     this.validateAccountConfig(config, chainId);
     const address = await this.getAccountAddress(config);
     const isDeployed = await isContractDeployed(this.config.rpcUrl, address);
@@ -578,8 +579,9 @@ export class SmartAccountManager {
    * @returns Transaction hash
    */
   async deployAccount(config: SmartAccountConfig): Promise<Hex> {
-    // biome-ignore lint/correctness/noUnusedVariables: known bug — the deployment check below queries this.config.rpcUrl, not the RPC of config.chainId's chain; fix separately
-    const chainId = config.chainId ?? this.config.chainId;
+    // Refuse a foreign chain before the RPC reads below: they can only ever
+    // answer for the manager's chain.
+    this.resolveChainId(config);
     const address = await this.getAccountAddress(config);
     const deployed = await isContractDeployed(this.config.rpcUrl, address);
     if (deployed) {
@@ -604,7 +606,7 @@ export class SmartAccountManager {
     data: Hex;
     value: bigint;
   }> {
-    const chainId = config.chainId ?? this.config.chainId;
+    const chainId = this.resolveChainId(config);
     this.validateAccountConfig(config, chainId);
     const factory = this.getFactory(chainId, config.accountType);
     const salt = config.salt ?? 0n;
@@ -633,7 +635,7 @@ export class SmartAccountManager {
   ): Promise<UserOperationResponse> {
     validateCalls(calls);
 
-    const chainId = config.chainId ?? this.config.chainId;
+    const chainId = this.resolveChainId(config);
     const version = getUserOperationVersion(chainId);
     const address = await this.getAccountAddress(config);
 
@@ -1157,22 +1159,44 @@ export class SmartAccountManager {
     return factory;
   }
 
+  /**
+   * The chain a per-call account config targets. The manager owns exactly one
+   * RPC (`this.config.rpcUrl`), so every read answers for `this.config.chainId`;
+   * a different `config.chainId` would get another chain's answers (deployed?
+   * nonce? balance?). Throws instead. Chain IDs are compared canonically
+   * (`eip155:<decimal>`), and the manager's own ID is returned so registry
+   * lookups always use the chain the RPC serves.
+   */
+  private resolveChainId(config: SmartAccountConfig): string {
+    const managerChainId = this.config.chainId;
+    const requested = config.chainId;
+    if (requested === undefined || requested === managerChainId) {
+      return managerChainId;
+    }
+    // Only CAIP-2 input: a bare "1" or "0x1" is not a chain ID here.
+    const canonical = requested.startsWith("eip155:")
+      ? normalizeEip155ChainId(requested)
+      : undefined;
+    if (
+      canonical === undefined ||
+      canonical !== normalizeEip155ChainId(managerChainId)
+    ) {
+      throw new AccountAbstractionError(
+        "aa_invalid_input",
+        `Account chain ${requested} does not match manager chain ${managerChainId}; ` +
+          `this manager only has an RPC for ${managerChainId}.`,
+      );
+    }
+    return managerChainId;
+  }
+
   private validateAccountConfig(
     config: SmartAccountConfig,
     chainId: string,
   ): void {
-    // Resolve first so an unknown chain reports the more specific missing
-    // EntryPoint error rather than being obscured by a transport mismatch.
+    // `chainId` comes from resolveChainId, which already refused a chain the
+    // manager's RPC/bundler transport does not serve.
     const expectedEntryPoint = this.getEntryPoint(chainId);
-    // The manager owns one RPC/bundler transport. Refuse a per-account chain
-    // override unless it matches that transport; otherwise a caller could
-    // derive or submit a valid-looking UserOperation against the wrong chain.
-    if (chainId !== this.config.chainId) {
-      throw new AccountAbstractionError(
-        "aa_invalid_input",
-        `Account chain ${chainId} does not match manager chain ${this.config.chainId}.`,
-      );
-    }
     if (!/^0x[0-9a-fA-F]{40}$/.test(config.owner)) {
       throw new AccountAbstractionError("aa_invalid_owner");
     }
