@@ -24,6 +24,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **x402 with a Solana session key skips unsponsored requirements** (`@naculus/payments-x402`) — a requirement whose fee payer is the key or its owner is now skipped when choosing what to pay, so another acceptable requirement can be used; before, it was chosen and the key refused to sign (`session_scope_exceeded`). The key still refuses such a payment if asked directly.
 - **`abiEncodeUint256` error message** (`@naculus/connect-core`) — an amount above 2^256 − 1 was reported as "negative".
+- **Coinbase connect honors the requested chain** (`@naculus/connector-coinbase`) — `connect({ chainId })` ignored `chainId` and created the session on whatever chain the wallet was on. It now throws `invalid_input` for a chain ID that is not EIP-155, and `chain_unsupported` when the wallet is on a different chain; it does not switch chains. Without `chainId`, the wallet's chain is used as before.
 
 ## 0.5.0 — 2026-09-28
 

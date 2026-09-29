@@ -16,6 +16,7 @@ import {
   detectPlatform,
   extractAccounts,
   hexEncode,
+  normalizeEip155ChainId,
   normalizeEip5792Capabilities,
   WalletError,
 } from "@naculus/connect-core";
@@ -358,12 +359,24 @@ export class CoinbaseConnector implements UniversalConnector {
    * @returns UniversalWalletSession
    */
   async connect(input?: unknown): Promise<UniversalWalletSession> {
-    const provider = this.getProvider();
-    // biome-ignore lint/correctness/noUnusedVariables: known bug — connect() documents a chainId override but ignores it and keeps the wallet's current chain; fix separately (chain handling needs its own review)
     const connectInput =
       input && typeof input === "object" && !Array.isArray(input)
         ? (input as Record<string, unknown>)
         : undefined;
+    // Checked before the provider is touched, so a bad request opens no
+    // connection flow and registers no listeners.
+    let requestedChain: string | undefined;
+    if (connectInput?.chainId !== undefined) {
+      requestedChain = normalizeEip155ChainId(connectInput.chainId);
+      if (!requestedChain) {
+        throw new WalletError(
+          "invalid_input",
+          `Invalid EVM chain ID: ${String(connectInput.chainId)}`,
+        );
+      }
+    }
+
+    const provider = this.getProvider();
 
     // Subscribe to events so we can react to wallet-side changes
     this.setupEventListeners(provider);
@@ -406,11 +419,21 @@ export class CoinbaseConnector implements UniversalConnector {
         );
       }
 
+      // The session must be on the chain the app asked for. Coinbase Wallet
+      // may be on another one; switching silently or falling back to it would
+      // hand the app a session it did not request.
+      const caip2ChainId = `eip155:${chainIdNum}`;
+      if (requestedChain && requestedChain !== caip2ChainId) {
+        throw new WalletError(
+          "chain_unsupported",
+          `Requested ${requestedChain}, but the wallet is currently on ${caip2ChainId}.`,
+        );
+      }
+
       // Detect connection mode
       this.connectionMode = this.detectConnectionMode(provider);
 
       // Build the session
-      const caip2ChainId = `eip155:${chainIdNum}`;
       const walletSession = createEmptySession({
         id: crypto.randomUUID(),
         topic: undefined, // Coinbase SDK does not use topics
