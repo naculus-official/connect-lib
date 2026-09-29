@@ -121,7 +121,7 @@ export function abiEncodeUint256(value: bigint): `0x${string}` {
   if (value < 0n || value > (1n << 256n) - 1n) {
     throw new ERC20TokenError(
       "invalid_amount",
-      `Cannot encode negative uint256: ${value}`,
+      `Not a uint256 (0 to 2^256 - 1): ${value}`,
     );
   }
   const hex = value.toString(16);
