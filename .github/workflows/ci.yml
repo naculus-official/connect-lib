@@ -42,6 +42,16 @@ jobs:
       - name: Run tests
         run: pnpm test:run
 
+      # After the build: these read the built packages.
+      - name: Public API surface unchanged (api-surface/)
+        run: pnpm api:check
+
+      - name: Critical helpers have one owner
+        run: pnpm helpers:check
+
+      - name: Bundle size budget
+        run: pnpm size:check
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -61,6 +71,12 @@ jobs:
 
       - name: Run lint
         run: pnpm lint
+
+      - name: Duplication threshold
+        run: pnpm dup:check
+
+      - name: Dependencies declared and used
+        run: pnpm deps:check
 
       - name: Check changeset
         run: |
