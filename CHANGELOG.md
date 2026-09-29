@@ -16,6 +16,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **Chain IDs from wallets and configuration go through connect-core** (`@naculus/connector-embedded`, `@naculus/connector-passkeys`, `@naculus/connector-evm-injected`) — each connector had its own copy. Chain IDs above `Number.MAX_SAFE_INTEGER` are now refused everywhere (`connector-passkeys` and `connector-evm-injected` accepted them before).
 
+### Fixed
+
+- **x402 with a Solana session key skips unsponsored requirements** (`@naculus/payments-x402`) — a requirement whose fee payer is the key or its owner is now skipped when choosing what to pay, so another acceptable requirement can be used; before, it was chosen and the key refused to sign (`session_scope_exceeded`). The key still refuses such a payment if asked directly.
+- **`abiEncodeUint256` error message** (`@naculus/connect-core`) — an amount above 2^256 − 1 was reported as "negative".
+
 ## 0.5.0 — 2026-09-28
 
 **Behavior change for `@naculus/wallet-engine`** — see *Changed*: `isolation: "secure"` now throws. Everything else is additive or a fix.

@@ -174,6 +174,13 @@ export async function sessionKeyMismatch(
   if (requirement.asset !== info.scope.mint) {
     return `asset ${requirement.asset} is not the session key's mint`;
   }
+  // Sponsored only: the manager refuses to sign otherwise, so skip it here
+  // and let another requirement be chosen.
+  const feePayer = (requirement.extra as { feePayer?: unknown } | undefined)
+    ?.feePayer;
+  if (feePayer === info.address || feePayer === info.owner) {
+    return "a session key pays only requirements whose fee the facilitator sponsors";
+  }
   return null;
 }
 

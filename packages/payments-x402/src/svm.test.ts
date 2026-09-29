@@ -314,6 +314,9 @@ describe("x402 exact on Solana, paid by a session key", () => {
     for (const req of [
       requirement({ asset: FEE_PAYER }),
       requirement({ network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" }),
+      // Not sponsored: the fee payer is the owner or the key itself.
+      requirement({ extra: { feePayer: info.owner } }),
+      requirement({ extra: { feePayer: info.address } }),
     ]) {
       expect(await sessionKeyMismatch(req, key)).not.toBeNull();
       await expect(
@@ -324,15 +327,8 @@ describe("x402 exact on Solana, paid by a session key", () => {
         ),
       ).rejects.toMatchObject({ code: "no_acceptable_requirement" });
     }
-    // The owner as the facilitator's fee payer is refused by the key.
-    const ownerPays = requirement({ extra: { feePayer: PAYER } });
-    await expect(
-      createSvmPaymentPayload(
-        { x402Version: 2, resource: { url: URL_ }, accepts: [ownerPays] },
-        ownerPays,
-        { sessionKey: key, rpc: rpc() },
-      ),
-    ).rejects.toMatchObject({ code: "session_scope_exceeded" });
+    // Unsponsored requirements are skipped here; the manager refuses them
+    // too if called anyway (core's session-key tests). Nothing was spent.
     expect((await manager.listSessions())[0]?.spent).toBe(0n);
   });
 
