@@ -16,7 +16,7 @@ import {
   AMOUNTS,
   DECIMALS,
 } from "@naculus/test-utils/test-constants";
-import { describe, expect, it, } from "vitest";
+import { describe, expect, it } from "vitest";
 import { IndexedDbStorageAdapter } from "../storage/indexed-db";
 import { LocalStorageAdapter } from "../storage/local-storage";
 import type { WalletData } from "../wallet";

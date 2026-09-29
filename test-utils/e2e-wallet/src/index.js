@@ -257,7 +257,7 @@ export class E2EWalletAdapter {
         topic: this.sessionTopic,
         reason: { code: 6000, message: "E2E test complete" },
       });
-    } catch (e) {
+    } catch (_e) {
       // Session may already be closed
     }
     this.sessionTopic = null;

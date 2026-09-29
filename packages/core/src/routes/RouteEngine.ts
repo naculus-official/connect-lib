@@ -12,7 +12,7 @@
  * @see docs/features/routes.md
  */
 
-import { CHAINS, } from "../chain-registry";
+import { CHAINS } from "../chain-registry";
 import type { EVMRouteExecutor } from "./executor/EVMRouteExecutor";
 import type {
   BridgeProvider,

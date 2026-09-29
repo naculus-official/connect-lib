@@ -14,8 +14,8 @@
  * All values from test-constants — no hardcoded strings.
  */
 
-import { describe, it, expect, vi, beforeEach, } from "vitest";
-import { parseUnits, } from "../token/units";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { parseUnits } from "../token/units";
 import { abiEncodeUint256, ERC20TokenHelper } from "../token/ERC20TokenHelper";
 import { ERC20TokenError } from "../token/errors";
 import { MemoryStorageAdapter } from "../storage";

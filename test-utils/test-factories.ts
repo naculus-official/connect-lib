@@ -8,14 +8,12 @@ import type {
   BatchCall,
   ConnectorSupport,
   UniversalConnector,
-  WalletCapabilities,
 } from "../packages/core/src/connector";
 import type {
   Namespace,
-  SessionNamespace,
   UniversalWalletSession,
 } from "../packages/core/src/session";
-import { ADDRESSES, CHAINS, GAS, SESSION } from "./test-constants";
+import { ADDRESSES, CHAINS, SESSION } from "./test-constants";
 
 // ── Session Factories ──────────────────────────────────────────────
 

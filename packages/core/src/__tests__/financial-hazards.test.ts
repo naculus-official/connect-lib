@@ -15,7 +15,7 @@
  * No hardcoded strings or magic numbers in this file.
  */
 
-import { describe, it, expect, } from "vitest";
+import { describe, it, expect } from "vitest";
 import { parseUnits, formatUnits } from "../token/units";
 import { abiEncodeAddress, abiEncodeUint256 } from "../token/ERC20TokenHelper";
 import { encodeGasLimits, buildUserOperation } from "../account-abstraction/user-operation";

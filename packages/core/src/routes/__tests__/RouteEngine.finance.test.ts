@@ -10,7 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeGasLimits } from "../../account-abstraction/SmartAccountManager";
 import { encodeGasLimits } from "../../account-abstraction/user-operation";
-import { CHAINS, } from "../../chain-registry";
+import { CHAINS } from "../../chain-registry";
 import { RouteEngine } from "../RouteEngine";
 import type {
   BridgeProvider,

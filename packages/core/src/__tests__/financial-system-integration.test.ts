@@ -1,4 +1,4 @@
-import { describe, it, expect, } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createConnectorManager } from "../connector-manager";
 import type { UniversalConnector, BatchCall } from "../connector";
 import type { UniversalWalletSession } from "../session";
