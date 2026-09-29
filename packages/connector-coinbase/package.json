@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@coinbase/wallet-sdk": "^4.3.7",
+    "@coinbase/wallet-sdk": "^4.4.0",
     "@naculus/connect-core": "workspace:*"
   },
   "devDependencies": {
