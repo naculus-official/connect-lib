@@ -33,7 +33,6 @@ class MockWorker {
       const fn = this.onmessageFn || this.onmessage;
       if (!fn) return;
       switch (msg.type) {
-        case "init":
         case "initWithKey":
           fn({ data: { id, type: "ready" } });
           break;

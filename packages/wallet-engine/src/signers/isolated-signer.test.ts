@@ -3,6 +3,8 @@ import { WalletError } from "../errors";
 import { IsolatedSigner } from "./isolated-signer";
 
 // Minimal mock Worker that responds to messages
+const TEST_KEY = `0x${"11".repeat(32)}`;
+
 class MockWorker {
   onmessage: ((e: any) => void) | null = null;
   onerror: ((e: any) => void) | null = null;
@@ -10,7 +12,7 @@ class MockWorker {
     const id = msg.id ?? String(Math.random());
     setTimeout(() => {
       if (!this.onmessage) return;
-      if (msg.type === "init" || msg.type === "initWithKey") {
+      if (msg.type === "initWithKey") {
         this.onmessage!({ data: { id, type: "ready" } });
       } else if (msg.type === "signMessage" || msg.type === "signTransaction") {
         this.onmessage!({
@@ -130,7 +132,7 @@ describe("IsolatedSigner", () => {
   it("init with mocked worker and sign message", async () => {
     (globalThis as any).Worker = MockWorker as any;
     const s = new IsolatedSigner();
-    await s.init({}, "passphrase");
+    await s.initWithKey(TEST_KEY);
     const result = await s.signMessage({ message: "hello" });
     expect(result.signature).toMatch(/^0x[0-9a-f]{130}$/);
     expect(result.recovery).toBe(0);
@@ -150,7 +152,7 @@ describe("IsolatedSigner", () => {
   it("clear after init", async () => {
     (globalThis as any).Worker = MockWorker as any;
     const s = new IsolatedSigner();
-    await s.init({}, "passphrase");
+    await s.initWithKey(TEST_KEY);
     await s.clear();
     try {
       await s.signMessage({ message: "test" });
@@ -165,7 +167,7 @@ describe("IsolatedSigner", () => {
     (globalThis as any).Worker = ErrorWorker as any;
     const s = new IsolatedSigner();
     try {
-      await s.init({}, "wrong");
+      await s.initWithKey(TEST_KEY);
       expect.fail("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(WalletError);
@@ -182,7 +184,7 @@ describe("IsolatedSigner", () => {
     vi.useFakeTimers();
     (globalThis as any).Worker = NoIdWorker as any;
     const s = new IsolatedSigner();
-    const initPromise = s.init({}, "passphrase");
+    const initPromise = s.initWithKey(TEST_KEY);
     const assertion = expect(initPromise).rejects.toMatchObject({
       code: "crypto_worker_error",
     });
@@ -195,7 +197,7 @@ describe("IsolatedSigner", () => {
     vi.useFakeTimers();
     (globalThis as any).Worker = NoIdWorker as any;
     const s = new IsolatedSigner();
-    const initPromise = s.init({}, "passphrase");
+    const initPromise = s.initWithKey(TEST_KEY);
     const assertion = initPromise.catch((e) => e);
     await vi.advanceTimersByTimeAsync(1000);
     const err = await assertion;
@@ -224,7 +226,7 @@ describe("IsolatedSigner", () => {
     vi.useFakeTimers();
     (globalThis as any).Worker = FailingWorker as any;
     const s = new IsolatedSigner();
-    const p = s.init({}, "passphrase");
+    const p = s.initWithKey(TEST_KEY);
     const assertion = expect(p).rejects.toMatchObject({
       code: "worker_error",
     });
@@ -249,7 +251,7 @@ describe("IsolatedSigner", () => {
     (globalThis as any).Worker = HandlerSpyWorker as any;
 
     const a = new IsolatedSigner();
-    void a.init({}, "passphrase").catch(() => {});
+    void a.initWithKey(TEST_KEY).catch(() => {});
     const afterInit = HandlerSpyWorker.last!;
 
     const b = new IsolatedSigner();
@@ -299,7 +301,7 @@ describe("IsolatedSigner", () => {
     }
     (globalThis as any).Worker = SilentWorker as any;
     const s = new IsolatedSigner();
-    const initPromise = s.init({}, "passphrase");
+    const initPromise = s.initWithKey(TEST_KEY);
     vi.advanceTimersByTime(31000);
     try {
       await initPromise;

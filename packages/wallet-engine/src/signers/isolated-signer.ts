@@ -102,12 +102,6 @@ export class IsolatedSigner implements Signer {
     return worker;
   }
 
-  async init(encrypted: any, passphrase: string): Promise<void> {
-    this.terminate();
-    this.spawnWorker();
-    return this.send("init", { encrypted, passphrase });
-  }
-
   async initWithKey(privateKey: string): Promise<void> {
     this.terminate();
     this.spawnWorker();

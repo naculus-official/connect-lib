@@ -25,12 +25,12 @@ PocketWallet.load()                              src/wallet.ts:517
 **Decryption happens on the main thread. The plaintext private key is then
 copied across the `postMessage` boundary into the worker.**
 
-`IsolatedSigner.init(encrypted, passphrase)` — the one entry point that would
-decrypt *inside* the worker — has no callers. `grep -rn "\.init(" src/`,
-excluding `initWithKey`, returns nothing. `crypto-worker.ts`'s `decryptWallet()`,
-`deriveKey()` and the `EncryptedPayload` interface are unreachable from the
-public API, and `IsolatedSigner` itself is not exported from `src/index.ts`
-(only `EVMSigner` is), so a consumer cannot reach them either.
+There is no entry point that decrypts *inside* the worker. The one that
+existed, `IsolatedSigner.init(encrypted, passphrase)` with the worker's
+`decryptWallet()` / `deriveKey()`, had no callers, was unreachable from the
+public API, and read a pre-envelope record format with a hard-coded iteration
+count; it was removed on 2026-09-29. The design below needs a new, versioned
+payload anyway.
 
 ## What it does protect
 
