@@ -549,12 +549,17 @@ describe("settlePayment, SVM exact", () => {
     const a = await verifyPayment(header, [requirement()], d);
     const b = await verifyPayment(header, [requirement()], d);
     if (!a.ok || !b.ok) throw new Error("verify");
-    const [first, second] = await Promise.all([
+    // Each claim waits on an async digest first, so either may win the race:
+    // exactly one settles and the other is refused.
+    const results = await Promise.all([
       settlePayment(a, d),
       settlePayment(b, d),
     ]);
-    expect(first.settlement.success).toBe(true);
-    expect(second.settlement).toMatchObject({
+    const settled = results.filter((r) => r.settlement.success);
+    const refused = results.filter((r) => !r.settlement.success);
+    expect(settled).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.settlement).toMatchObject({
       success: false,
       errorReason: "duplicate_settlement",
     });
