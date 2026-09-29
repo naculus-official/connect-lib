@@ -16,7 +16,7 @@ import {
   type RpcErrorFactory,
   rpcCall as sharedRpcCall,
 } from "../abortable-fetch";
-import { type AAErrorCode, AccountAbstractionError } from "./errors";
+import { AccountAbstractionError } from "./errors";
 import { PaymasterService } from "./paymaster";
 import {
   AA_SUPPORTED_CHAINS,
@@ -24,13 +24,9 @@ import {
   type Address,
   type BundlerClient,
   type Call,
-  DEFAULT_CALL_GAS_LIMIT,
-  DEFAULT_PRE_VERIFICATION_GAS,
-  DEFAULT_VERIFICATION_GAS_LIMIT,
   type Hex,
   type PaymasterConfig,
   type SendUserOpOptions,
-  SIMPLE_ACCOUNT_FACTORY,
   type SmartAccountConfig,
   type SmartAccountInfo,
   type UserOperation,
@@ -582,6 +578,7 @@ export class SmartAccountManager {
    * @returns Transaction hash
    */
   async deployAccount(config: SmartAccountConfig): Promise<Hex> {
+    // biome-ignore lint/correctness/noUnusedVariables: known bug, tracked — the deployment check below queries this.config.rpcUrl, not config.chainId's chain (.ai/reviews/2026-09-29-duplication-review.md)
     const chainId = config.chainId ?? this.config.chainId;
     const address = await this.getAccountAddress(config);
     const deployed = await isContractDeployed(this.config.rpcUrl, address);

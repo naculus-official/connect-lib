@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { InAppChannel, NoopChannel, TelegramChannel } from "../channels";
+import { NoopChannel, TelegramChannel } from "../channels";
 import { Notifier } from "../Notifier";
 import type {
   MuteRule,
   NotificationPayload,
-  NotificationWatch,
   TxMetadata,
-  TxStatus,
 } from "../types";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
@@ -28,7 +26,7 @@ function createMockStorage() {
   };
 }
 
-function makePayload(
+function _makePayload(
   overrides: Partial<NotificationPayload> = {},
 ): NotificationPayload {
   return {

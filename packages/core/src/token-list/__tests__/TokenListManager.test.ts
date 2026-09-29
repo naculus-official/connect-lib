@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { TokenListManager } from "../TokenListManager";
-import type { TokenListEntry, TokenListSource } from "../types";
+import type { TokenListSource } from "../types";
 import { ETHEREUM_MAINNET_TOKENS, POLYGON_TOKENS } from "../lists";
 
 // Built-in sources for testing

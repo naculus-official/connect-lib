@@ -1,4 +1,4 @@
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NameResolver, ResolutionError } from "..";
 

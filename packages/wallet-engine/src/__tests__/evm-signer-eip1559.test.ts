@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { WalletError } from "../errors";
 import { EVMSigner } from "../signers/evm";
 import type { TransactionRequest } from "../signers/types";
 
@@ -10,7 +9,7 @@ const TEST_TO = ("0x" + "cd".repeat(20)) as `0x${string}`;
 /**
  * Helper: parse a hex string into a Uint8Array
  */
-function hexToBytes(h: string): Uint8Array {
+function _hexToBytes(h: string): Uint8Array {
   const raw = h.startsWith("0x") ? h.slice(2) : h;
   const b = new Uint8Array(raw.length / 2);
   for (let i = 0; i < raw.length; i += 2)

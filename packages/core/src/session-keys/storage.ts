@@ -58,7 +58,6 @@ function assertIterationFloor(
   }
 }
 const STORAGE_KEY = "session_keys";
-const ENCRYPTION_KEY_STORAGE_KEY = "session_key_encryption_salt";
 
 type AsyncOperation<T> = () => Promise<T>;
 

@@ -14,19 +14,17 @@
  * All values from test-constants — no hardcoded strings.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseUnits, formatUnits } from "../token/units";
-import { abiEncodeAddress, abiEncodeUint256, ERC20TokenHelper } from "../token/ERC20TokenHelper";
+import { describe, it, expect, vi, beforeEach, } from "vitest";
+import { parseUnits, } from "../token/units";
+import { abiEncodeUint256, ERC20TokenHelper } from "../token/ERC20TokenHelper";
 import { ERC20TokenError } from "../token/errors";
-import { WalletError } from "../errors";
 import { MemoryStorageAdapter } from "../storage";
 import { SessionPersistence, createSessionPersistence } from "../session-manager/persistence";
 import type { PersistedSessionData, ActiveSessionBundle, ChainSession } from "../session-manager/types";
-import { createConnectorManager } from "../connector-manager";
 import { SimulationManager } from "../simulation/SimulationManager";
 
 import { ADDRESSES, CHAINS, DECIMALS, AMOUNTS } from "@naculus/test-utils/test-constants";
-import { createTestSession, createMockConnector, createTestTokenConfig } from "@naculus/test-utils/test-factories";
+import { createTestSession, createTestTokenConfig } from "@naculus/test-utils/test-factories";
 
 // ══════════════════════════════════════════════════════════════════════
 // Section A: ERC20TokenHelper RPC Pipeline
@@ -341,7 +339,7 @@ describe("C1 — Pre-flight balance: insufficient funds rejection", () => {
   it("balance >= totalCost: transaction can proceed", () => {
     const balance = parseUnits(AMOUNTS.TEN_THOUSAND_USDC, DECIMALS.USDC);
     const transfer = parseUnits("5000", DECIMALS.USDC);
-    const gasEstimate = parseUnits("5", DECIMALS.ETH);
+    const _gasEstimate = parseUnits("5", DECIMALS.ETH);
     // For ERC-20: gas is in native token, transfer is in token — they're separate
     // But the pattern: balance must cover both
     expect(balance >= transfer).toBe(true);
@@ -505,7 +503,7 @@ describe("C4 — Unlimited approval detection", () => {
   });
 
   it("limited approval on known contract is safe", () => {
-    const spender = ADDRESSES.USDC_MAINNET; // known router
+    const _spender = ADDRESSES.USDC_MAINNET; // known router
     const allowance = parseUnits("100", DECIMALS.USDC);
     const isHighRisk = allowance === UNLIMITED;
     expect(isHighRisk).toBe(false);

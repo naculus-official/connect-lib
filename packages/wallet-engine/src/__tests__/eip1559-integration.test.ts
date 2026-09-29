@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { WalletError } from "../errors";
 import type { StorageAdapter } from "../storage/types";
 import type { WalletData } from "../wallet";
 import { PocketWallet } from "../wallet";

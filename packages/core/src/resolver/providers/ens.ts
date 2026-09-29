@@ -51,8 +51,6 @@ const RESOLVER_ABI = [
   },
 ] as const;
 
-const EMPTY_ADDR = `0x${"00".repeat(20)}` as const;
-
 /**
  * ENS namehash algorithm.
  * Converts a domain like "vitalik.eth" into a 32-byte node hash.
@@ -69,13 +67,6 @@ function namehash(name: string): `0x${string}` {
   }
 
   return `0x${bytesToHex(node)}`;
-}
-
-/**
- * Labelhash for a single label (used in reverse lookup).
- */
-function labelhash(label: string): `0x${string}` {
-  return `0x${bytesToHex(keccak_256(stringToBytes(label.toLowerCase())))}`;
 }
 
 // ── ABI Encoding ─────────────────────────────────────────────────

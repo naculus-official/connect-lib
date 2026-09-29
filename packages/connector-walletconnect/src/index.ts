@@ -1,8 +1,6 @@
 import type {
   BatchCall,
-  Namespace,
   SendCallsOptions,
-  SessionNamespace,
   UniversalConnector,
   UniversalWalletSession,
   WalletCapabilities,
@@ -10,7 +8,6 @@ import type {
 } from "@naculus/connect-core";
 import {
   CONNECTOR_ERROR_MESSAGES,
-  caip2ToHexChain,
   createEmptySession,
   DEFAULT_RPC_URLS,
   detectPlatform,
@@ -36,7 +33,6 @@ import {
   buildOptionalNamespaces,
   buildRequiredNamespaces,
   extractAddress,
-  isValidCAIP10,
   mapNamespaces,
   parseCAIP10,
   toHexValue,

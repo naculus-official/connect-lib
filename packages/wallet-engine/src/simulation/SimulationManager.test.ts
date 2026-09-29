@@ -89,7 +89,7 @@ describe("SimulationManager", () => {
   });
 
   it("simulate returns unavailable when no provider available", async () => {
-    const result = await manager.simulate(
+    const _result = await manager.simulate(
       { to: "0x1234", data: "0x", value: "0x0" },
       "0xabcd",
       { chainId: 999 }, // chain not supported by eth_call...Wait, eth_call supports all chains

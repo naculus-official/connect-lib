@@ -3,7 +3,6 @@ import {
   createSiwxMessage,
   isSiwxMessage,
   parseSiwxMessage,
-  SIWX_VERSION,
 } from "../src/message";
 import type { SiwxParams } from "../src/types";
 import {

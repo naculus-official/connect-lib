@@ -2,7 +2,6 @@
  * RouteEngine Tests
  */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { RouteEngine, RouteEngineError } from "../RouteEngine";
@@ -30,7 +29,7 @@ const USDC_POLY: Token = {
   symbol: "USDC",
 };
 
-const USDT_ETH: Token = {
+const _USDT_ETH: Token = {
   chainId: 1,
   address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
   decimals: 6,

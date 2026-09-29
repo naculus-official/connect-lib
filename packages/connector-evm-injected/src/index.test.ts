@@ -1,10 +1,6 @@
 import type { UniversalWalletSession } from "@naculus/connect-core";
 import { createEmptySession } from "@naculus/connect-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  isCoinbaseWalletInstalled as discoveryIsCoinbase,
-  isMetaMaskInstalled as discoveryIsMetaMask,
-} from "./discovery";
 import type { DiscoveredWallet, Eip6963EthereumProvider } from "./index";
 import {
   createEIP6963Connector,
@@ -679,7 +675,7 @@ describe("EIP6963Connector", () => {
   describe("getBalance", () => {
     it("should return balance from provider", async () => {
       provider.request.mockResolvedValue("0x100");
-      const session = createSession();
+      const _session = createSession();
       const balance = await (connector as any).getBalance();
       expect(provider.request).toHaveBeenCalledWith({
         method: "eth_getBalance",

@@ -1,6 +1,4 @@
 import type {
-  BatchCall,
-  UniversalConnector,
   UniversalWalletSession,
 } from "@naculus/connect-core";
 import { createEmptySession } from "@naculus/connect-core";

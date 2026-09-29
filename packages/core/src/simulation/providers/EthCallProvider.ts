@@ -18,18 +18,6 @@ import type {
 } from "../types";
 import type { SimulationProvider } from "./types";
 
-// ── Constants ─────────────────────────────────────────────────────
-
-const NATIVE_ASSET = {
-  address: "0x0000000000000000000000000000000000000000" as `0x${string}`,
-  symbol: "ETH",
-  decimals: 18,
-};
-
-const ETH_NATIVE_CHAINS = [1, 5, 11155111, 10, 42161, 421614, 8453, 84532];
-const POLYGON_NATIVE_CHAINS = [137, 80002];
-const BNB_NATIVE_CHAINS = [56, 97];
-
 // ── Helper: Parse revert reason from error data ───────────────────
 
 /**
@@ -87,18 +75,6 @@ function parseRevertReason(errorData: string): string | undefined {
 }
 
 /**
- * Determine the native gas token symbol for a given chain.
- */
-function getNativeSymbol(chainId: number): string {
-  if (ETH_NATIVE_CHAINS.includes(chainId)) return "ETH";
-  if (POLYGON_NATIVE_CHAINS.includes(chainId)) {
-    return chainId === 137 ? "POL" : "MATIC";
-  }
-  if (BNB_NATIVE_CHAINS.includes(chainId)) return "BNB";
-  return "ETH";
-}
-
-/**
  * Build a basic safe SimulationResult when eth_call does not revert.
  */
 function buildSuccessResult(
@@ -106,7 +82,6 @@ function buildSuccessResult(
   from: `0x${string}`,
   chainId: number,
 ): SimulationResult {
-  const nativeSymbol = getNativeSymbol(chainId);
   return {
     status: "success",
     coverage: { balanceChanges: false, approvalChanges: false, risk: false },

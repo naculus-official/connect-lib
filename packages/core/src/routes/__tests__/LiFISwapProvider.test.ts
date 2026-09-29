@@ -2,7 +2,6 @@
  * LiFISwapProvider Tests
  */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import {

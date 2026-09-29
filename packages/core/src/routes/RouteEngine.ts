@@ -12,14 +12,13 @@
  * @see docs/features/routes.md
  */
 
-import { CHAINS, getChainInfo } from "../chain-registry";
+import { CHAINS, } from "../chain-registry";
 import type { EVMRouteExecutor } from "./executor/EVMRouteExecutor";
 import type {
   BridgeProvider,
   Route,
   RouteEngineConfig,
   RouteQuote,
-  RouteStep,
   SwapProvider,
   Token,
 } from "./types";

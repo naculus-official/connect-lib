@@ -386,7 +386,7 @@ describe("TxMonitor - Event Management", () => {
     const hash = "0x" + "h".repeat(64);
     mockProvider.setReceipt(hash, null);
 
-    const entry1 = await monitor.watchTx(hash, 1, {
+    const _entry1 = await monitor.watchTx(hash, 1, {
       initialEntry: {
         from: "0x" + "i".repeat(40),
         to: "0x" + "j".repeat(40),

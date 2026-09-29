@@ -33,7 +33,7 @@ describe("Solana Financial Integration: Address & Signing", () => {
   });
 
   it("signs with zeroed key produces deterministic signature", async () => {
-    const seed = new Uint8Array(32);
+    const _seed = new Uint8Array(32);
     const message = new TextEncoder().encode("hello");
     const { ed25519 } = await import("@noble/curves/ed25519.js");
     const priv = ed25519.utils.randomSecretKey();

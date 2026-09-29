@@ -4,7 +4,6 @@ import {
   DEFAULT_SESSION_EXPIRY_SECONDS,
   SiwxSessionManager,
 } from "../src/session";
-import { createMemorySiwxSessionStorage } from "../src/session-storage";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -221,12 +220,12 @@ describe("SiwxSessionManager", () => {
 
     it("should return null for expired session", async () => {
       // Create a session that expired 1 second ago
-      const mgrWithInstantExpiry = createTestManager({
+      const _mgrWithInstantExpiry = createTestManager({
         defaultExpirySeconds: 0,
       });
 
       // For 0 expiry, expiresAt is null, so let's test with 1ms expiry
-      const expiredSession = await mgr.signIn({
+      const _expiredSession = await mgr.signIn({
         ...baseSignInParams,
         expirySeconds: 0, // no expiry
       });
@@ -282,7 +281,7 @@ describe("SiwxSessionManager", () => {
     it("should refresh an active session with updated timestamps", async () => {
       const session = await mgr.signIn(baseSignInParams);
       const originalId = session.id;
-      const originalSignature = session.signature;
+      const _originalSignature = session.signature;
       const originalIssuedAt = session.issuedAt;
 
       // Wait a tiny bit so timestamps differ

@@ -15,19 +15,16 @@
  * No hardcoded strings or magic numbers in this file.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, } from "vitest";
 import { parseUnits, formatUnits } from "../token/units";
 import { abiEncodeAddress, abiEncodeUint256 } from "../token/ERC20TokenHelper";
 import { encodeGasLimits, buildUserOperation } from "../account-abstraction/user-operation";
 import { decodeGasLimits } from "../account-abstraction/SmartAccountManager";
 import { ERC20TokenError } from "../token/errors";
-import { WalletError } from "../errors";
-import { ConnectorManager, createConnectorManager } from "../connector-manager";
+import { createConnectorManager } from "../connector-manager";
 import {
-  NAMESPACE_EIP155,
   SESSION_TIMEOUT_MS,
 } from "../constants";
-import type { UniversalWalletSession } from "../session";
 import type { BatchCall } from "../connector";
 
 import { ADDRESSES, CHAINS, DECIMALS, AMOUNTS, GAS, ABI_SELECTORS } from "@naculus/test-utils/test-constants";

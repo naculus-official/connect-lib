@@ -6,7 +6,6 @@ import {
   isValidXRPClassicAddress,
   parseXRPAmount,
   XRPLConnector,
-  xrplConnector,
 } from "./index";
 
 describe("XRPLConnector", () => {

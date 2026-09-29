@@ -58,7 +58,7 @@ function createMockPublicKeyCredential(
   } as unknown as PublicKeyCredential;
 }
 
-function createMockAssertion(overrides: Record<string, unknown> = {}) {
+function _createMockAssertion(overrides: Record<string, unknown> = {}) {
   return {
     id: mockCredentialId,
     rawId: new Uint8Array([1, 2, 3, 4, 5]),

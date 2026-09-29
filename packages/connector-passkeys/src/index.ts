@@ -85,15 +85,6 @@ function ab2b64(buf: ArrayBuffer): string {
   return btoa(binary);
 }
 
-function b642ab(b64: string): ArrayBuffer {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-}
-
 function getRpId(): string {
   if (typeof window !== "undefined") {
     return window.location.hostname;

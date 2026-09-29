@@ -19,7 +19,6 @@ import type {
   FeeEstimationConfig,
   FeeValues,
   FeeValuesEIP1559,
-  FeeValuesLegacy,
 } from "./types";
 
 // ─── Registry for chain-specific estimators ────────────────────────────

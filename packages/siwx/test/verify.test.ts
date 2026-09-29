@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createSiwxMessage } from "../src/message";
 import { issueNonce, resetNonceStorage } from "../src/nonce-consumption";
 import type { SiwxParams } from "../src/types";
-import { generateNonce, nowISO } from "../src/utils";
-import { type VerifySiwxMessageParams, verifySiwxMessage } from "../src/verify";
+import { verifySiwxMessage } from "../src/verify";
 
 // ---------------------------------------------------------------------------
 // Helpers

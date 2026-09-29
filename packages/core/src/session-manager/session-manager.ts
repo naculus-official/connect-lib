@@ -20,11 +20,6 @@ import { logger } from "../logger";
 import { DEFAULT_RPC_URLS } from "../rpc";
 import type { SessionNamespace } from "../session";
 import { createSessionError } from "./errors";
-import type {
-  SessionEvent,
-  SessionEventHandler,
-  SessionEventPayloads,
-} from "./events";
 import { SessionEventEmitter } from "./events";
 import {
   createSessionPersistence,
@@ -824,7 +819,7 @@ export class SessionManager extends SessionEventEmitter {
     session: UniversalWalletSession,
     chainId: string,
   ): void {
-    const { namespace, reference } = parseChainId(chainId);
+    const { namespace } = parseChainId(chainId);
 
     if (!session.namespaces[namespace]) {
       session.namespaces[namespace] = {

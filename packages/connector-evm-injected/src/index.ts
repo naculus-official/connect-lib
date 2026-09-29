@@ -24,8 +24,6 @@ import { CHAIN_METADATA } from "./chain";
 import {
   EIP6963_ANNOUNCE_EVENT,
   EIP6963_REQUEST_EVENT,
-  isCoinbaseWalletInstalled,
-  isMetaMaskInstalled,
 } from "./discovery";
 import type {
   DiscoveredWallet,

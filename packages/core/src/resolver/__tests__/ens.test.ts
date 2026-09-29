@@ -1,14 +1,12 @@
 import { ADDRESSES } from "@naculus/test-utils/test-constants";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ENS_REGISTRY_ADDRESS,
-  ENS_REVERSE_REGISTRAR,
   ENSProvider,
 } from "../providers/ens";
 
 // ── Mock fetch ──────────────────────────────────────────────────
 
-const mockEthCall = vi.fn();
+const _mockEthCall = vi.fn();
 
 function mockFetch(response: unknown) {
   return vi.mocked(fetch).mockResolvedValueOnce({

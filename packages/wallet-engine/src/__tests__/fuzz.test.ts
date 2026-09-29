@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { WalletError } from "../errors";
 import type { StorageAdapter } from "../storage/types";
 import type { WalletData } from "../wallet";
 import { PocketWallet } from "../wallet";
@@ -33,7 +32,7 @@ function randomQuantity(bytes: number): `0x${string}` {
   return `0x${value.toString(16)}` as `0x${string}`;
 }
 
-function randomBytes(n: number): Uint8Array {
+function _randomBytes(n: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(n));
 }
 

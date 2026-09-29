@@ -4,7 +4,6 @@
  * Uses a pure mock that returns the correct data per data+selector.
  */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { clearAutoDetectCache, detectTokenInfo } from "../auto-detect";

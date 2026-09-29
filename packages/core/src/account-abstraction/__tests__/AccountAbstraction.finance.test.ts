@@ -11,7 +11,6 @@
  * @see docs/features/account-abstraction.md
  */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PaymasterService } from "../paymaster";
@@ -584,7 +583,7 @@ describe("Paymaster financial tests", () => {
     // 1. Calls pm_getPaymasterStakeData → returns error
     // 2. Falls back to getVerifyingPaymasterData → pm_sponsorUserOperation → success
     let callCount = 0;
-    const fetchSpy = vi
+    const _fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => {
         callCount++;
@@ -692,7 +691,7 @@ describe("SmartAccountManager financial edge cases", () => {
     // to verify the financial contract.
 
     // Use sendUserOpToBundler directly which properly serializes bigints
-    const spy = vi.stubGlobal(
+    const _spy = vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,

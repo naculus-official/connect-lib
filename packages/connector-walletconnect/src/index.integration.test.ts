@@ -1,7 +1,7 @@
 /// <reference types="vitest" />
 /// @vitest-environment jsdom
 
-import { createEmptySession, WalletError } from "@naculus/connect-core";
+import { createEmptySession, } from "@naculus/connect-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletConnectConnector } from "./index";
 import { buildRequiredNamespaces } from "./namespaces";

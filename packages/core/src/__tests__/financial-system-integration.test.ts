@@ -1,6 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { ConnectorManager, createConnectorManager } from "../connector-manager";
-import { WalletError } from "../errors";
+import { describe, it, expect, } from "vitest";
+import { createConnectorManager } from "../connector-manager";
 import type { UniversalConnector, BatchCall } from "../connector";
 import type { UniversalWalletSession } from "../session";
 import { NAMESPACE_EIP155 } from "../constants";
@@ -91,7 +90,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const connector = createMockConnector("test", NAMESPACE_EIP155);
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
-    const session = await manager.connect("mock-test");
+    const _session = await manager.connect("mock-test");
     const sig = await manager.signMessage({ message: "hello" });
     expect(sig).toMatch(/^0x[0-9a-f]{64}$/);
   });
@@ -100,7 +99,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const connector = createMockConnector("test", NAMESPACE_EIP155);
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
-    const session = await manager.connect("mock-test");
+    const _session = await manager.connect("mock-test");
     const hash = await manager.sendTransaction({ to: "0xdead", value: "0x1" });
     expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
@@ -122,7 +121,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const connector = createMockConnector("test", NAMESPACE_EIP155);
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
-    const session = await manager.connect("mock-test");
+    const _session = await manager.connect("mock-test");
     const balance = await manager.getBalance!();
     expect(balance).toBe("1000000000000000000");
     expect(() => BigInt(balance!)).not.toThrow();
@@ -132,7 +131,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const connector = createMockConnector("test", NAMESPACE_EIP155);
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
-    const session = await manager.connect("mock-test");
+    const _session = await manager.connect("mock-test");
     await manager.disconnect();
     expect(manager.getActiveSession()).toBeNull();
   });
@@ -141,7 +140,7 @@ describe("Financial System Integration: ConnectorManager", () => {
     const connector = createMockConnector("test", NAMESPACE_EIP155);
     const manager = createConnectorManager();
     manager.register("mock-test", connector);
-    const session = await manager.connect("mock-test");
+    const _session = await manager.connect("mock-test");
     await expect(manager.switchChain("eip155:137")).resolves.not.toThrow();
   });
 });

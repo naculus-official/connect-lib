@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { StorageAdapter } from "../storage/types";
 import type { WalletData } from "../wallet";
 import { PocketWallet } from "../wallet";

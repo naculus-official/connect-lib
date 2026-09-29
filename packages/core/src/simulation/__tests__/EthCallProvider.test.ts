@@ -6,7 +6,6 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EthCallProvider } from "../providers/EthCallProvider";
-import type { TransactionDescriptor } from "../types";
 
 // ── Mock RPC Response ─────────────────────────────────────────────
 

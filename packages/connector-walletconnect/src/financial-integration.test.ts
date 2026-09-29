@@ -1,5 +1,5 @@
 import { createEmptySession } from "@naculus/connect-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WalletConnectConnector } from "./index";
 
 const TEST_PROJECT_ID = "test-project-id";

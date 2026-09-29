@@ -1,18 +1,6 @@
-/**
- * Tests for PaymasterService
- *
- * Tests cover:
- * - Paymaster type handling
- * - Error cases for empty/missing config
- * - Sponsor info tracking
- * - isSponsored checks
- *
- * RPC-dependent tests are conditional.
- */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { PaymasterService, createPaymasterService, type PaymasterServiceConfig } from "../paymaster";
 import { buildUserOperation } from "../user-operation";
 import type { Address, PaymasterConfig } from "../types";
@@ -294,7 +282,7 @@ describe("sponsor paymaster data", () => {
   });
 
   it("falls back to verifying paymaster when sponsor RPC returns error", async () => {
-    const spy = vi.spyOn(globalThis, "fetch")
+    const _spy = vi.spyOn(globalThis, "fetch")
       .mockImplementationOnce(async () => ({ ok: true, status: 200, json: async () => ({ error: { code: -32000, message: "not sponsored" } }) }) as unknown as Response)
       .mockImplementationOnce(async () => ({ ok: true, status: 200, json: async () => ({ result: { paymasterAndData: "0xfallback", sponsor: { name: "Fallback" } } }) }) as unknown as Response);
     const service = new PaymasterService(createServiceConfig({ type: "sponsor" }));

@@ -7,7 +7,6 @@
  * - Consistency across entries
  */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { describe, expect, it } from "vitest";
 import { CHAINS, getChainInfo } from "./chain-registry";

@@ -12,8 +12,6 @@ import {
 } from "@naculus/connect-core";
 import {
   createProviderFromWalletStandard,
-  isPhantomInstalled,
-  isSolflareInstalled,
   SOLANA_WALLET_META,
 } from "./discovery";
 import type { SolanaRoles } from "./roles";

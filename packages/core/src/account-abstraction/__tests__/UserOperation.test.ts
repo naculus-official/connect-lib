@@ -12,9 +12,7 @@ import { AccountAbstractionError } from "../errors";
 import {
   type Address,
   type Call,
-  DEFAULT_CALL_GAS_LIMIT,
   DEFAULT_PRE_VERIFICATION_GAS,
-  DEFAULT_VERIFICATION_GAS_LIMIT,
   ENTRY_POINT_V0_7,
   type Hex,
   type UserOperation,

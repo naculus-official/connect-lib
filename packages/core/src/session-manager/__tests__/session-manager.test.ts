@@ -10,7 +10,6 @@ import { createSessionPersistence } from "../persistence";
 import { MemoryStorageAdapter } from "../../storage";
 import type {
   ActiveSessionBundle,
-  ChainSession,
   SessionManagerConfig,
 } from "../types";
 import { parseChainId, validateChainId } from "../types";
@@ -506,7 +505,7 @@ describe("SessionManager", () => {
 
       // Mock estimateFees to return a value
       const { estimateFees } = await import("../../fee-estimation");
-      const originalEstimate = estimateFees;
+      const _originalEstimate = estimateFees;
 
       // We can't easily mock estimateFees in vitest,
       // so we just verify the flow doesn't throw

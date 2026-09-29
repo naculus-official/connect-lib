@@ -1,11 +1,11 @@
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
+
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorageAdapter } from "../../storage";
 import { SessionKeyManager } from "../SessionKeyManager";
 import { decryptPrivateKey, SessionKeyStorage } from "../storage";
-import type { SessionKeyInfo, SessionKeyScope } from "../types";
+import type { SessionKeyScope } from "../types";
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 

@@ -9,7 +9,6 @@ import {
   applyMultiplier,
   estimateFee as oracleEstimateFee,
   resolveFeeOptions,
-  shouldUseEIP1559,
   validateFeeParams,
 } from "./fee-oracle";
 import {
@@ -45,7 +44,6 @@ import type {
   Eip7702AuthorizationOptions,
   SignedEip7702Authorization,
   Signer,
-  SignRequest,
   SignResult,
   TransactionRequest,
   TransactionResult,
@@ -82,7 +80,6 @@ import {
   cloneForBumping,
   resolveChainId,
 } from "./transaction";
-import { MemoryHistoryStorage } from "./tx-monitor/TxHistoryStore";
 import { TxMonitor } from "./tx-monitor/TxMonitor";
 import type {
   ProviderLike,

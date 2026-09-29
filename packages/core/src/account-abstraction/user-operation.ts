@@ -12,7 +12,6 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { AccountAbstractionError } from "./errors";
 import {
   type Address,
-  type BundlerClient,
   type Call,
   DEFAULT_CALL_GAS_LIMIT,
   DEFAULT_PRE_VERIFICATION_GAS,
@@ -20,7 +19,6 @@ import {
   type Hex,
   type UserOperation,
   type UserOperationGasEstimate,
-  type UserOperationReceipt,
   type UserOperationResponse,
   type UserOperationVersion,
 } from "./types";
@@ -227,7 +225,6 @@ function encodeExecuteBatchV07(calls: Call[]): Hex {
 
   const toLen = 32 + n * 32;
   const valuesLen = 32 + n * 32;
-  const datasLen = datasArray.length / 2;
 
   const headSize = 32 * 3;
   const toOffset = headSize;

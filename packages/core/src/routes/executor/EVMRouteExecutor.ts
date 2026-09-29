@@ -62,12 +62,6 @@ const ERC20_ABI = [
   },
 ] as const;
 
-/**
- * Type-safe ABI for writeContract calls.
- * Widened to unknown[] because viem's writeContract accepts unknown[].
- */
-type Erc20Abi = typeof ERC20_ABI;
-
 // ─── EVMRouteExecutor ─────────────────────────────────────────────────
 
 export class EVMRouteExecutor {

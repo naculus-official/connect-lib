@@ -76,20 +76,6 @@ async function getTxByHash(provider: ProviderLike, hash: string): Promise<any> {
   });
 }
 
-/**
- * Fetch transaction count for an address (to detect nonce usage).
- */
-async function getTxCount(
-  provider: ProviderLike,
-  address: string,
-): Promise<number> {
-  const result = await provider.request({
-    method: "eth_getTransactionCount",
-    params: [address, "latest"],
-  });
-  return Number(result as string);
-}
-
 export class TxPoller {
   private getProvider: (chainId: number) => ProviderLike;
   private defaultInterval: number;

@@ -3,7 +3,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { concatBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { base58, base64 } from "@scure/base";
 import { WalletError } from "./errors";
-import { compileV0, equal, key, type Meta, shortVec } from "./solana-wire";
+import { compileV0, equal, key, shortVec } from "./solana-wire";
 
 /**
  * One SPL token payment as a Solana transaction, built and checked byte by

@@ -16,7 +16,7 @@ import {
   AMOUNTS,
   DECIMALS,
 } from "@naculus/test-utils/test-constants";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, } from "vitest";
 import { IndexedDbStorageAdapter } from "../storage/indexed-db";
 import { LocalStorageAdapter } from "../storage/local-storage";
 import type { WalletData } from "../wallet";
@@ -28,7 +28,7 @@ function toBigInt(value: string, decimals: number): bigint {
   return BigInt(int + padded);
 }
 
-function fromBigInt(value: bigint, decimals: number): string {
+function _fromBigInt(value: bigint, decimals: number): string {
   const str = value.toString().padStart(decimals + 1, "0");
   const int = str.slice(0, str.length - decimals) || "0";
   const frac = str.slice(str.length - decimals).replace(/0+$/, "");

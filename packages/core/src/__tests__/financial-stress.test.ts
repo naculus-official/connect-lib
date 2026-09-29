@@ -13,7 +13,6 @@ import { parseUnits, formatUnits } from "../token/units";
 import { abiEncodeUint256 } from "../token/ERC20TokenHelper";
 import { encodeGasLimits } from "../account-abstraction/user-operation";
 import { decodeGasLimits } from "../account-abstraction/SmartAccountManager";
-import { createConnectorManager } from "../connector-manager";
 import { MemoryStorageAdapter } from "../storage";
 import { SessionPersistence } from "../session-manager/persistence";
 import { fuzzer } from "@naculus/test-utils/test-fuzzer";

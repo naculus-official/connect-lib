@@ -21,9 +21,6 @@ import type { TokenConfig } from "../token/types";
 import { EthCallProvider } from "./providers/EthCallProvider";
 import type { SimulationProvider } from "./providers/types";
 import type {
-  ApprovalChange,
-  BalanceChange,
-  GasInfo,
   RiskAssessment,
   SimulationConfig,
   SimulationProviderName,

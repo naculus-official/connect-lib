@@ -1,5 +1,5 @@
 import { WalletConnectConnector } from "@naculus/connector-walletconnect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNaculusConnector } from "./index";
 
 const TEST_PROJECT_ID = "test-project-id";

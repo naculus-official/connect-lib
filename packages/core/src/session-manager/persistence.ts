@@ -9,7 +9,6 @@
  */
 
 import { logger } from "../logger";
-import type { UniversalWalletSession } from "../session";
 import { isSessionExpired } from "../session";
 import type { StorageAdapter } from "../storage";
 import { LocalStorageAdapter, MemoryStorageAdapter } from "../storage";

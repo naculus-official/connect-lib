@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, } from "vitest";
 
 describe("XRPL Crypto: Address & Key Format", () => {
   it("validates XRPL classic address format (r...)", () => {

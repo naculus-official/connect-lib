@@ -1,5 +1,4 @@
 import type {
-  DiscoveredSolanaWallet,
   SolanaProvider,
   WalletStandardWallet,
 } from "./types";

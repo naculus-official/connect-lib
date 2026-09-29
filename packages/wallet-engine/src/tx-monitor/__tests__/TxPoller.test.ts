@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_POLL_INTERVAL, TxPoller } from "../poller";
+import { TxPoller } from "../poller";
 import type { ProviderLike } from "../types";
 
 class MockProvider {

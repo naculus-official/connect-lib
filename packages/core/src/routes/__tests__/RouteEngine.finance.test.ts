@@ -6,12 +6,11 @@
  * and output amount calculation correctness.
  */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeGasLimits } from "../../account-abstraction/SmartAccountManager";
 import { encodeGasLimits } from "../../account-abstraction/user-operation";
-import { CHAINS, getChainInfo } from "../../chain-registry";
+import { CHAINS, } from "../../chain-registry";
 import { RouteEngine } from "../RouteEngine";
 import type {
   BridgeProvider,
@@ -38,7 +37,7 @@ const USDC_BSC: Token = {
   symbol: "USDC",
 };
 
-const USDT_ETH: Token = {
+const _USDT_ETH: Token = {
   chainId: 1,
   address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
   decimals: 6,
@@ -98,7 +97,7 @@ function createMockSwapProvider(
   };
 }
 
-function createMockBridgeProvider(
+function _createMockBridgeProvider(
   name: string,
   cost: bigint = 1_000_000n,
   timeMs: number = 60_000,
@@ -965,7 +964,7 @@ describe("Chain name mapping completeness", () => {
   it("all chains with USDC that also have Axelar support are consistent", () => {
     // Every chain with an axelarName should also have a usdcAddress
     for (const [chainIdStr, info] of Object.entries(CHAINS)) {
-      const chainId = Number(chainIdStr);
+      const _chainId = Number(chainIdStr);
       if (info.axelarName) {
         expect(info.usdcAddress).toBeDefined();
       }
@@ -974,7 +973,7 @@ describe("Chain name mapping completeness", () => {
 
   it("all chains with USDT also have USDC", () => {
     // USDT exists on a subset of chains that have USDC
-    for (const [chainIdStr, info] of Object.entries(CHAINS)) {
+    for (const [_chainIdStr, info] of Object.entries(CHAINS)) {
       if (info.usdtAddress) {
         expect(info.usdcAddress).toBeDefined();
       }

@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SimulationManager, compareSimulationVsActual } from "../SimulationManager";
 import type { SimulationProvider } from "../providers/types";
-import type { SimulationResult, TransactionDescriptor } from "../types";
+import type { SimulationResult, } from "../types";
 
 // ── Mock eth_call RPC ─────────────────────────────────────────────
 

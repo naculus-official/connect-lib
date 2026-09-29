@@ -1,8 +1,4 @@
-import type {
-  NAMESPACE_EIP155,
-  NAMESPACE_SOLANA,
-  NAMESPACE_XRPL,
-} from "../constants";
+
 
 /**
  * Result of a forward name resolution (name → address).

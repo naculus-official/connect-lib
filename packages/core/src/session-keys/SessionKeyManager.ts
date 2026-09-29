@@ -50,7 +50,6 @@ import type {
   SessionKeyBundle,
   SessionKeyInfo,
   SessionKeyManagerConfig,
-  SessionKeyPair,
   SessionKeyScope,
   SessionKeyTransaction,
   SignedAuthorization,

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectorSupport, UniversalConnector } from "./connector";
 import { ConnectorManager, createConnectorManager } from "./connector-manager";
-import type { UniversalWalletSession } from "./session";
 
 const createMockConnector = (
   id: string,
@@ -152,7 +151,7 @@ describe("ConnectorManager", () => {
     manager.register("fallback", createMockConnector("fallback"));
     manager.register("other", createMockConnector("other"));
 
-    const session = await manager.connect();
+    const _session = await manager.connect();
     expect(manager.getActive()).toBeDefined();
   });
 

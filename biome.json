@@ -26,8 +26,8 @@
       },
       "correctness": {
         "noUnusedFunctionParameters": "off",
-        "noUnusedImports": "off",
-        "noUnusedVariables": "off",
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
         "noUnusedPrivateClassMembers": "off"
       }
     }

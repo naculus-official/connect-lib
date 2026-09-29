@@ -23,7 +23,6 @@ import {
   AA_SUPPORTED_CHAINS,
   type Address,
   type Call,
-  DEFAULT_ENTRY_POINT,
   ENTRY_POINT_V0_6,
   ENTRY_POINT_V0_7,
   type Hex,
@@ -354,7 +353,7 @@ describe("AA_SUPPORTED_CHAINS", () => {
   });
 
   it("each entry has entryPoint and factory", () => {
-    for (const [chainId, info] of Object.entries(AA_SUPPORTED_CHAINS)) {
+    for (const [_chainId, info] of Object.entries(AA_SUPPORTED_CHAINS)) {
       expect(info.entryPoint).toBeTruthy();
       expect(info.entryPoint.startsWith("0x")).toBe(true);
       expect(info.entryPoint.length).toBe(42);
@@ -570,7 +569,7 @@ describe("getDeployCallData", () => {
 // ─── sendUserOperation (full flow) ──────────────────────────────
 
 describe("sendUserOperation (full flow)", () => {
-  const RPC_URL = "https://eth.llamarpc.com";
+  const _RPC_URL = "https://eth.llamarpc.com";
   const BUNDLER_URL = "https://api.pimlico.io/v2/1/rpc?apikey=test";
   const TEST_CALL: Call = {
     to: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as Address,
@@ -588,12 +587,12 @@ describe("sendUserOperation (full flow)", () => {
     injectExtra = true,
   ) {
     let rpcIdx = 0;
-    let bundlerCalled = false;
+    let _bundlerCalled = false;
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
         if (url === BUNDLER_URL) {
-          bundlerCalled = true;
+          _bundlerCalled = true;
           const body = init?.body ? JSON.parse(init.body as string) : {};
           return {
             ok: true,
@@ -1103,7 +1102,7 @@ describe("getNonce", () => {
 // ─── estimateUserOperationGas ───────────────────────────────────
 
 describe("estimateUserOperationGas", () => {
-  const BUNDLER_URL = "https://api.pimlico.io/v2/1/rpc?apikey=test";
+  const _BUNDLER_URL = "https://api.pimlico.io/v2/1/rpc?apikey=test";
 
   beforeEach(() => {
     // Source code passes BigInt defaults to JSON.stringify via rpcCall.

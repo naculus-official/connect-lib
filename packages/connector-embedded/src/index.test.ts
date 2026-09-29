@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPocketConnector, type PocketConnector } from "./index";
+import { createPocketConnector, } from "./index";
 
 // LocalStorage mock
 const localStorageMock = (() => {

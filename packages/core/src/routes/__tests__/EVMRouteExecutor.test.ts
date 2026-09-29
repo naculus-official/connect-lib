@@ -2,14 +2,13 @@
  * EVMRouteExecutor Tests
  */
 
-import { ADDRESSES } from "@naculus/test-utils/test-constants";
 
 import { describe, expect, it } from "vitest";
 import {
   EVMRouteExecutor,
   type ViemWalletClient,
 } from "../executor/EVMRouteExecutor";
-import type { Route, RouteStep, Token } from "../types";
+import type { Route, Token } from "../types";
 import { RouteEngineError } from "../types";
 
 const WETH: Token = {

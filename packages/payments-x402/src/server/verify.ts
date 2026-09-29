@@ -13,7 +13,6 @@ import {
 } from "../wire";
 import {
   deepFreeze,
-  exactKeys,
   type Failure,
   failure,
   isFailure,

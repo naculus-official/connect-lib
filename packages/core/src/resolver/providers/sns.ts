@@ -5,7 +5,6 @@
 // resolves a name to a different account entirely.
 
 import { ed25519 } from "@noble/curves/ed25519.js";
-import { keccak_256 } from "@noble/hashes/sha3.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { base58 } from "@scure/base";

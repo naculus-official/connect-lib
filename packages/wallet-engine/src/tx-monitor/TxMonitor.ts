@@ -14,7 +14,6 @@ import { TxHistoryStore } from "./TxHistoryStore";
 import type {
   ProviderLike,
   TxHistoryQuery,
-  TxStatus,
   TxStatusEntry,
   WatchEntry,
   WatchTxOptions,

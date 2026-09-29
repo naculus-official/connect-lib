@@ -23,7 +23,6 @@ import { CoinbaseProviderAdapter } from "./provider";
 import type {
   CoinbaseConnectionMode,
   CoinbaseConnectorConfig,
-  CoinbaseSession,
 } from "./types";
 
 function requireEvmAddress(value: unknown, field: string): string {
@@ -360,6 +359,7 @@ export class CoinbaseConnector implements UniversalConnector {
    */
   async connect(input?: unknown): Promise<UniversalWalletSession> {
     const provider = this.getProvider();
+    // biome-ignore lint/correctness/noUnusedVariables: known bug, tracked — connect() documents a chainId override but ignores it and keeps the wallet's current chain (.ai/reviews/2026-09-29-duplication-review.md)
     const connectInput =
       input && typeof input === "object" && !Array.isArray(input)
         ? (input as Record<string, unknown>)

@@ -368,12 +368,12 @@ describe("Coinbase Financial: switchChain chainId conversion", () => {
 
 describe("Coinbase Financial: getBalance BigInt", () => {
   let connector: InstanceType<typeof CoinbaseConnector>;
-  let session: UniversalWalletSession;
+  let _session: UniversalWalletSession;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     connector = await createConnectedConnector();
-    session = createSession();
+    _session = createSession();
   });
 
   it("returns string bigint from RPC balance", async () => {

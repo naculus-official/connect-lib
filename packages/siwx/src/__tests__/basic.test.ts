@@ -21,7 +21,7 @@ import {
 } from "../session-storage";
 import type { SiwxMessage, SiwxParams } from "../types";
 import { addSecondsISO, generateNonce, isValidNonce, nowISO } from "../utils";
-import { type VerifySiwxMessageParams, verifySiwxMessage } from "../verify";
+import { verifySiwxMessage } from "../verify";
 
 // Reset nonce storage before each test to avoid cross-test contamination
 beforeEach(async () => {
