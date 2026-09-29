@@ -578,7 +578,7 @@ export class SmartAccountManager {
    * @returns Transaction hash
    */
   async deployAccount(config: SmartAccountConfig): Promise<Hex> {
-    // biome-ignore lint/correctness/noUnusedVariables: known bug, tracked — the deployment check below queries this.config.rpcUrl, not config.chainId's chain (.ai/reviews/2026-09-29-duplication-review.md)
+    // biome-ignore lint/correctness/noUnusedVariables: known bug — the deployment check below queries this.config.rpcUrl, not the RPC of config.chainId's chain; fix separately
     const chainId = config.chainId ?? this.config.chainId;
     const address = await this.getAccountAddress(config);
     const deployed = await isContractDeployed(this.config.rpcUrl, address);
