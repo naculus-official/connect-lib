@@ -1,0 +1,28 @@
+{
+  "$comment": "gzip bytes per built file; reset with node scripts/size-budget.mjs --update and give the reason in the commit.",
+  "extra": [
+    "packages/wallet-engine/dist/crypto-worker.js"
+  ],
+  "budgets": {
+    "packages/connect-lib/index.js": 1024,
+    "packages/connector-coinbase/dist/index.js": 6144,
+    "packages/connector-embedded/dist/index.js": 4096,
+    "packages/connector-evm-injected/dist/index.js": 7168,
+    "packages/connector-passkeys/dist/index.js": 4096,
+    "packages/connector-reown/dist/index.js": 2048,
+    "packages/connector-safe/dist/index.js": 4096,
+    "packages/connector-solana-kit/dist/index.js": 2048,
+    "packages/connector-solana/dist/index.js": 5120,
+    "packages/connector-wagmi/dist/index.js": 2048,
+    "packages/connector-walletconnect/dist/index.js": 8192,
+    "packages/connector-xrpl/dist/index.js": 4096,
+    "packages/core/dist/index.js": 98304,
+    "packages/payments-mpp/dist/index.js": 2048,
+    "packages/payments-mpp/dist/server.js": 8192,
+    "packages/payments-x402/dist/index.js": 2048,
+    "packages/payments-x402/dist/server.js": 7168,
+    "packages/siwx/dist/index.js": 7168,
+    "packages/wallet-engine/dist/crypto-worker.js": 23552,
+    "packages/wallet-engine/dist/index.js": 27648
+  }
+}

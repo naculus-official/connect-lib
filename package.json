@@ -27,7 +27,10 @@
     "lint": "biome lint",
     "api:check": "node scripts/api-surface.mjs --check",
     "api:update": "node scripts/api-surface.mjs",
-    "helpers:check": "node scripts/critical-helpers.mjs"
+    "helpers:check": "node scripts/critical-helpers.mjs",
+    "dup:check": "jscpd --config .jscpd.json packages/*/src",
+    "deps:check": "pnpm dlx knip@5.88.1 --production --include dependencies,unlisted,unresolved",
+    "size:check": "node scripts/size-budget.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
@@ -39,6 +42,7 @@
     "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "^5.0.0",
     "cspell": "^10.3.4",
+    "jscpd": "^5.3.3",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "viem": "^2.56.5",
