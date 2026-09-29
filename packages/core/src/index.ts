@@ -82,7 +82,9 @@ export {
   eip155Reference,
   isEvmAddress,
   namespaceOf,
+  normalizeEip155ChainId,
   parseCaip10,
+  requireEip155ChainId,
 } from "./caip";
 export type { Caip10Account } from "./caip";
 export { parseChainId, validateChainId } from "./session-manager/types";

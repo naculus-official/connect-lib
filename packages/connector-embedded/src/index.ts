@@ -12,8 +12,8 @@ import type {
   ConnectorSupport,
   DelegationAuthorizationRequest,
   SelfDelegationRequest,
-  SentDelegation,
   SendCallsOptions,
+  SentDelegation,
   SignedDelegationAuthorization,
   UniversalConnector,
   UniversalWalletSession,
@@ -21,6 +21,7 @@ import type {
 import {
   createEmptySession,
   eip155Reference,
+  requireEip155ChainId,
   SOLANA_MAINNET,
   WalletError,
 } from "@naculus/connect-core";
@@ -64,23 +65,6 @@ const SUPPORT: ConnectorSupport = {
   qr: false,
   trustedReconnect: true,
 };
-
-function normalizeEip155ChainId(chainId: string): string {
-  if (typeof chainId !== "string" || !/^eip155:[1-9][0-9]*$/.test(chainId)) {
-    throw new WalletError(
-      "chain_unsupported",
-      `Invalid EIP-155 chain ID: ${chainId}`,
-    );
-  }
-  const reference = BigInt(chainId.slice("eip155:".length));
-  if (reference <= 0n || reference > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new WalletError(
-      "chain_unsupported",
-      `EIP-155 chain ID is outside the embedded signer's numeric range: ${chainId}`,
-    );
-  }
-  return `eip155:${reference.toString(10)}`;
-}
 
 function extractTransactionInput(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== "object") {
@@ -275,7 +259,7 @@ class PocketConnectorImpl implements UniversalConnector {
       storageKey: config.storageKey ?? "naculus_pocket",
       derivationPath: config.derivationPath ?? "m/44'/60'/0'/0/0",
       autoSave: config.autoSave ?? true,
-      chainId: normalizeEip155ChainId(config.chainId ?? "eip155:1"),
+      chainId: requireEip155ChainId(config.chainId ?? "eip155:1"),
       rpcUrl: config.rpcUrl ?? "",
     };
   }
@@ -774,7 +758,7 @@ class PocketConnectorImpl implements UniversalConnector {
     chainId: string,
   ): Promise<void> {
     this.requireActiveSession(session);
-    this.cfg.chainId = normalizeEip155ChainId(
+    this.cfg.chainId = requireEip155ChainId(
       chainId.startsWith("eip155:") ? chainId : `eip155:${chainId}`,
     );
     const w = await this.ensureWallet();

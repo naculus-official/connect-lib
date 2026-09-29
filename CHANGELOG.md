@@ -7,6 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **Solana payment-channel primitives for the MPP session intent** (`@naculus/connect-core`) — channel PDA derivation, open / topUp / requestClose / withdrawPayer builders, the 50-byte voucher encoding with `signVoucher` / `verifyVoucher`, `assertTrustedChannelProgram` (the channel program must be the reviewed deployment: address, ProgramData, deployed slot and upgrade authority), and `verifySignedChannelOpen`. Byte-identical to `@solana/mpp` 0.7.0's generated client. The session client itself is not in this release. Design: `docs/design/mpp-session.md`.
+- **`normalizeEip155ChainId` / `requireEip155ChainId`** (`@naculus/connect-core`) — one EIP-155 chain-ID reader for wallet events (`eip155:N`, `0x` hex, decimal) and one checker for configuration.
+
+### Changed
+
+- **Chain IDs from wallets and configuration go through connect-core** (`@naculus/connector-embedded`, `@naculus/connector-passkeys`, `@naculus/connector-evm-injected`) — each connector had its own copy. Chain IDs above `Number.MAX_SAFE_INTEGER` are now refused everywhere (`connector-passkeys` and `connector-evm-injected` accepted them before).
+
 ## 0.5.0 — 2026-09-28
 
 **Behavior change for `@naculus/wallet-engine`** — see *Changed*: `isolation: "secure"` now throws. Everything else is additive or a fix.

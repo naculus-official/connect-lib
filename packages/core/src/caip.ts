@@ -10,6 +10,7 @@
  * the next caller does not get to write a fourth.
  */
 
+import { WalletError } from "./errors";
 import { parseChainId } from "./session-manager/types";
 
 export interface Caip10Account {
@@ -74,6 +75,52 @@ export function eip155Reference(chainId: string): number | null {
   if (!/^[1-9]\d*$/.test(reference)) return null;
   const value = Number(reference);
   return Number.isSafeInteger(value) ? value : null;
+}
+
+/**
+ * A wallet-reported EIP-155 chain as canonical CAIP-2 (`eip155:<decimal>`),
+ * or undefined. Accepts what wallets emit — `eip155:N`, `0x` hex or a decimal
+ * string — and refuses 0 and anything beyond `Number.MAX_SAFE_INTEGER`, so a
+ * malformed wallet event cannot become a chain the SDK acts on.
+ *
+ * The connectors and appkit each had a copy; one of them accepted chain 0.
+ */
+export function normalizeEip155ChainId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  let raw: string;
+  if (value.startsWith("eip155:")) {
+    raw = value.slice("eip155:".length);
+    if (!/^\d+$/.test(raw)) return undefined;
+  } else if (/^0x[0-9a-f]+$/i.test(value) || /^\d+$/.test(value)) {
+    raw = value;
+  } else {
+    return undefined;
+  }
+  let numeric: bigint;
+  try {
+    numeric = BigInt(raw);
+  } catch {
+    return undefined;
+  }
+  if (numeric <= 0n || numeric > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return undefined;
+  }
+  return `eip155:${numeric.toString(10)}`;
+}
+
+/**
+ * A configured EIP-155 chain ID, checked: exactly `eip155:<decimal>` with no
+ * leading zeros, from 1 to `Number.MAX_SAFE_INTEGER`. Throws otherwise.
+ */
+export function requireEip155ChainId(chainId: string): string {
+  const reference = eip155Reference(chainId);
+  if (reference === null) {
+    throw new WalletError(
+      "chain_unsupported",
+      `Invalid EIP-155 chain ID: ${chainId}`,
+    );
+  }
+  return `eip155:${reference}`;
 }
 
 /**

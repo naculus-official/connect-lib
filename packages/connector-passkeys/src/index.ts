@@ -4,7 +4,7 @@ import type {
   UniversalConnector,
   UniversalWalletSession,
 } from "@naculus/connect-core";
-import { WalletError } from "@naculus/connect-core";
+import { requireEip155ChainId, WalletError } from "@naculus/connect-core";
 
 export interface PasskeyConfig {
   storageKey?: string;
@@ -101,23 +101,6 @@ function getRpId(): string {
   return "localhost";
 }
 
-function normalizeEip155ChainId(chainId: string): string {
-  if (typeof chainId !== "string" || !/^eip155:[1-9][0-9]*$/.test(chainId)) {
-    throw new WalletError(
-      "chain_unsupported",
-      `Invalid EIP-155 chain ID: ${chainId}`,
-    );
-  }
-  const reference = BigInt(chainId.slice("eip155:".length));
-  if (reference <= 0n) {
-    throw new WalletError(
-      "chain_unsupported",
-      `Invalid EIP-155 chain ID: ${chainId}`,
-    );
-  }
-  return `eip155:${reference.toString(10)}`;
-}
-
 class PasskeysConnectorImpl implements UniversalConnector {
   readonly id = "passkeys";
   readonly name = "Passkeys";
@@ -135,7 +118,7 @@ class PasskeysConnectorImpl implements UniversalConnector {
         name: DEFAULT_RP_NAME,
         id: getRpId(),
       },
-      chainId: normalizeEip155ChainId(config.chainId ?? DEFAULT_CHAIN),
+      chainId: requireEip155ChainId(config.chainId ?? DEFAULT_CHAIN),
     };
   }
 
@@ -495,7 +478,7 @@ class PasskeysConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
     chainId: string,
   ): Promise<void> {
-    this.cfg = { ...this.cfg, chainId: normalizeEip155ChainId(chainId) };
+    this.cfg = { ...this.cfg, chainId: requireEip155ChainId(chainId) };
   }
 
   async sendCalls(

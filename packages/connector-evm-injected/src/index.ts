@@ -14,10 +14,11 @@ import {
   getPermissions,
   hasPermission,
   hexEncode,
+  normalizeEip155ChainId,
   normalizeEip5792Capabilities,
   requestPermissions,
-  WalletError,
   scopeRequestFrom,
+  WalletError,
 } from "@naculus/connect-core";
 import { CHAIN_METADATA } from "./chain";
 import {
@@ -50,27 +51,6 @@ interface StoredEventHandler {
 }
 
 /** Normalize EIP-1193 chainChanged values to the CAIP-2 form used by sessions. */
-function normalizeEip155ChainId(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-
-  try {
-    if (value.startsWith("eip155:")) {
-      const reference = value.slice("eip155:".length);
-      if (!/^\d+$/.test(reference)) return undefined;
-      const numeric = BigInt(reference);
-      return numeric > 0n ? `eip155:${numeric.toString(10)}` : undefined;
-    }
-    if (/^0x[0-9a-f]+$/i.test(value) || /^\d+$/.test(value)) {
-      const numeric = BigInt(value);
-      return numeric > 0n ? `eip155:${numeric.toString(10)}` : undefined;
-    }
-  } catch {
-    // An invalid wallet event must not corrupt the persisted session.
-  }
-
-  return undefined;
-}
-
 function rawEvmAddress(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0) return undefined;
   let address = value;
