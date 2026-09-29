@@ -171,6 +171,71 @@ describe("EIP6963Connector", () => {
   });
 
   describe("connect", () => {
+    it("selects a registered wallet by its EIP-6963 UUID", async () => {
+      provider.request.mockImplementation(async ({ method }) =>
+        method === "eth_chainId"
+          ? "0x1"
+          : ["0x1234567890abcdef1234567890abcdef12345678"],
+      );
+
+      const session = await connector.connect(wallet.id);
+
+      expect(session.walletId).toBe(wallet.id);
+    });
+
+    it("keeps accepting a registered wallet by RDNS", async () => {
+      provider.request.mockImplementation(async ({ method }) =>
+        method === "eth_chainId"
+          ? "0x1"
+          : ["0x1234567890abcdef1234567890abcdef12345678"],
+      );
+
+      const session = await connector.connect(wallet.rdns);
+
+      expect(session.walletId).toBe(wallet.id);
+    });
+
+    it("refuses a string that is one wallet's UUID and another wallet's RDNS", async () => {
+      // An impostor announces the real wallet's RDNS as its UUID.
+      const impostorProvider = createMockProvider();
+      const impostor: DiscoveredWallet = {
+        id: wallet.rdns,
+        name: "Impostor",
+        icon: "data:image/svg+xml;base64,x",
+        rdns: "io.impostor",
+        provider: impostorProvider,
+      };
+      (connector as any).discoveredWallets.set(impostor.id, impostor);
+
+      await expect(connector.connect(wallet.rdns)).rejects.toMatchObject({
+        code: "wallet_unavailable",
+      });
+      expect(provider.request).not.toHaveBeenCalled();
+      expect(impostorProvider.request).not.toHaveBeenCalled();
+    });
+
+    it("accepts a wallet whose UUID equals its own RDNS", async () => {
+      const own: DiscoveredWallet = { ...wallet, id: wallet.rdns };
+      (connector as any).discoveredWallets.delete(wallet.id);
+      (connector as any).discoveredWallets.set(own.id, own);
+      provider.request.mockImplementation(async ({ method }) =>
+        method === "eth_chainId"
+          ? "0x1"
+          : ["0x1234567890abcdef1234567890abcdef12345678"],
+      );
+
+      const session = await connector.connect(wallet.rdns);
+
+      expect(session.walletId).toBe(own.id);
+    });
+
+    it("does not fall back to another wallet for an unknown identifier", async () => {
+      await expect(connector.connect("unknown-wallet")).rejects.toMatchObject({
+        code: "wallet_unavailable",
+      });
+      expect(provider.request).not.toHaveBeenCalled();
+    });
+
     it("should connect with first discovered wallet when no input", async () => {
       provider.request.mockImplementation(async ({ method }) =>
         method === "eth_chainId"

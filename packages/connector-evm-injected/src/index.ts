@@ -419,11 +419,28 @@ class EIP6963ConnectorImpl implements UniversalConnector {
         wallet = wallets[0];
       }
     } else if (typeof input === "string") {
-      wallet = this.getWalletByRDNS(input);
+      // Discovery exposes the EIP-6963 UUID as `wallet.id`, and appkit passes
+      // that value back when the user selects a wallet. Keep accepting RDNS
+      // for callers that used the connector's original string contract.
+      //
+      // Announcements are unauthenticated and a UUID is any string, so one
+      // provider can announce another wallet's RDNS as its UUID. A string
+      // that is one wallet's UUID and a different wallet's RDNS is refused
+      // rather than resolved either way: UUID-first would hand an RDNS
+      // caller to the impostor.
+      const byId = this.discoveredWallets.get(input);
+      const byRdns = this.getWalletByRDNS(input);
+      if (byId && byRdns && byId !== byRdns) {
+        throw new WalletError(
+          "wallet_unavailable",
+          `Wallet "${input}" is ambiguous: it is one wallet's UUID and another wallet's RDNS.`,
+        );
+      }
+      wallet = byId ?? byRdns;
       if (!wallet) {
         throw new WalletError(
           "wallet_unavailable",
-          `Wallet "${input}" not found. Please check the wallet RDNS.`,
+          `Wallet "${input}" not found. Please check the wallet UUID or RDNS.`,
         );
       }
     } else if (typeof input === "object" && "provider" in input) {

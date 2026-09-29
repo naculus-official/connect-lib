@@ -22,6 +22,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **EIP-6963 wallet selection accepts the discovered wallet ID** (`@naculus/connector-evm-injected`) — appkit returns each discovered provider's UUID as its wallet ID, but the connector treated a string passed to `connect()` only as an RDNS. Selecting a wallet by its advertised ID now finds that exact provider; RDNS selection remains supported. A string that is one wallet's UUID and a different wallet's RDNS is refused (`wallet_unavailable`) rather than resolved: announcements are unauthenticated, so a provider could otherwise claim another wallet's RDNS as its UUID and capture callers selecting by RDNS.
 - **x402 with a Solana session key skips unsponsored requirements** (`@naculus/payments-x402`) — a requirement whose fee payer is the key or its owner is now skipped when choosing what to pay, so another acceptable requirement can be used; before, it was chosen and the key refused to sign (`session_scope_exceeded`). The key still refuses such a payment if asked directly.
 - **`abiEncodeUint256` error message** (`@naculus/connect-core`) — an amount above 2^256 − 1 was reported as "negative".
 
