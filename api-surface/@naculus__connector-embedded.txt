@@ -1,0 +1,11 @@
+@naculus/connector-embedded
+.:
+  createPocketConnector
+  PocketConfig
+  PocketConnector
+  PocketConnectorClass
+  StorageSecurityFinding
+  StorageSecurityReport
+  WalletAccount
+  WalletData
+  WalletNamespace

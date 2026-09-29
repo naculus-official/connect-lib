@@ -1,0 +1,15 @@
+@naculus/connector-evm-injected
+.:
+  createEIP6963Connector
+  type DiscoveredWallet
+  eip6963Connector
+  EIP6963Connector
+  EIP6963ConnectorClass
+  type Eip6963EthereumProvider
+  type EIP6963Provider
+  type EIP6963ProviderInfo
+  type EIP6963Session
+  getEIP6963Provider
+  isCoinbaseWalletInstalled
+  isMetaMaskInstalled
+  isWalletInstalled

@@ -1,0 +1,21 @@
+@naculus/connector-solana
+.:
+  createSolanaConnector
+  type DiscoveredSolanaWallet
+  featuresFromLegacyProvider
+  featuresFromWalletStandard
+  getSolanaProvider
+  isPhantomInstalled
+  isSolflareInstalled
+  requireRole
+  solanaConnector
+  SolanaConnector
+  type SolanaConnectorSession
+  type SolanaIdentity
+  type SolanaPayer
+  type SolanaProvider
+  solanaRoles
+  type SolanaRoles
+  type SolanaSigner
+  type SolanaWalletFeatures
+  type WalletStandardWallet

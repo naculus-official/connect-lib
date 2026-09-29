@@ -24,7 +24,10 @@
     "docs:serve": "npx serve docs",
     "spell-check": "cspell lint \"**/*.{ts,tsx,md}\"",
     "spell-fix": "cspell lint --fix \"**/*.{ts,tsx,md}\"",
-    "lint": "biome lint"
+    "lint": "biome lint",
+    "api:check": "node scripts/api-surface.mjs --check",
+    "api:update": "node scripts/api-surface.mjs",
+    "helpers:check": "node scripts/critical-helpers.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

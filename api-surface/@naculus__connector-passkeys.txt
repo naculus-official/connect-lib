@@ -1,0 +1,11 @@
+@naculus/connector-passkeys
+.:
+  createPasskeysConnector
+  createPasskeyUnlockProvider
+  default
+  type PasskeyAssertion
+  type PasskeyConfig
+  type PasskeyCredential
+  type PasskeyUnlockProvider
+  type VerifyOptions
+  verifyPasskeyAssertion

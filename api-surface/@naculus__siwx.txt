@@ -1,0 +1,62 @@
+@naculus/siwx
+.:
+  addSecondsISO
+  type ChainNamespace
+  checkSessionExpired
+  consumeNonce
+  consumeNonceIfValid
+  createEVMVerifier
+  createLocalStorageSiwxSessionStorage
+  createMemoryNonceStorage
+  createMemorySiwxSessionStorage
+  createSiwxMessage
+  createSolanaVerifier
+  createXRPLVerifier
+  decodeErc6492Signature
+  DEFAULT_NONCE_LENGTH
+  DEFAULT_SESSION_EXPIRY_SECONDS
+  DEFAULT_SESSION_STORAGE_KEY
+  encodeIsValidSignatureCall
+  ERC1271_MAGIC_VALUE
+  ERC6492_MAGIC_SUFFIX
+  type Erc6492Envelope
+  type EthCall
+  generateNonce
+  getBlockchainName
+  hashPersonalMessage
+  isErc1271Accepted
+  isErc6492Signature
+  isNonceConsumed
+  isNonceIssued
+  isNonceValid
+  isSiwxMessage
+  issueNonce
+  isValidDomain
+  isValidNonce
+  nowISO
+  parseChainId
+  parseSiwxMessage
+  removeNonce
+  resetNonceStorage
+  type SessionChangeCallback
+  type SessionExpiryCallback
+  setNonceStorage
+  SIWX_VERSION
+  type SiwxMessage
+  type SiwxNonceStorage
+  type SiwxParams
+  type SiwxRefreshParams
+  type SiwxResult
+  type SiwxSession
+  SiwxSessionManager
+  type SiwxSessionManagerOptions
+  type SiwxSessionStorage
+  type SiwxSignInParams
+  type SiwxVerificationResult
+  verifyCosmwasmSignInMessage
+  verifyErc1271
+  type VerifyOptions
+  verifyPolkadotSignInMessage
+  verifySiwxMessage
+  type VerifySiwxMessageParams
+  verifyStarknetSignInMessage

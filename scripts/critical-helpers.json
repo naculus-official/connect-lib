@@ -1,0 +1,129 @@
+{
+  "$comment": "Helper name -> the only source files allowed to define it. More than one file is a known duplicate: shrink the list when one is removed, never grow it without a reason written in the commit.",
+  "helpers": {
+    "normalizeEip155ChainId": [
+      "packages/core/src/caip.ts"
+    ],
+    "requireEip155ChainId": [
+      "packages/core/src/caip.ts"
+    ],
+    "eip155Reference": [
+      "packages/core/src/caip.ts"
+    ],
+    "parseCaip10": [
+      "packages/core/src/caip.ts"
+    ],
+    "isEvmAddress": [
+      "packages/core/src/caip.ts"
+    ],
+    "parseUnits": [
+      "packages/core/src/token/units.ts",
+      "packages/wallet-engine/src/erc20-utils.ts"
+    ],
+    "formatUnits": [
+      "packages/core/src/token/units.ts"
+    ],
+    "abiEncodeUint256": [
+      "packages/core/src/token/ERC20TokenHelper.ts",
+      "packages/wallet-engine/src/erc20-utils.ts"
+    ],
+    "abiEncodeAddress": [
+      "packages/core/src/token/ERC20TokenHelper.ts",
+      "packages/wallet-engine/src/erc20-utils.ts"
+    ],
+    "decodeUint256": [
+      "packages/core/src/token/ERC20TokenHelper.ts",
+      "packages/wallet-engine/src/erc20-utils.ts"
+    ],
+    "getSelector": [
+      "packages/core/src/token/ERC20TokenHelper.ts",
+      "packages/wallet-engine/src/erc20-utils.ts"
+    ],
+    "deriveKey": [
+      "packages/core/src/storage/encrypted-storage.ts",
+      "packages/wallet-engine/src/storage/encrypted.ts"
+    ],
+    "parseSolanaTransaction": [
+      "packages/core/src/solana-payment.ts",
+      "packages/wallet-engine/src/solana/transaction.ts"
+    ],
+    "verifySolanaSignature": [
+      "packages/core/src/solana-payment.ts"
+    ],
+    "verifySignedSplTransfer": [
+      "packages/core/src/solana-payment.ts"
+    ],
+    "associatedTokenAddress": [
+      "packages/core/src/solana-payment.ts"
+    ],
+    "compileV0": [
+      "packages/core/src/solana-wire.ts"
+    ],
+    "decodeBase64": [
+      "packages/payments-mpp/src/server/solana.ts",
+      "packages/payments-x402/src/server/common.ts",
+      "packages/siwx/src/chain-verifiers/cosmwasm.ts"
+    ],
+    "encodeBase64": [
+      "packages/payments-mpp/src/server/solana.ts",
+      "packages/payments-x402/src/server/common.ts"
+    ],
+    "requireEvmAddress": [
+      "packages/connector-coinbase/src/connector.ts",
+      "packages/connector-evm-injected/src/index.ts",
+      "packages/connector-walletconnect/src/index.ts"
+    ],
+    "assertSessionTransactionFrom": [
+      "packages/connector-coinbase/src/connector.ts",
+      "packages/connector-evm-injected/src/index.ts",
+      "packages/connector-walletconnect/src/index.ts"
+    ],
+    "normalizeEvmTransaction": [
+      "packages/connector-coinbase/src/connector.ts",
+      "packages/connector-evm-injected/src/index.ts",
+      "packages/connector-walletconnect/src/index.ts"
+    ],
+    "toEip155HexChainId": [
+      "packages/connector-evm-injected/src/index.ts",
+      "packages/connector-walletconnect/src/index.ts"
+    ],
+    "bytesEqual": [
+      "packages/connector-passkeys/src/verify.ts",
+      "packages/payments-x402/src/server/common.ts"
+    ],
+    "sameBytes": [
+      "packages/connector-solana-kit/src/index.ts",
+      "packages/wallet-engine/src/solana/transaction.ts"
+    ],
+    "equal": [
+      "packages/core/src/solana-wire.ts"
+    ],
+    "deriveChannelPda": [
+      "packages/core/src/solana-channel.ts"
+    ],
+    "encodeChannelVoucher": [
+      "packages/core/src/solana-channel.ts"
+    ],
+    "signVoucher": [
+      "packages/core/src/solana-channel.ts"
+    ],
+    "verifyVoucher": [
+      "packages/core/src/solana-channel.ts"
+    ],
+    "assertTrustedChannelProgram": [
+      "packages/core/src/solana-channel.ts"
+    ],
+    "typedDataDigest": [
+      "packages/core/src/session-keys/typed-data.ts"
+    ],
+    "toChecksumAddress": [
+      "packages/core/src/address-validation.ts"
+    ],
+    "aesGcmSeal": [
+      "packages/core/src/aead.ts"
+    ],
+    "aesGcmOpen": [
+      "packages/core/src/aead.ts"
+    ]
+  }
+}

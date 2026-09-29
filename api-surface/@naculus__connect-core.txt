@@ -1,0 +1,442 @@
+@naculus/connect-core
+.:
+  AA_ERROR_MESSAGES
+  AA_SUPPORTED_CHAINS
+  type AAErrorCode
+  abiEncodeAddress
+  abiEncodeFunctionCall
+  abiEncodeUint256
+  abiFunctionSelector
+  type AbiItem
+  AccountAbstractionError
+  type AccountCapabilities
+  type AccountType
+  type ActiveSessionBundle
+  type Address
+  type AddressResult
+  aesGcmOpen
+  aesGcmSeal
+  ANY_DELEGATE
+  type ApprovalChange
+  ARBITRUM_TOKENS
+  assertSolanaCluster
+  assertTrustedChannelProgram
+  associatedTokenAddress
+  type AtomicityRequirement
+  AUTO_RECONNECT_TIMEOUT_MS
+  type AutoReconnectConfig
+  AutoReconnectManager
+  type BalanceChange
+  BASE_TOKENS
+  type BatchCall
+  buildApproveDelegateTransaction
+  buildCallData
+  buildDelegation
+  type BuildDelegationInput
+  buildOpenChannelTransaction
+  buildRequestCloseChannelTransaction
+  buildRevokeDelegateTransaction
+  buildSplTransferTransaction
+  buildTopUpChannelTransaction
+  buildUserOperation
+  buildWithdrawPayerChannelTransaction
+  type BundlerClient
+  type Caip10Account
+  caip2ToHexChain
+  type Call
+  type CallsStatus
+  type CallsStatusCode
+  type CapabilityQueryable
+  type CaveatOptions
+  caveatsFromScope
+  type ChainFeeEstimator
+  type ChainFeeSupport
+  type ChainInfo
+  CHAINS
+  type ChainSession
+  type ChannelCapability
+  type ChannelMintAccount
+  type ChannelPdaInput
+  type ChannelVoucher
+  chooseExecutionStrategy
+  clearAutoDetectCache
+  clearChainFeeEstimators
+  compareSimulationVsActual
+  CONNECTOR_ERROR_MESSAGES
+  type ConnectorEntry
+  type ConnectorId
+  ConnectorManager
+  type ConnectorManagerConfig
+  type ConnectorSupport
+  createAutoReconnectManager
+  createConnectorManager
+  createEmptySession
+  type CreateEmptySessionInput
+  createPaymasterService
+  createSessionError
+  createSessionKeyError
+  createSessionManager
+  createSessionPersistence
+  createStorageAdapter
+  decodeGasLimits
+  decryptPrivateKey
+  DEFAULT_BUILTIN_TOKENS
+  DEFAULT_CALL_GAS_LIMIT
+  DEFAULT_ENTRY_POINT
+  DEFAULT_EVM_CHAIN
+  DEFAULT_NONCE_LENGTH
+  DEFAULT_PRE_VERIFICATION_GAS
+  DEFAULT_RPC_URLS
+  DEFAULT_SESSION_KEY_CONFIG
+  DEFAULT_SOLANA_CLUSTER
+  DEFAULT_SOURCES
+  DEFAULT_VERIFICATION_GAS_LIMIT
+  DEFAULT_XRPL_NETWORK
+  delegateAccount
+  type DelegateAccountInput
+  DELEGATION_FRAMEWORK
+  DELEGATION_FRAMEWORK_CHAIN_IDS
+  DELEGATION_PREFIX
+  type DelegationAuthorizationRequest
+  delegationHash
+  delegationSigningDigest
+  type DelegationStatus
+  delegationTypedData
+  deriveChannelPda
+  describeTimeline
+  detectPlatform
+  detectTokenInfo
+  type Duration
+  EIP155_ARBITRUM
+  EIP155_BASE
+  EIP155_HOLESKY
+  EIP155_MAINNET
+  EIP155_OPTIMISM
+  EIP155_POLYGON
+  EIP155_SEPOLIA
+  eip155Reference
+  encodeChannelVoucher
+  encodeGasFees
+  encodeGasLimits
+  encodePermissionContext
+  encodeRedeemDelegations
+  encodeRedeemDelegationsWithContext
+  encodeSingleExecution
+  type EncryptedKeyPair
+  encryptPrivateKey
+  endToEnd
+  ENSProvider
+  ENTRY_POINT_V0_6
+  ENTRY_POINT_V0_7
+  ERC20_FUNCTION_SIGNATURES
+  ERC20_MIN_ABI
+  type ERC20ApproveTxParams
+  type ERC20CallOptions
+  ERC20TokenError
+  type ERC20TokenErrorCode
+  ERC20TokenHelper
+  type ERC20TransferFromTxParams
+  type ERC20TransferTxParams
+  estimateFees
+  estimateMaxPriorityFeePerGas
+  estimateUserOperationGas
+  EthCallProvider
+  ETHEREUM_MAINNET_TOKENS
+  type ExecutionPlan
+  type ExecutionRequirements
+  type ExecutionStrategy
+  extractAccounts
+  extractAccountsFromPermissions
+  FEE_ERROR_MESSAGES
+  type FeeEstimationConfig
+  FeeEstimationError
+  type FeeEstimationErrorCode
+  type FeeTypeStrategy
+  type FeeValues
+  type FeeValuesEIP1559
+  type FeeValuesLegacy
+  formatSol
+  formatUnits
+  type FrameworkCaveat
+  type FrameworkDelegation
+  type FrameworkExecution
+  type GasInfo
+  getAccountCapabilities
+  getAllBuiltinTokens
+  getChainId
+  getChainsFromNamespaces
+  getEventsFromNamespaces
+  getFeeData
+  getGasPrice
+  getLatestBaseFee
+  getLatestBlockhash
+  getMethodsFromNamespaces
+  getNativeTokenPriceUsd
+  getPermissions
+  getRpcUrl
+  getSignatureStatus
+  getSolanaBalance
+  hashUserOperation
+  hashUserOperationV06
+  hasPermission
+  type Hex
+  hexChainToCaip2
+  hexEncode
+  InAppChannel
+  type InAppChannelOptions
+  isAAError
+  isBurnAddress
+  isChecksumAddress
+  isERC20TokenError
+  isEvmAddress
+  isFeeEstimationError
+  isMobileBrowser
+  isMobileDevice
+  isReactNative
+  isSessionExpired
+  isSettled
+  isValidAddress
+  isWalletError
+  isZeroAddress
+  LAMPORTS_PER_SOL
+  latestStage
+  LocalStorageAdapter
+  LocalStorageSessionStorage
+  logger
+  type LoggerNamespace
+  type LogLevel
+  MemoryStorageAdapter
+  type MuteRule
+  NameResolver
+  type NameResolverConfig
+  type NameResult
+  type Namespace
+  NAMESPACE_EIP155
+  NAMESPACE_SOLANA
+  NAMESPACE_XRPL
+  type NamespaceCapabilities
+  namespaceOf
+  type NativeTokenPriceOptions
+  NO_CAPABILITIES
+  NoopChannel
+  NoopStorageAdapter
+  normalizeEip155ChainId
+  normalizeEip5792Capabilities
+  type NotificationChannel
+  type NotificationFrequency
+  type NotificationItem
+  type NotificationPayload
+  type NotificationSettings
+  type NotificationWatch
+  Notifier
+  type NotifierOptions
+  type OpenChannelTransaction
+  OPTIMISM_TOKENS
+  parseBigInt
+  parseCaip10
+  parseChainId
+  type ParsedSolanaTransaction
+  parseSol
+  parseSolanaTransaction
+  parseUnits
+  PassphraseCancelledError
+  PassphraseGate
+  type PassphraseIntent
+  type PassphraseRequest
+  type Paymaster
+  type PaymasterConfig
+  type PaymasterData
+  type PaymasterRequestOptions
+  PaymasterService
+  type PaymasterServiceConfig
+  type PaymasterType
+  PAYMENT_STAGES
+  type PaymentDisplay
+  type PaymentDisplayState
+  type PaymentFailure
+  type PaymentStage
+  type PaymentTimeline
+  type PermissionsRequest
+  type PersistedSessionData
+  planExecution
+  type Platform
+  POLYGON_TOKENS
+  type PreparedDelegationAuthorization
+  prepareDelegationAuthorization
+  type PrepareDelegationInput
+  readAtomicSupport
+  readDelegation
+  readMint
+  readTokenAccount
+  recordFailure
+  recordStage
+  recoverTypedDataSigner
+  type RefreshFeesOptions
+  registerChainFeeEstimator
+  type RequestCloseChannelTransaction
+  requestPermissions
+  requireEip155ChainId
+  ResolutionError
+  type ResolutionErrorCode
+  ResolverCache
+  type ResolverProvider
+  REVOKE_DELEGATE
+  revokeDelegation
+  type RiskAssessment
+  type RiskLevel
+  type RiskWarning
+  type RiskWarningCategory
+  type RiskWarningSeverity
+  ROOT_AUTHORITY
+  type Route
+  RouteEngine
+  type RouteQuote
+  type RouteStep
+  type ScopeCheckResult
+  scopeRequestFrom
+  type SelfDelegationRequest
+  type SendCallsOptions
+  sendUserOperation
+  type SendUserOpOptions
+  type SentDelegation
+  SESSION_ERROR_MESSAGES
+  SESSION_KEY_ERROR_MESSAGES
+  SESSION_TIMEOUT_MS
+  type SessionChange
+  type SessionErrorCode
+  type SessionEvent
+  SessionEventEmitter
+  type SessionEventHandler
+  type SessionEventPayloads
+  sessionKeyAddress
+  type SessionKeyBundle
+  type SessionKeyErrorCode
+  type SessionKeyInfo
+  SessionKeyManager
+  type SessionKeyManagerConfig
+  type SessionKeyPair
+  type SessionKeyScope
+  type SessionKeyStatus
+  SessionKeyStorage
+  type SessionKeyTransaction
+  type SessionKeyTypedDataRequest
+  SessionManager
+  type SessionManagerConfig
+  type SessionNamespace
+  SessionPersistence
+  type SessionScopeNamespaceRequest
+  type SessionScopeRequest
+  type SessionStorage
+  SessionStorageAdapter
+  setLogLevel
+  setLogSink
+  setPlatformOverride
+  type SignedAuthorization
+  type SignedDelegationAuthorization
+  signUserOperation
+  signUserOperationV06
+  signVoucher
+  SIMPLE_ACCOUNT_FACTORY
+  SIMPLE_ACCOUNT_FACTORY_V06
+  SIMPLE_ACCOUNT_FACTORY_V07
+  type SimulationConfig
+  type SimulationCoverage
+  SimulationManager
+  type SimulationProvider
+  type SimulationProviderName
+  type SimulationResult
+  type SimulationStatus
+  SINGLE_DEFAULT_MODE
+  type SmartAccountConfig
+  type SmartAccountInfo
+  SmartAccountManager
+  type SmartAccountManagerConfig
+  SNSProvider
+  SOLANA_CHANNEL_PROGRAM
+  SOLANA_DEVNET
+  SOLANA_MAINNET
+  SOLANA_PROGRAMS
+  SOLANA_TESTNET
+  SOLANA_TRANSACTION_LIMIT
+  type SolanaBalance
+  type SolanaConfirmationStatus
+  solanaPaymentRpc
+  type SolanaPaymentRpc
+  SolanaRpcError
+  type SolanaSessionKeyConfig
+  type SolanaSessionKeyInfo
+  SolanaSessionKeyManager
+  type SolanaSessionKeyScope
+  type SolanaSessionKeyStatus
+  type SolanaSessionPayment
+  solanaTransactionId
+  SPL_PAYMENT_COMPUTE_UNIT_LIMIT
+  SPL_PAYMENT_COMPUTE_UNIT_PRICE
+  type SplDelegateApproval
+  type SplTokenAccount
+  type SplTransferPayment
+  type StageRecord
+  stalledFor
+  startTimeline
+  STORAGE_KEYS
+  type StorageAdapter
+  StorageError
+  type StoredSessionKey
+  SUPPORTED_NAMESPACES
+  TelegramChannel
+  type TimelineLeg
+  timelineLegs
+  toChecksumAddress
+  toDecString
+  toEthSignedMessageHash
+  toHumanReadable
+  type Token
+  type TokenConfig
+  type TokenInfo
+  type TokenList
+  type TokenListEntry
+  TokenListManager
+  type TokenListManagerConfig
+  type TokenListSource
+  type TokenListSourceStatus
+  type TokenMatch
+  type TokenSearchQuery
+  type TokenSearchResult
+  type TopUpChannelTransaction
+  type TransactionDescriptor
+  TRUSTED_CHANNEL_PROGRAMS
+  type TrustedChannelProgram
+  type TxMetadata
+  type TxStatus
+  type TxStatusCallback
+  typedDataDigest
+  type UniversalConnector
+  type UniversalWalletSession
+  UNKNOWN_DELEGATION
+  unregisterChainFeeEstimator
+  updateSession
+  type UserFeeOverrides
+  type UserNotificationPreferences
+  type UserOperation
+  type UserOperationGasEstimate
+  type UserOperationReceipt
+  type UserOperationResponse
+  type UserOperationVersion
+  validateChainId
+  validateTypedDataRequest
+  verifySignedChannelOpen
+  verifySignedOwnerTransaction
+  verifySignedSplTransfer
+  verifySolanaSignature
+  verifyVoucher
+  type WalletCapabilities
+  WalletError
+  type WalletErrorCode
+  type WalletPermission
+  WC_DISCONNECT_SESSION_EXPIRED
+  WC_DISCONNECT_TIMEOUT
+  WC_DISCONNECT_USER
+  type WithdrawPayerChannelTransaction
+  XRPL_DEVNET
+  XRPL_MAINNET
+  XRPL_TESTNET

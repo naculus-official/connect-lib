@@ -1,0 +1,13 @@
+@naculus/connect
+.:
+  * from @naculus/connect-core
+  coinbase (* from @naculus/connector-coinbase)
+  embedded (* from @naculus/connector-embedded)
+  evmInjected (* from @naculus/connector-evm-injected)
+  passkeys (* from @naculus/connector-passkeys)
+  safe (* from @naculus/connector-safe)
+  siwx (* from @naculus/siwx)
+  solana (* from @naculus/connector-solana)
+  walletConnect (* from @naculus/connector-walletconnect)
+  walletEngine (* from @naculus/wallet-engine)
+  xrpl (* from @naculus/connector-xrpl)

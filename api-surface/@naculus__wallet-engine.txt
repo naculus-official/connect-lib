@@ -1,0 +1,99 @@
+@naculus/wallet-engine
+.:
+  ApprovalChange
+  assessStorageSecurity
+  BalanceChange
+  decodeShortVec
+  type DelegationTransactionResult
+  deriveEd25519
+  derivePrfWrappingKey
+  deriveSolanaKeypair
+  type DetectedKey
+  detectPrivateKey
+  ed25519DeriveChild
+  ed25519MasterNode
+  type Eip7702AuthorizationOptions
+  type Eip7702AuthorizationRequest
+  EMBEDDED_SESSION_KEYS_PREFIX
+  type EmbeddedSessionKeyOptions
+  EncryptedStorageAdapter
+  type EncryptedStorageOptions
+  EthCallProvider
+  EVMSigner
+  GasInfo
+  IndexedDbStorageAdapter
+  isFullySigned
+  type KeyNamespace
+  KeyStoreStorageAdapter
+  type KeyStoreStorageOptions
+  LEGACY_SESSION_KEYS_STORAGE_KEY
+  LocalStorageAdapter
+  MemoryHistoryStorage
+  migrateWalletData
+  parseHardenedPath
+  parseSolanaTransaction
+  type PocketConfig
+  PocketWallet
+  type PrfAvailability
+  type PrfUnlockProvider
+  type ProviderLike
+  RiskAssessment
+  RiskLevel
+  RiskWarning
+  RiskWarningCategory
+  RiskWarningSeverity
+  ScopeCheckResult
+  SessionKeyBundle
+  SessionKeyInfo
+  SessionKeyPair
+  SessionKeyScope
+  SessionKeyStatus
+  type ShortVec
+  SignedAuthorization
+  type SignedEip7702Authorization
+  type Signer
+  type SignRequest
+  type SignResult
+  signSolanaTransaction
+  SimulationConfig
+  SimulationCoverage
+  SimulationManager
+  SimulationProvider
+  SimulationProviderName
+  SimulationResult
+  SimulationStatus
+  type Slip10Node
+  SOLANA_DERIVATION_PATH
+  type SolanaKeypair
+  type SolanaTransactionLayout
+  type StorageAdapter
+  type StorageFindingSeverity
+  type StorageSecurityFinding
+  type StorageSecurityInput
+  type StorageSecurityLevel
+  type StorageSecurityReport
+  type StorageType
+  StoredSessionKey
+  toBase64
+  toEvmPrivateKeyHex
+  toSolanaKeypairJson
+  toSolanaPrivateKeyBase58
+  toSolanaSecretKeyBytes
+  toWireBytes
+  TransactionDescriptor
+  type TxHistoryQuery
+  TxHistoryStore
+  TxMonitor
+  TxPoller
+  type TxStatus
+  type TxStatusEntry
+  type UnlockMethod
+  type UnlockState
+  type WalletAccount
+  type WalletBlobStore
+  type WalletData
+  type WalletDataV1
+  WalletError
+  type WalletKeyStore
+  type WalletNamespace
+  type WatchTxOptions

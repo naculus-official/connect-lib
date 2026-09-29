@@ -1,0 +1,6 @@
+@naculus/connector-solana-kit
+.:
+  type KitSigners
+  SolanaKitAdapterError
+  type SolanaKitAdapterErrorCode
+  toKitSigners

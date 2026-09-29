@@ -1,0 +1,8 @@
+@naculus/connector-coinbase
+.:
+  type CoinbaseConnectionMode
+  CoinbaseConnector
+  type CoinbaseConnectorConfig
+  CoinbaseProviderAdapter
+  type CoinbaseSession
+  createCoinbaseConnector

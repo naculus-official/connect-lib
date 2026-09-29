@@ -1,0 +1,14 @@
+@naculus/connector-walletconnect
+.:
+  buildOptionalNamespaces
+  buildRequiredNamespaces
+  createWalletConnectConnector
+  extractAddress
+  isValidCAIP10
+  mapNamespaces
+  parseCAIP10
+  toHexValue
+  type WalletConnectConfig
+  type WalletConnectConnectInput
+  WalletConnectConnector
+  type WalletConnectMetadata

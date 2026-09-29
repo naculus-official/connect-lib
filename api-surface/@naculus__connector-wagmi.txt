@@ -1,0 +1,4 @@
+@naculus/connector-wagmi
+.:
+  createNaculusConnector
+  WalletConnectConfig

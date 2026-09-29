@@ -1,0 +1,13 @@
+@naculus/connector-safe
+.:
+  createSafeConnector
+  isInIframe
+  isSafeAppEnvironment
+  isSafeTransactionRequest
+  SafeConnector
+  type SafeConnectorConfig
+  type SafeEnvironment
+  type SafeEventName
+  type SafeTransactionRequest
+  type SafeTransactionResponse
+  waitForSafeEnvironment
