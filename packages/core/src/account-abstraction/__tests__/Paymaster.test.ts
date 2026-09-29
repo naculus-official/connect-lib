@@ -1,4 +1,14 @@
-
+/**
+ * Tests for PaymasterService
+ *
+ * Tests cover:
+ * - Paymaster type handling
+ * - Error cases for empty/missing config
+ * - Sponsor info tracking
+ * - isSponsored checks
+ *
+ * RPC-dependent tests are conditional.
+ */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { PaymasterService, createPaymasterService, type PaymasterServiceConfig } from "../paymaster";
