@@ -8,7 +8,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   minify: true,
-  external: ["react", "@naculus/connect-core", "@solana/web3.js", "tweetnacl"],
+  external: ["react", "@naculus/connect-core"],
   onSuccess: () => {
     console.log("Solana connector built successfully");
   },

@@ -18,6 +18,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **Unused runtime dependencies removed** (`@naculus/connector-xrpl`, `@naculus/connector-solana`, `@naculus/wallet-engine`) — `xrpl`, `@solana/web3.js` and `@noble/ciphers` were declared but never imported (connector-xrpl talks to XRPL nodes directly; connector-solana uses plain `fetch`), so every install downloaded them for nothing. No behavior change.
 
+- **connector-solana no longer depends on `@naculus/siwx` or `tweetnacl`** — they served `src/siws.ts`, which was never exported. Its README showed `createSolanaSiwsMessage` / `verifySolanaSiwsMessage` imports that did not exist; that verifier also checked only the signature (not signer, domain, nonce or expiry). The README now shows Sign-In With Solana through `@naculus/siwx`, which checks all of them.
+
 ### Fixed
 
 - **x402 with a Solana session key skips unsponsored requirements** (`@naculus/payments-x402`) — a requirement whose fee payer is the key or its owner is now skipped when choosing what to pay, so another acceptable requirement can be used; before, it was chosen and the key refused to sign (`session_scope_exceeded`). The key still refuses such a payment if asked directly.

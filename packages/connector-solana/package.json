@@ -24,9 +24,7 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "@naculus/connect-core": "workspace:*",
-    "@naculus/siwx": "workspace:*",
-    "tweetnacl": "^1.0.3"
+    "@naculus/connect-core": "workspace:*"
   },
   "devDependencies": {
     "@noble/curves": "^2.4.0",

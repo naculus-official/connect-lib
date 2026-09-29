@@ -15,7 +15,7 @@ Discovers Solana wallets through the **Wallet Standard** registry — the path S
 - 📝 **Sign Transactions** — Sign transactions via `solana_signTransaction`
 - 📤 **Send Transactions** — Sign + send transactions via `solana_signAndSendTransaction`
 - 🔄 **Chain Switching** — Update session chain ID (e.g., mainnet ↔ devnet)
-- 🧩 **SIWS** — Sign-In With Solana message creation and verification via `@naculus/siwx`
+- 🧩 **SIWS** — Sign-In With Solana works through `@naculus/siwx` (see below)
 - 🎭 **Signer roles** — `identity` / `signer` / `payer`, so a wallet that cannot fill
   the role a flow needs is known before the user is asked to approve anything
 
@@ -117,14 +117,43 @@ const provider = getSolanaProvider("phantom");
 
 ### SIWS (Sign-In With Solana)
 
-```ts
-import { createSolanaSiwsMessage, verifySolanaSiwsMessage } from "@naculus/connector-solana";
+Sign-in messages are created and verified by `@naculus/siwx`, which checks
+the signer, domain, nonce and validity window, and refuses a nonce it did not
+issue or has already seen:
 
-const message = createSolanaSiwsMessage({
+```ts
+import {
+  createSiwxMessage,
+  createSolanaVerifier,
+  generateNonce,
+  issueNonce,
+  verifySiwxMessage,
+} from "@naculus/siwx";
+
+// Server: issue a nonce for this sign-in.
+const nonce = generateNonce();
+await issueNonce(nonce);
+
+// Client: build the message, have the wallet sign it (base58 signature).
+const message = createSiwxMessage({
   domain: "example.com",
-  address: "4sGjMW1s...",
+  address, // base58
   uri: "https://example.com/login",
+  chainId: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+  nonce,
 });
+
+// Server: verify.
+const result = await verifySiwxMessage({
+  raw: message,
+  signature,
+  publicKey: address,
+  expectedAddress: address,
+  domain: "example.com",
+  nonce,
+  recoverAddress: createSolanaVerifier(),
+});
+if (!result.isValid) throw new Error(result.error);
 ```
 
 ## Development
@@ -174,8 +203,6 @@ Create a new Solana connector instance.
 ## Dependencies
 
 - `@naculus/connect-core` — Core connector interfaces and utilities
-- `@naculus/siwx` — SIWS message creation and parsing
-- `tweetnacl` — Ed25519 signature verification for Solana
 
 ## License
 
