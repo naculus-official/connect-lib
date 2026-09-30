@@ -34,7 +34,7 @@ import type {
 import { toHexValue } from "./utils";
 
 export { isCoinbaseWalletInstalled, isMetaMaskInstalled } from "./discovery";
-export {
+export type {
   DiscoveredWallet,
   EIP6963Provider,
   EIP6963ProviderInfo,
