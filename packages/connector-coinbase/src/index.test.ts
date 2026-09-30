@@ -123,6 +123,95 @@ describe("CoinbaseConnector", () => {
     });
   });
 
+  describe("connect with a requested chain", () => {
+    const account = "0x1234567890abcdef1234567890abcdef12345678";
+
+    it("connects on the requested chain when the wallet is on it", async () => {
+      mockProvider.request
+        .mockResolvedValueOnce([account])
+        .mockResolvedValueOnce("0x2105"); // eth_chainId: 8453
+
+      const session = await connector.connect({ chainId: "eip155:8453" });
+
+      expect(session.namespaces.eip155.chains).toEqual(["eip155:8453"]);
+      expect(session.namespaces.eip155.accounts).toEqual([
+        `eip155:8453:${account}`,
+      ]);
+    });
+
+    it("accepts a hex or decimal requested chain", async () => {
+      mockProvider.request
+        .mockResolvedValueOnce([account])
+        .mockResolvedValueOnce("0x89");
+      const hex = await connector.connect({ chainId: "0x89" });
+      expect(hex.namespaces.eip155.chains).toEqual(["eip155:137"]);
+
+      mockProvider.request
+        .mockResolvedValueOnce([account])
+        .mockResolvedValueOnce("0x89");
+      const decimal = await connector.connect({ chainId: "137" });
+      expect(decimal.namespaces.eip155.chains).toEqual(["eip155:137"]);
+    });
+
+    it("refuses when the wallet is on another chain and leaves no listeners", async () => {
+      mockProvider.request
+        .mockResolvedValueOnce([account])
+        .mockResolvedValueOnce("0x1"); // wallet on mainnet
+
+      const error = await connector
+        .connect({ chainId: "eip155:8453" })
+        .catch((e: unknown) => e);
+
+      expect(error).toMatchObject({
+        code: "chain_unsupported",
+        message:
+          "Requested eip155:8453, but the wallet is currently on eip155:1.",
+      });
+      // No automatic switch.
+      const methods = mockProvider.request.mock.calls.map(
+        ([arg]) => (arg as { method: string }).method,
+      );
+      expect(methods).toEqual(["eth_requestAccounts", "eth_chainId"]);
+      // No session.
+      expect(connector.getConnectionMode()).toBeUndefined();
+      expect((connector as any).lastSession).toBeUndefined();
+      // Every handler attached during connect was detached again.
+      const attached = mockProvider.on.mock.calls.map(([event, handler]) => [
+        event,
+        handler,
+      ]);
+      expect(attached).toHaveLength(3);
+      for (const [event, handler] of attached) {
+        expect(mockProvider.off).toHaveBeenCalledWith(event, handler);
+      }
+    });
+
+    it.each([
+      "eip155:0",
+      "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+      "eip155:abc",
+      "",
+      8453,
+    ])("rejects %j as invalid_input without touching the wallet", async (chainId) => {
+      await expect(connector.connect({ chainId })).rejects.toMatchObject({
+        code: "invalid_input",
+      });
+      expect(mockMakeWeb3Provider).not.toHaveBeenCalled();
+      expect(mockProvider.request).not.toHaveBeenCalled();
+      expect(mockProvider.on).not.toHaveBeenCalled();
+    });
+
+    it("keeps the wallet's chain when no chainId is given", async () => {
+      mockProvider.request
+        .mockResolvedValueOnce([account])
+        .mockResolvedValueOnce("0xa"); // Optimism
+
+      const session = await connector.connect({});
+
+      expect(session.namespaces.eip155.chains).toEqual(["eip155:10"]);
+    });
+  });
+
   describe("reconnect", () => {
     it("should throw session_expired", async () => {
       const mockSession = {
