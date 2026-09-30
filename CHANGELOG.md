@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.6.0 — 2026-09-30
+
+No breaking changes to public APIs. Two connectors now refuse inputs they used to mishandle silently — see *Fixed* (Coinbase `connect({ chainId })`, `SmartAccountManager` with a foreign `chainId`).
+
 ### Added
 
 - **Solana payment-channel primitives for the MPP session intent** (`@naculus/connect-core`) — channel PDA derivation, open / topUp / requestClose / withdrawPayer builders, the 50-byte voucher encoding with `signVoucher` / `verifyVoucher`, `assertTrustedChannelProgram` (the channel program must be the reviewed deployment: address, ProgramData, deployed slot and upgrade authority), and `verifySignedChannelOpen`. Byte-identical to `@solana/mpp` 0.7.0's generated client. The session client itself is not in this release. Design: `docs/design/mpp-session.md`.
@@ -24,6 +28,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **EIP-6963 wallet selection accepts the discovered wallet ID** (`@naculus/connector-evm-injected`) — appkit returns each discovered provider's UUID as its wallet ID, but the connector treated a string passed to `connect()` only as an RDNS. Selecting a wallet by its advertised ID now finds that exact provider; RDNS selection remains supported. A string that is one wallet's UUID and a different wallet's RDNS is refused (`wallet_unavailable`) rather than resolved: announcements are unauthenticated, so a provider could otherwise claim another wallet's RDNS as its UUID and capture callers selecting by RDNS.
 - **x402 with a Solana session key skips unsponsored requirements** (`@naculus/payments-x402`) — a requirement whose fee payer is the key or its owner is now skipped when choosing what to pay, so another acceptable requirement can be used; before, it was chosen and the key refused to sign (`session_scope_exceeded`). The key still refuses such a payment if asked directly.
+- **connector-evm-injected re-exports its types with `export type`** — a bundler compiling sources file by file (Vite/Rollup) failed on the plain re-export; the published declarations are unchanged.
 - **`abiEncodeUint256` error message** (`@naculus/connect-core`) — an amount above 2^256 − 1 was reported as "negative".
 - **`SmartAccountManager` refuses a chainId it has no RPC for** (`@naculus/connect-core`) — the manager reads chain state through its one `rpcUrl`, so an account `chainId` different from the manager's `chainId` now throws `aa_invalid_input` before any RPC call instead of reading the wrong chain. Chain IDs are compared canonically (`eip155:01` is `eip155:1`); a malformed or unregistered foreign chain ID now reports the mismatch rather than `aa_no_entry_point`.
 - **Coinbase connect honors the requested chain** (`@naculus/connector-coinbase`) — `connect({ chainId })` ignored `chainId` and created the session on whatever chain the wallet was on. It now throws `invalid_input` for a chain ID that is not EIP-155, and `chain_unsupported` when the wallet is on a different chain; it does not switch chains. Without `chainId`, the wallet's chain is used as before.
