@@ -4,6 +4,7 @@
   challengeNonce
   createChargeCredential
   createMppFetch
+  createMppSessionFetch
   createSolanaChargeCredential
   decodeBase64UrlJson
   DEFAULT_VALIDITY_SECONDS
@@ -17,8 +18,17 @@
   MppErrorCode
   type MppFetchOptions
   type MppFetchResult
+  type MppForceCloseResult
+  type MppOpenChannel
   MppReceipt
   MppRejectedChallenge
+  type MppSessionFetch
+  type MppSessionFetchOptions
+  type MppSessionFetchResult
+  type MppSessionMeter
+  type MppSessionPolicy
+  type MppSessionRequestInit
+  type MppSessionRpc
   MppSolanaNetwork
   MppSolanaOptions
   MppSolanaSessionKey

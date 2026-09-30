@@ -76,6 +76,62 @@ A Solana session key (`solana: { sessionKey: { manager, id }, rpc }`, see the
 payments-x402 README) pays `solana` charges without a prompt, within its
 scope — and only charges whose fee the server sponsors (`feePayer: true`).
 
+## Solana metered sessions
+
+`createMppSessionFetch` opens one escrow channel for a
+`method="solana", intent="session"` challenge, then sends cumulative vouchers
+without another wallet prompt. The app owns the meter: report consumption with
+`pay.meter.add(units)` before a request, or pass `{ units }` on that request.
+The server cannot choose how many units the delegated key signs.
+Units are committed as soon as the delegated key signs their voucher, even if
+the HTTP request later fails. Do not retry a failed request with the same
+`units`; report only newly consumed units. Units added to `pay.meter` while a
+voucher request is in flight remain pending for the next voucher.
+
+Pass a `ChannelVoucherKeyManager`, the connected owner wallet, and an RPC that
+implements `isBlockhashValid`. The policy pins the one payee and per-unit
+price, deposit, cumulative/delta limits, expiry, and minimum forced-close grace
+period (one hour by default). Before the wallet signs, the client checks the
+RPC cluster, the reviewed channel-program address/deployment, mint and
+Token-2022 extensions, challenge policy, and server blockhash. Operator-signed
+vouchers, resume, top-up, and distribution co-recipients are refused.
+
+```ts
+const pay = createMppSessionFetch({
+  rpc,
+  signer: solanaRoles.signer,
+  keyManager: voucherKeys,
+  policy: {
+    recipient: merchant,
+    amount: 10n,
+    deposit: 1_000_000n,
+    maxCumulative: 1_000_000n,
+    maxDelta: 10_000n,
+    expiresAt: Math.floor(Date.now() / 1000) + 7_200,
+  },
+});
+
+await pay("https://api.example.com/session"); // owner approves channel open
+await pay("https://api.example.com/session", { units: 25n });
+await pay.close(); // server settles the final voucher and refunds the rest
+```
+
+Voucher expiry is finite and sealed into the delegated-key policy. It must
+outlast the channel's grace period so the server can settle the last accepted
+voucher. The reference `@solana/mpp` client instead defaults to 2100, and
+its server applies the same settlement-window check. The client keeps the
+active key id in memory and does not call `ChannelVoucherKeyManager.list()` on
+request paths (that method intentionally decrypts every stored key).
+
+For recovery, `forceClose()` signs and submits `requestClose` only through the
+app-supplied `sendTransaction`, then returns a `withdrawPayer()` function to
+call after the grace period and on-chain seal. `pay.channels` exposes the open
+channel so a UI can offer cooperative or forced close.
+If the signed open transaction reaches the server but its response fails or
+lacks a matching receipt, the thrown `MppError` has a `channelId` property and
+the channel remains in `pay.channels` for `forceClose()` recovery. The voucher
+key is still revoked; failures before the transaction is sent retain nothing.
+
 ## Server: `@naculus/payments-mpp/server`
 
 The other side of the same charges: issue challenges, verify credentials,

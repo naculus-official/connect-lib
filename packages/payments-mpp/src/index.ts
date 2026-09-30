@@ -16,20 +16,32 @@ export {
   unsupportedReason,
 } from "./evm-charge";
 export {
+  createMppFetch,
+  type MppFetchOptions,
+  type MppFetchResult,
+} from "./fetch";
+export {
+  createMppSessionFetch,
+  type MppForceCloseResult,
+  type MppOpenChannel,
+  type MppSessionFetch,
+  type MppSessionFetchOptions,
+  type MppSessionFetchResult,
+  type MppSessionMeter,
+  type MppSessionPolicy,
+  type MppSessionRequestInit,
+  type MppSessionRpc,
+} from "./session";
+export {
   createSolanaChargeCredential,
   type MppSolanaNetwork,
   type MppSolanaOptions,
   type MppSolanaSessionKey,
   type MppSolanaSigner,
   readSolanaRequest,
-  sessionKeyMismatch,
   type SolanaChargeRequest,
+  sessionKeyMismatch,
 } from "./solana-charge";
-export {
-  createMppFetch,
-  type MppFetchOptions,
-  type MppFetchResult,
-} from "./fetch";
 export {
   decodeBase64UrlJson,
   encodeBase64UrlJson,

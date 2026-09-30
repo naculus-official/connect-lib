@@ -9,7 +9,12 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`createMppSessionFetch`** (`@naculus/payments-mpp`) — opens a policy-checked Solana MPP payment channel with an owner-signed transaction and a sealed delegated voucher key, signs only app-metered cumulative usage, supports cooperative and forced close, and exposes open channels for recovery UI. Program deployment, RPC cluster, mint, payee, price, grace period, split policy and server blockhash are verified before signing.
 - **`ChannelVoucherKeyManager`** (`@naculus/connect-core`) — creates record-bound encrypted ed25519 keys for Solana MPP channels, fixes channel identity at creation, verifies the channel PDA after open, and persists cumulative voucher budgets before returning canonical 50-byte voucher signatures.
+
+### Fixed
+
+- **Solana MPP session recovery and accounting** (`@naculus/payments-mpp`) — signed voucher units are committed exactly once across failed requests, meter additions made in flight are preserved, concurrent first requests share one channel open, and a failed response after the signed open reaches the server retains the channel for `forceClose()` recovery while revoking its voucher key.
 
 ## 0.6.0 — 2026-09-30
 

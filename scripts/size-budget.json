@@ -17,7 +17,7 @@
     "packages/connector-walletconnect/dist/index.js": 8192,
     "packages/connector-xrpl/dist/index.js": 4096,
     "packages/core/dist/index.js": 98304,
-    "packages/payments-mpp/dist/index.js": 2048,
+    "packages/payments-mpp/dist/index.js": 5120,
     "packages/payments-mpp/dist/server.js": 8192,
     "packages/payments-x402/dist/index.js": 2048,
     "packages/payments-x402/dist/server.js": 7168,
