@@ -29,6 +29,7 @@
   type BalanceChange
   BASE_TOKENS
   type BatchCall
+  type BoundChannel
   buildApproveDelegateTransaction
   buildCallData
   buildDelegation
@@ -58,6 +59,11 @@
   type ChannelMintAccount
   type ChannelPdaInput
   type ChannelVoucher
+  type ChannelVoucherKeyConfig
+  type ChannelVoucherKeyInfo
+  ChannelVoucherKeyManager
+  type ChannelVoucherKeyStatus
+  type ChannelVoucherPolicy
   chooseExecutionStrategy
   clearAutoDetectCache
   clearChainFeeEstimators
@@ -332,6 +338,7 @@
   setLogSink
   setPlatformOverride
   type SignedAuthorization
+  type SignedChannelVoucher
   type SignedDelegationAuthorization
   signUserOperation
   signUserOperationV06

@@ -11,6 +11,15 @@ export type { SessionKeyErrorCode } from "./errors";
 export { createSessionKeyError, SESSION_KEY_ERROR_MESSAGES } from "./errors";
 export { SessionKeyManager } from "./SessionKeyManager";
 export {
+  type BoundChannel,
+  type ChannelVoucherKeyConfig,
+  type ChannelVoucherKeyInfo,
+  ChannelVoucherKeyManager,
+  type ChannelVoucherKeyStatus,
+  type ChannelVoucherPolicy,
+  type SignedChannelVoucher,
+} from "./channel-voucher-keys";
+export {
   type SolanaSessionKeyConfig,
   type SolanaSessionKeyInfo,
   SolanaSessionKeyManager,

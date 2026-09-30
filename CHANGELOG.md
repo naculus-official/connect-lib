@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`ChannelVoucherKeyManager`** (`@naculus/connect-core`) — creates record-bound encrypted ed25519 keys for Solana MPP channels, fixes channel identity at creation, verifies the channel PDA after open, and persists cumulative voucher budgets before returning canonical 50-byte voucher signatures.
+
 ## 0.6.0 — 2026-09-30
 
 No breaking changes to public APIs. Two connectors now refuse inputs they used to mishandle silently — see *Fixed* (Coinbase `connect({ chainId })`, `SmartAccountManager` with a foreign `chainId`).
