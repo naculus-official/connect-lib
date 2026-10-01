@@ -6,6 +6,7 @@ import {
   assertTrustedChannelProgram,
   buildOpenChannelTransaction,
   buildRequestCloseChannelTransaction,
+  buildSealChannelTransaction,
   buildTopUpChannelTransaction,
   buildWithdrawPayerChannelTransaction,
   type ChannelMintAccount,
@@ -47,6 +48,8 @@ const VECTORS = [
     openData:
       "010700000000000000e703000000000000100e000040e201000000000000000000",
     topUpData: "03e703000000000000",
+    sealMessage:
+      "80010001038139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b39487e680bcf07ec5e48742853d68eb54b20f7c94610984bf9995d89a8e31d93ce5a7a1fba4eb2b090993f7d2dfd62b89e2b872077a639fd7d747a8e99f63d415aecc490e928cd2e3873bb343fc95da33179ca60f4dbf46c2c36e91299d55d4e6b901020101010600",
   },
   {
     payer: "7v54NWdBtkjuAFJrLGsS2SXnuk8nKam81mZJeeYxVFi9",
@@ -65,6 +68,8 @@ const VECTORS = [
     openData:
       "01feffffffffffffff15cd5b07000000008403000073c29f1c0000000000000000",
     topUpData: "0315cd5b0700000000",
+    sealMessage:
+      "80010001030b513ad9b4924015ca0902ed079044d3ac5dbec2306f06948c10da8eb6e39f2d7af0ba6cb6d6765a0614ee3c18f7c97544d1272a8141570ee226bbea99965c95a7a1fba4eb2b090993f7d2dfd62b89e2b872077a639fd7d747a8e99f63d415aecc490e928cd2e3873bb343fc95da33179ca60f4dbf46c2c36e91299d55d4e6b901020101010600",
   },
 ] as const;
 
@@ -244,6 +249,23 @@ describe("Solana payment-channel vectors", () => {
         data: new Uint8Array([5]),
       });
       expect(roles(closeTx, close?.accounts ?? [])).toEqual([2, 1]);
+
+      const sealWire = buildSealChannelTransaction({
+        programAddress: SOLANA_CHANNEL_PROGRAM,
+        feePayer: vector.feePayer,
+        channelId: vector.channelId,
+        recentBlockhash: BLOCKHASH,
+      });
+      const sealTx = parseSolanaTransaction(sealWire);
+      const seal = sealTx.instructions[0];
+      expect(hex(sealTx.message)).toBe(vector.sealMessage);
+      expect(sealTx.instructions).toHaveLength(1);
+      expect(seal).toMatchObject({
+        program: SOLANA_CHANNEL_PROGRAM,
+        accounts: [vector.channelId],
+        data: new Uint8Array([6]),
+      });
+      expect(roles(sealTx, seal?.accounts ?? [])).toEqual([1]);
 
       const withdrawTx = parseSolanaTransaction(
         buildWithdrawPayerChannelTransaction(common),

@@ -98,6 +98,13 @@ export interface RequestCloseChannelTransaction {
   recentBlockhash: string;
 }
 
+export interface SealChannelTransaction {
+  programAddress?: string;
+  feePayer: string;
+  channelId: string;
+  recentBlockhash: string;
+}
+
 export interface WithdrawPayerChannelTransaction {
   programAddress?: string;
   feePayer: string;
@@ -329,6 +336,24 @@ export function buildRequestCloseChannelTransaction(
           { address: input.channelId, signer: false, writable: true },
         ],
         new Uint8Array([5]),
+      ),
+    ],
+    input.recentBlockhash,
+  );
+}
+
+/** Build the unsigned permissionless transaction that seals an elapsed closing channel. */
+export function buildSealChannelTransaction(
+  input: SealChannelTransaction,
+): Uint8Array {
+  const program = programAddress(input.programAddress);
+  return compileV0(
+    input.feePayer,
+    [
+      instruction(
+        program,
+        [{ address: input.channelId, signer: false, writable: true }],
+        new Uint8Array([6]),
       ),
     ],
     input.recentBlockhash,

@@ -37,6 +37,7 @@
   buildOpenChannelTransaction
   buildRequestCloseChannelTransaction
   buildRevokeDelegateTransaction
+  buildSealChannelTransaction
   buildSplTransferTransaction
   buildTopUpChannelTransaction
   buildUserOperation
@@ -300,6 +301,7 @@
   type RouteStep
   type ScopeCheckResult
   scopeRequestFrom
+  type SealChannelTransaction
   type SelfDelegationRequest
   type SendCallsOptions
   sendUserOperation

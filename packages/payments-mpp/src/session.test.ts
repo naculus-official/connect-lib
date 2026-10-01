@@ -47,6 +47,13 @@ function programDataAccount(slot: bigint, authority: string): Uint8Array {
   return data;
 }
 
+function channelAccount(status: number, closureStartedAt = 0n): Uint8Array {
+  const data = new Uint8Array(44);
+  data[3] = status;
+  new DataView(data.buffer).setBigInt64(36, closureStartedAt, true);
+  return data;
+}
+
 function rpc(over: Partial<MppSessionRpc> = {}): MppSessionRpc {
   const trust = TRUSTED_CHANNEL_PROGRAMS[SOLANA_MAINNET] as NonNullable<
     (typeof TRUSTED_CHANNEL_PROGRAMS)[string]
@@ -658,7 +665,7 @@ describe("createMppSessionFetch", () => {
     expect(signer.seen).toHaveLength(0);
   });
 
-  it("uses only app-supplied broadcasting for forced close and exposes withdrawal", async () => {
+  it("seals an elapsed closing channel before withdrawing through app-supplied broadcasting", async () => {
     let channelId = "";
     const sent: Uint8Array[] = [];
     const fetch = async (input: RequestInfo | URL) => {
@@ -674,8 +681,20 @@ describe("createMppSessionFetch", () => {
         headers: { "Payment-Receipt": receipt(channelId) },
       });
     };
+    const base = rpc();
     const pay = createMppSessionFetch({
-      rpc: rpc(),
+      rpc: rpc({
+        getAccountInfo: async (address) =>
+          address === channelId
+            ? {
+                owner: SOLANA_CHANNEL_PROGRAM,
+                data: channelAccount(
+                  2,
+                  BigInt(Math.floor(Date.now() / 1_000) - 3_600),
+                ),
+              }
+            : base.getAccountInfo(address),
+      }),
       signer: wallet(),
       keyManager: manager(),
       policy: policy(),
@@ -688,7 +707,100 @@ describe("createMppSessionFetch", () => {
     await pay(URL_);
     const forced = await pay.forceClose();
     expect(forced.requestCloseTxHash).toBe("tx-1");
+    sent.splice(0, sent.length);
     await expect(forced.withdrawPayer()).resolves.toBe("tx-2");
-    expect(sent).toHaveLength(2);
+    expect(
+      sent.map((tx) => parseSolanaTransaction(tx).instructions[0]?.data),
+    ).toEqual([new Uint8Array([6]), new Uint8Array([8])]);
+  });
+
+  it("refuses payer withdrawal before the closing grace period elapses", async () => {
+    let channelId = "";
+    const sent: Uint8Array[] = [];
+    const base = rpc();
+    const now = Math.floor(Date.now() / 1_000);
+    const pay = createMppSessionFetch({
+      rpc: rpc({
+        getAccountInfo: async (address) =>
+          address === channelId
+            ? {
+                owner: SOLANA_CHANNEL_PROGRAM,
+                data: channelAccount(2, BigInt(now)),
+              }
+            : base.getAccountInfo(address),
+      }),
+      signer: wallet(),
+      keyManager: manager(),
+      policy: policy(),
+      fetch: (async (input: RequestInfo | URL) => {
+        const req = input as Request;
+        if (!req.headers.has("Authorization")) {
+          return new Response(null, {
+            status: 402,
+            headers: { "WWW-Authenticate": challenge() },
+          });
+        }
+        channelId = credential(req).payload.channelId as string;
+        return new Response(null, {
+          headers: { "Payment-Receipt": receipt(channelId) },
+        });
+      }) as typeof globalThis.fetch,
+      sendTransaction: async (tx) => {
+        sent.push(tx);
+        return `tx-${sent.length}`;
+      },
+    });
+    await pay(URL_);
+    const forced = await pay.forceClose();
+    sent.splice(0, sent.length);
+    await expect(forced.withdrawPayer()).rejects.toMatchObject({
+      name: "MppError",
+      message: `grace period has not elapsed; retry after ${now + 3_600}`,
+    });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("withdraws without sealing an already sealed channel", async () => {
+    let channelId = "";
+    const sent: Uint8Array[] = [];
+    const base = rpc();
+    const pay = createMppSessionFetch({
+      rpc: rpc({
+        getAccountInfo: async (address) =>
+          address === channelId
+            ? {
+                owner: SOLANA_CHANNEL_PROGRAM,
+                data: channelAccount(1),
+              }
+            : base.getAccountInfo(address),
+      }),
+      signer: wallet(),
+      keyManager: manager(),
+      policy: policy(),
+      fetch: (async (input: RequestInfo | URL) => {
+        const req = input as Request;
+        if (!req.headers.has("Authorization")) {
+          return new Response(null, {
+            status: 402,
+            headers: { "WWW-Authenticate": challenge() },
+          });
+        }
+        channelId = credential(req).payload.channelId as string;
+        return new Response(null, {
+          headers: { "Payment-Receipt": receipt(channelId) },
+        });
+      }) as typeof globalThis.fetch,
+      sendTransaction: async (tx) => {
+        sent.push(tx);
+        return `tx-${sent.length}`;
+      },
+    });
+    await pay(URL_);
+    const forced = await pay.forceClose();
+    sent.splice(0, sent.length);
+    await expect(forced.withdrawPayer()).resolves.toBe("tx-1");
+    expect(
+      sent.map((tx) => parseSolanaTransaction(tx).instructions[0]?.data),
+    ).toEqual([new Uint8Array([8])]);
   });
 });

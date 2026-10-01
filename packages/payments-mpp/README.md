@@ -124,9 +124,14 @@ active key id in memory and does not call `ChannelVoucherKeyManager.list()` on
 request paths (that method intentionally decrypts every stored key).
 
 For recovery, `forceClose()` signs and submits `requestClose` only through the
-app-supplied `sendTransaction`, then returns a `withdrawPayer()` function to
-call after the grace period and on-chain seal. `pay.channels` exposes the open
-channel so a UI can offer cooperative or forced close.
+app-supplied `sendTransaction`, then returns a `withdrawPayer()` function.
+That function reads the channel state, refuses with the exact retry timestamp
+while the grace period is active, submits the permissionless seal for an
+elapsed `Closing` channel through the same wallet and broadcast path, then
+withdraws the payer's remainder. An already `Sealed` channel skips the seal
+transaction.
+`pay.channels` exposes the open channel so a UI can offer cooperative or forced
+close.
 If the signed open transaction reaches the server but its response fails or
 lacks a matching receipt, the thrown `MppError` has a `channelId` property and
 the channel remains in `pay.channels` for `forceClose()` recovery. The voucher

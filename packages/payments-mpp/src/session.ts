@@ -3,6 +3,7 @@ import {
   assertTrustedChannelProgram,
   buildOpenChannelTransaction,
   buildRequestCloseChannelTransaction,
+  buildSealChannelTransaction,
   buildWithdrawPayerChannelTransaction,
   type ChannelMintAccount,
   type ChannelVoucherKeyManager,
@@ -102,7 +103,7 @@ export interface MppSessionFetchResult {
 
 export interface MppForceCloseResult {
   requestCloseTxHash: string;
-  /** Call after the on-chain grace period and seal have completed. */
+  /** Seal the channel once its grace period has elapsed, then withdraw the payer's remainder. */
   withdrawPayer(): Promise<string>;
 }
 
@@ -312,6 +313,25 @@ function verifyOwnerSignedTransaction(
     );
   }
   return signed;
+}
+
+// draft-solana-session-00 Channel IDL: discriminator/version/bump/status are
+// four u8s; closureStartedAt follows salt, deposit, and two u64 watermarks.
+function readClosingChannel(
+  account: { data: Uint8Array } | null,
+): bigint | null {
+  if (!account) {
+    fail("invalid_input", "Channel missing.");
+  }
+  const { data } = account;
+  if (
+    data.length <= 3 ||
+    (data[3] !== 1 && (data[3] !== 2 || data.length < 44))
+  ) {
+    fail("invalid_input", "Unknown status.");
+  }
+  if (data[3] === 1) return null;
+  return new DataView(data.buffer, data.byteOffset).getBigInt64(36, true);
 }
 
 function receiptFor(response: Response, channelId: string): MppReceipt {
@@ -752,8 +772,29 @@ export function createMppSessionFetch(
         active = undefined;
         return {
           requestCloseTxHash,
-          withdrawPayer: async () =>
-            signAndSend(
+          withdrawPayer: async () => {
+            const closureStartedAt = readClosingChannel(
+              await rpc.getAccountInfo(snapshot.channel.channelId),
+            );
+            if (closureStartedAt !== null) {
+              const retryAfter =
+                closureStartedAt + BigInt(snapshot.channel.gracePeriodSeconds);
+              if (BigInt(Math.floor(Date.now() / 1_000)) < retryAfter) {
+                fail(
+                  "invalid_input",
+                  `grace period has not elapsed; retry after ${retryAfter}`,
+                );
+              }
+              await signAndSend(
+                buildSealChannelTransaction({
+                  programAddress: snapshot.channel.channelProgram,
+                  feePayer: signer.address,
+                  channelId: snapshot.channel.channelId,
+                  recentBlockhash: await rpc.getLatestBlockhash(),
+                }),
+              );
+            }
+            return signAndSend(
               buildWithdrawPayerChannelTransaction({
                 programAddress: snapshot.channel.channelProgram,
                 feePayer: signer.address,
@@ -762,7 +803,8 @@ export function createMppSessionFetch(
                 mintAccount: snapshot.mintAccount,
                 recentBlockhash: await rpc.getLatestBlockhash(),
               }),
-            ),
+            );
+          },
         };
       },
     },
