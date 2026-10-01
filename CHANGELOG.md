@@ -7,6 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.7.0 — 2026-10-01
+
+Adds the client side of the Solana MPP **session** intent (metered payments over a payment channel). Compatibility notes:
+
+- `EthCall` (`@naculus/siwx`) — `to` is now optional. A custom `EthCall` must pass a call without `to` through as a contract-creation `eth_call` (standard JSON-RPC behaviour); this is how counterfactual ERC-6492 signatures are verified.
+- `createMppSessionFetch` follows `draft-solana-session-00` as revised in July–August 2026. It interoperates with the pay-kit session server from source (`solana-foundation/pay-kit` main, verified on a mainnet fork running the deployed `CHNLx…` program), **not** with `@solana/mpp` 0.7.0 on npm, which predates those revisions.
+
 ### Added
 
 - **`createMppSessionFetch`** (`@naculus/payments-mpp`) — opens a policy-checked Solana MPP payment channel with an owner-signed transaction and a sealed delegated voucher key, signs only app-metered cumulative usage, supports cooperative and forced close, and exposes open channels for recovery UI. Program deployment, RPC cluster, mint, payee, price, grace period, split policy and server blockhash are verified before signing.
