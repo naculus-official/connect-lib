@@ -30,9 +30,14 @@ export const ERC1271_MAGIC_VALUE = "0x1626ba7e";
 export const ERC6492_MAGIC_SUFFIX =
   "6492649264926492649264926492649264926492649264926492649264926492";
 
-/** Performs an `eth_call`; returns the raw hex result. */
+/**
+ * Performs an `eth_call`; returns the raw hex result.
+ *
+ * Omitting `to` makes a contract-creation `eth_call`, as supported by
+ * standard JSON-RPC nodes. ERC-6492 uses this address-free verification form.
+ */
 export type EthCall = (params: {
-  to: string;
+  to?: string;
   data: string;
 }) => Promise<string>;
 

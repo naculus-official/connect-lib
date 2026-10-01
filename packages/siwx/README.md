@@ -12,6 +12,14 @@ npm install @naculus/siwx
 pnpm add @naculus/siwx
 ```
 
+## Smart-account signatures
+
+`createEVMVerifier({ call, getCode })` verifies deployed smart accounts through
+ERC-1271 and counterfactual accounts through ERC-6492. The supplied `call`
+must pass through an optional `to`: ERC-1271 calls include the account address,
+while address-free ERC-6492 verification intentionally sends a contract-creation
+`eth_call` with only `data`. Standard JSON-RPC nodes support both forms.
+
 ## License
 
 MIT

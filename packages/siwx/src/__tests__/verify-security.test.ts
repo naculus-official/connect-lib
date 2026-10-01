@@ -1,4 +1,6 @@
+import { encodeAbiParameters, erc6492SignatureValidatorByteCode } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { hashPersonalMessage } from "../contract-signature";
 import { createSiwxMessage } from "../message";
 import {
   issueNonce,
@@ -10,6 +12,14 @@ import {
   createXRPLVerifier,
   verifySiwxMessage,
 } from "../verify";
+
+vi.mock("viem", () => ({
+  encodeAbiParameters: vi.fn(() => "0xfeed"),
+  erc6492SignatureValidatorByteCode: "0x6000",
+  recoverMessageAddress: vi.fn(() => {
+    throw new Error("not an EOA signature");
+  }),
+}));
 
 /**
  * End-to-end security properties of verifySiwxMessage.
@@ -377,6 +387,13 @@ describe("contract-account sign-in (ERC-1271 / ERC-6492)", () => {
    */
   const ACCOUNT = "0x1234567890abcdef1234567890abcdef12345678";
   const MAGIC = "0x1626ba7e";
+  // Generated once with viem toCoinbaseSmartAccount v1.1. Keeping the real
+  // envelope here exercises the factory calldata and nested signature shape
+  // without pulling account-abstraction code or a network into the test run.
+  const COUNTERFACTUAL_ACCOUNT = "0x889942B56A61010D8b8F1a6FfcC3856CA0Ecca73";
+  const COUNTERFACTUAL_MESSAGE = "naculus erc6492 counterfactual fixture";
+  const COUNTERFACTUAL_SIGNATURE =
+    "0x000000000000000000000000ba5ed110efdba3d005bfc882d75358acbbb858420000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000c43ffba36f0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002000000000000000000000000030daB87B1fCcF37A981B49eaf005217C29AFB7810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000004195ddbe94245b69015215fa8bcda0e0d545e5290aaef749984687fab482f215717dc3fa3bb45ac7b4b72e20153d3b1dde23d44657f5378e91796a77a0740a5c771c000000000000000000000000000000000000000000000000000000000000006492649264926492649264926492649264926492649264926492649264926492";
 
   const contractMessage = () =>
     createSiwxMessage({
@@ -415,23 +432,97 @@ describe("contract-account sign-in (ERC-1271 / ERC-6492)", () => {
     expect(r.isValid).toBe(false);
   });
 
-  it("does not claim an undeployed ERC-6492 account is verified", async () => {
-    // Resolving a counterfactual signature needs a deploy-and-check against a
-    // validator contract. Answering "valid" without doing it would authorize
-    // an account nobody has proven control of.
-    await issueNonce("testnonce123");
-    const wrapper = `0x${"00".repeat(96)}${"6492".repeat(16)}`;
-    const r = await verifySiwxMessage({
-      raw: contractMessage(),
-      signature: wrapper,
-      domain: "localhost",
-      publicKey: ACCOUNT,
-      recoverAddress: createEVMVerifier({
-        call: vi.fn(async () => `${MAGIC}${"0".repeat(56)}`),
-        getCode: vi.fn(async () => "0x"),
+  it("verifies a counterfactual ERC-6492 signature with a creation call", async () => {
+    const call = vi.fn(
+      async (_params: { to?: string; data: string }) => "0x01",
+    );
+    const verifier = createEVMVerifier({ call });
+
+    await expect(
+      verifier({
+        message: COUNTERFACTUAL_MESSAGE,
+        signature: COUNTERFACTUAL_SIGNATURE,
+        publicKey: COUNTERFACTUAL_ACCOUNT,
       }),
+    ).resolves.toBe(true);
+
+    const expectedArgs = encodeAbiParameters(
+      [{ type: "address" }, { type: "bytes32" }, { type: "bytes" }],
+      [
+        COUNTERFACTUAL_ACCOUNT,
+        hashPersonalMessage(COUNTERFACTUAL_MESSAGE) as `0x${string}`,
+        COUNTERFACTUAL_SIGNATURE,
+      ],
+    );
+    expect(encodeAbiParameters).toHaveBeenCalledWith(
+      [{ type: "address" }, { type: "bytes32" }, { type: "bytes" }],
+      [
+        COUNTERFACTUAL_ACCOUNT,
+        hashPersonalMessage(COUNTERFACTUAL_MESSAGE),
+        COUNTERFACTUAL_SIGNATURE,
+      ],
+    );
+    expect(call).toHaveBeenCalledWith({
+      data: `${erc6492SignatureValidatorByteCode}${expectedArgs.slice(2)}`,
     });
-    expect(r.isValid).toBe(false);
+    expect(call.mock.calls[0]?.[0]).not.toHaveProperty("to");
+  });
+
+  it("rejects a counterfactual ERC-6492 signature the validator refuses", async () => {
+    const verifier = createEVMVerifier({
+      call: vi.fn(async () => "0x00"),
+      getCode: vi.fn(async () => "0x"),
+    });
+    await expect(
+      verifier({
+        message: COUNTERFACTUAL_MESSAGE,
+        signature: COUNTERFACTUAL_SIGNATURE,
+        publicKey: COUNTERFACTUAL_ACCOUNT,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("accepts the validator's 32-byte true word", async () => {
+    const verifier = createEVMVerifier({
+      call: vi.fn(async () => `0x${"0".repeat(63)}1`),
+    });
+    await expect(
+      verifier({
+        message: COUNTERFACTUAL_MESSAGE,
+        signature: COUNTERFACTUAL_SIGNATURE,
+        publicKey: COUNTERFACTUAL_ACCOUNT,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("fails closed when the address-free ERC-6492 call throws", async () => {
+    const verifier = createEVMVerifier({
+      call: vi.fn(async () => {
+        throw new Error("execution reverted");
+      }),
+      getCode: vi.fn(async () => "0x"),
+    });
+    await expect(
+      verifier({
+        message: COUNTERFACTUAL_MESSAGE,
+        signature: COUNTERFACTUAL_SIGNATURE,
+        publicKey: COUNTERFACTUAL_ACCOUNT,
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("fails closed when ERC-6492 calldata encoding throws", async () => {
+    vi.mocked(encodeAbiParameters).mockImplementationOnce(() => {
+      throw new Error("invalid address");
+    });
+    const verifier = createEVMVerifier({ call: vi.fn(async () => "0x01") });
+    await expect(
+      verifier({
+        message: COUNTERFACTUAL_MESSAGE,
+        signature: COUNTERFACTUAL_SIGNATURE,
+        publicKey: COUNTERFACTUAL_ACCOUNT,
+      }),
+    ).resolves.toBe(false);
   });
 
   it("verifies an ERC-6492 signature once the account is deployed", async () => {
@@ -445,17 +536,24 @@ describe("contract-account sign-in (ERC-1271 / ERC-6492)", () => {
       "cafe".padEnd(64, "0") +
       (65).toString(16).padStart(64, "0") +
       inner.padEnd(192, "0");
+    const call = vi.fn(async () => `${MAGIC}${"0".repeat(56)}`);
     const r = await verifySiwxMessage({
       raw: contractMessage(),
       signature: `0x${body}${"6492".repeat(16)}`,
       domain: "localhost",
       publicKey: ACCOUNT,
       recoverAddress: createEVMVerifier({
-        call: vi.fn(async () => `${MAGIC}${"0".repeat(56)}`),
+        call,
         getCode: vi.fn(async () => "0x6080604052"),
       }),
     });
     expect(r.isValid).toBe(true);
+    expect(call).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ACCOUNT,
+        data: expect.stringContaining(inner),
+      }),
+    );
   });
 
   it("refuses an ERC-6492 signature with no chain access at all", async () => {

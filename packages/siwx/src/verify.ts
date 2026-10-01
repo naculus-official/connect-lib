@@ -353,9 +353,9 @@ function compareAddresses(chainId: string, a: string, b: string): boolean {
 export interface EVMVerifierOptions {
   /**
    * Performs an `eth_call`. Supplying it enables contract-account
-   * verification (ERC-1271, and ERC-6492 for an account that is already
-   * deployed). Without it only externally owned accounts can be verified,
-   * because `ecrecover` has nothing to say about a contract signature.
+   * verification (ERC-1271 and ERC-6492, including counterfactual accounts).
+   * Without it only externally owned accounts can be verified, because
+   * `ecrecover` has nothing to say about a contract signature.
    */
   call?: EthCall;
   /** Returns the deployed bytecode at an address, or "0x" when there is none. */
@@ -371,8 +371,14 @@ export function createEVMVerifier(
 }) => Promise<string | boolean> {
   return async ({ message, signature, publicKey }) => {
     let recoverMessageAddress: typeof import("viem").recoverMessageAddress;
+    let encodeAbiParameters: typeof import("viem").encodeAbiParameters;
+    let erc6492SignatureValidatorByteCode: typeof import("viem").erc6492SignatureValidatorByteCode;
     try {
-      ({ recoverMessageAddress } = await import("viem"));
+      ({
+        recoverMessageAddress,
+        encodeAbiParameters,
+        erc6492SignatureValidatorByteCode,
+      } = await import("viem"));
     } catch (err) {
       throw new Error(
         "viem is required for EVM SIWx verification. Install it via: pnpm add viem",
@@ -397,11 +403,27 @@ export function createEVMVerifier(
           // inner signature is what the account would answer for.
           return verifyErc1271(account, hash, wrapped.signature, options.call);
         }
-        // Still counterfactual. Deciding this requires deploying the account
-        // inside an eth_call against a validator contract, which this module
-        // deliberately does not carry an address for — see the note on
-        // ERC6492_MAGIC_SUFFIX. Report unverified rather than guess.
-        return false;
+        // The ERC-6492 validator's address-free form runs its creation bytecode
+        // directly, so it needs no already-deployed validator address. The full
+        // wrapper is required: it carries the factory call that creates the
+        // counterfactual account before checking its signature.
+        try {
+          const args = encodeAbiParameters(
+            [{ type: "address" }, { type: "bytes32" }, { type: "bytes" }],
+            [
+              account as `0x${string}`,
+              hash as `0x${string}`,
+              signature as `0x${string}`,
+            ],
+          );
+          const result = await options.call({
+            data: `${erc6492SignatureValidatorByteCode}${args.slice(2)}`,
+          });
+          const normalized = result.toLowerCase();
+          return normalized === "0x01" || normalized === `0x${"0".repeat(63)}1`;
+        } catch {
+          return false;
+        }
       }
 
       const contractResult = await verifyErc1271(

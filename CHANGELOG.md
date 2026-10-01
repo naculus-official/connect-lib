@@ -14,6 +14,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- **Counterfactual ERC-6492 SIWX signatures** (`@naculus/siwx`) — `createEVMVerifier` now verifies undeployed smart accounts with the ERC-6492 validator creation bytecode through a contract-creation `eth_call`, while deployed accounts continue to use ERC-1271 with the inner signature.
 - **Solana MPP forced close completes without a server** (`@naculus/connect-core`, `@naculus/payments-mpp`) — adds the permissionless channel `seal` transaction builder and makes `forceClose().withdrawPayer()` seal an elapsed `Closing` channel before withdrawing. It now reports the exact retry time during the grace period and refuses missing or unrecognized channel state instead of broadcasting a transaction that the program will reject.
 - **Solana MPP session recovery and accounting** (`@naculus/payments-mpp`) — signed voucher units are committed exactly once across failed requests, meter additions made in flight are preserved, concurrent first requests share one channel open, and a failed response after the signed open reaches the server retains the channel for `forceClose()` recovery while revoking its voucher key.
 
