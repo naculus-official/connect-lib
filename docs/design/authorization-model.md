@@ -105,9 +105,9 @@ Rules, all fail-closed:
 | Authorization | EVM `SessionKeyScope` | Solana `SolanaSessionKeyScope` | MPP voucher + client |
 |---|---|---|---|
 | grants on one chain | `allowedChainIds: [id]` | `cluster` | `cluster` |
-| `asset` | ERC-20 → `tokenAllowances[token] = maxTotal`; native → `maxTotalValue` | `mint` | `mint` |
+| `asset` | ERC-20 → `tokenAllowances[token] = maxTotal`; native is not expressible | `mint` | `mint` |
 | `recipients` | `allowedRecipients` | `allowedRecipients` | single `payee` (more than one → not compilable) |
-| `maxPerPayment` | `maxValuePerTx` (native); per-token per-tx is **not expressible today** | `maxPerPayment` | `maxDelta` |
+| `maxPerPayment` | per-token per-tx and native transfers are **not expressible today** | `maxPerPayment` | `maxDelta` |
 | `maxTotal` | as above | `budget` | `maxCumulative`; `deposit` chosen by the app ≥ `maxTotal` |
 | `maxCount` | `maxTxCount` | `maxTxCount` | not expressible |
 | `expiresAt` | `expiry` | `expiry` | `expiry` / `expiresAt` |
@@ -120,6 +120,10 @@ enforcers. The compiler refuses them, and the doc records them as follow-ups:
 - **EVM per-token per-payment limit** (`tokenAllowances` caps the total
   only). Follow-up: add `tokenMaxPerTx` to `SessionKeyScope`, enforced in
   `checkSessionScope` — a signing-path change, reviewed on its own.
+- **Native EVM transfers** (`slip44:60`). The current scope cannot allow only
+  empty-calldata value transfers to recipients without also permitting calls
+  with arbitrary calldata to recipient contracts, so the compiler refuses
+  native grants. Follow-up: add a faithfully enforced native-transfer shape.
 - **`maxCount` for MPP sessions** — vouchers are cumulative; a count limit
   has no meaning there and is refused rather than ignored.
 

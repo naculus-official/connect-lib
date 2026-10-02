@@ -23,6 +23,8 @@
   assertTrustedChannelProgram
   associatedTokenAddress
   type AtomicityRequirement
+  type Authorization
+  type AuthorizationValidation
   AUTO_RECONNECT_TIMEOUT_MS
   type AutoReconnectConfig
   AutoReconnectManager
@@ -69,6 +71,12 @@
   clearAutoDetectCache
   clearChainFeeEstimators
   compareSimulationVsActual
+  type CompiledMppSession
+  type CompiledMppSessionPolicy
+  compileEvmSessionScope
+  compileMppSession
+  type CompileResult
+  compileSolanaSessionScope
   CONNECTOR_ERROR_MESSAGES
   type ConnectorEntry
   type ConnectorId
@@ -149,6 +157,7 @@
   estimateUserOperationGas
   EthCallProvider
   ETHEREUM_MAINNET_TOKENS
+  evaluateSpend
   type ExecutionPlan
   type ExecutionRequirements
   type ExecutionStrategy
@@ -183,6 +192,7 @@
   getRpcUrl
   getSignatureStatus
   getSolanaBalance
+  type Grant
   hashUserOperation
   hashUserOperationV06
   hasPermission
@@ -213,6 +223,7 @@
   type LoggerNamespace
   type LogLevel
   MemoryStorageAdapter
+  type MppSessionCompileContext
   type MuteRule
   NameResolver
   type NameResolverConfig
@@ -271,6 +282,7 @@
   type PreparedDelegationAuthorization
   prepareDelegationAuthorization
   type PrepareDelegationInput
+  type Rail
   readAtomicSupport
   readDelegation
   readMint
@@ -379,6 +391,9 @@
   type SolanaSessionKeyStatus
   type SolanaSessionPayment
   solanaTransactionId
+  type SpendRefusal
+  type SpendRequest
+  type SpendVerdict
   SPL_PAYMENT_COMPUTE_UNIT_LIMIT
   SPL_PAYMENT_COMPUTE_UNIT_PRICE
   type SplDelegateApproval
@@ -431,6 +446,7 @@
   type UserOperationReceipt
   type UserOperationResponse
   type UserOperationVersion
+  validateAuthorization
   validateChainId
   validateTypedDataRequest
   verifySignedChannelOpen

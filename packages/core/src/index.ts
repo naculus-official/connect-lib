@@ -2,6 +2,7 @@
 export * from "./account-abstraction";
 export * from "./address-validation";
 export * from "./auto-reconnect";
+export * from "./authorization";
 // ── Chain Registry (SRS-007: Token Configs) ──────────────────────────
 export * from "./capabilities";
 export * from "./delegation";

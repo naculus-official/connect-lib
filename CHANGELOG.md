@@ -16,6 +16,7 @@ Adds the client side of the Solana MPP **session** intent (metered payments over
 
 ### Added
 
+- **Unified authorization model** (`@naculus/connect-core`) — declares versioned, CAIP-19 asset grants once, validates them fail-closed, previews spend decisions with a pure evaluator, and compiles only faithfully expressible policies to the existing EVM, Solana, and MPP session enforcers. Deterministic differential tests keep evaluator decisions aligned with those signing-time checks.
 - **`createMppSessionFetch`** (`@naculus/payments-mpp`) — opens a policy-checked Solana MPP payment channel with an owner-signed transaction and a sealed delegated voucher key, signs only app-metered cumulative usage, supports cooperative and forced close, and exposes open channels for recovery UI. Program deployment, RPC cluster, mint, payee, price, grace period, split policy and server blockhash are verified before signing.
 - **`ChannelVoucherKeyManager`** (`@naculus/connect-core`) — creates record-bound encrypted ed25519 keys for Solana MPP channels, fixes channel identity at creation, verifies the channel PDA after open, and persists cumulative voucher budgets before returning canonical 50-byte voucher signatures.
 

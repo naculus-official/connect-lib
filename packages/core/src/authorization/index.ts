@@ -1,0 +1,591 @@
+import { base58 } from "@scure/base";
+import { isValidAddress, toChecksumAddress } from "../address-validation";
+import { eip155Reference, parseCaip10 } from "../caip";
+import type { ChannelVoucherPolicy } from "../session-keys/channel-voucher-keys";
+import type { SolanaSessionKeyScope } from "../session-keys/solana-session-keys";
+import type { SessionKeyScope } from "../session-keys/types";
+
+export type Rail = "transfer" | "x402-exact" | "mpp-charge" | "mpp-session";
+
+export interface Grant {
+  asset: string;
+  recipients: string[];
+  maxPerPayment: bigint;
+  maxTotal: bigint;
+  maxCount?: number;
+  rails: Rail[];
+}
+
+export interface Authorization {
+  version: 1;
+  principal: string;
+  label?: string;
+  grants: Grant[];
+  notBefore?: number;
+  expiresAt: number;
+}
+
+export interface SpendRequest {
+  asset: string;
+  recipient: string;
+  amount: bigint;
+  rail: Rail;
+  at: number;
+  spentSoFar: bigint;
+  countSoFar: number;
+}
+
+export type SpendRefusal =
+  | "expired"
+  | "not-yet-valid"
+  | "no-matching-grant"
+  | "recipient-not-allowed"
+  | "over-per-payment"
+  | "over-total"
+  | "over-count"
+  | "rail-not-allowed"
+  | "invalid-authorization";
+
+export type SpendVerdict =
+  | { allow: true; grant: number }
+  | { allow: false; reason: SpendRefusal };
+
+export type AuthorizationValidation =
+  | { ok: true; authorization: Authorization }
+  | { ok: false; reason: string };
+
+export type CompileResult<T> =
+  | { ok: true; scope: T }
+  | { ok: false; reason: string };
+
+export interface CompiledMppSessionPolicy {
+  recipient: string;
+  amount: bigint;
+  deposit: bigint;
+  maxCumulative: bigint;
+  maxDelta: bigint;
+  expiresAt: number;
+  minimumGracePeriodSeconds?: number;
+}
+
+export interface MppSessionCompileContext {
+  channelProgram: string;
+  payer: string;
+  pricePerUnit: bigint;
+  deposit: bigint;
+  minimumGracePeriodSeconds?: number;
+}
+
+export interface CompiledMppSession {
+  voucher: ChannelVoucherPolicy;
+  client: CompiledMppSessionPolicy;
+}
+
+interface ParsedAsset {
+  canonical: string;
+  chain: string;
+  namespace: "eip155" | "solana";
+  kind: "erc20" | "native" | "token";
+  address?: string;
+}
+
+const RAILS = new Set<Rail>([
+  "transfer",
+  "x402-exact",
+  "mpp-charge",
+  "mpp-session",
+]);
+const U64_MAX = (1n << 64n) - 1n;
+const I64_MAX = (1n << 63n) - 1n;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => allowed.has(key))
+  );
+}
+
+function canonicalSolanaAddress(value: unknown): string | null {
+  if (typeof value !== "string" || !isValidAddress(value, "solana")) {
+    return null;
+  }
+  try {
+    const bytes = base58.decode(value);
+    return bytes.length === 32 ? base58.encode(bytes) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseAsset(value: unknown): ParsedAsset | null {
+  if (typeof value !== "string") return null;
+  const evm = /^(eip155:[1-9]\d*)\/(erc20|slip44):(.+)$/.exec(value);
+  if (evm) {
+    const chainNumber = eip155Reference(evm[1]);
+    if (chainNumber === null) return null;
+    const chain = `eip155:${chainNumber}`;
+    if (evm[2] === "slip44") {
+      return evm[3] === "60"
+        ? {
+            canonical: `${chain}/slip44:60`,
+            chain,
+            namespace: "eip155",
+            kind: "native",
+          }
+        : null;
+    }
+    if (!isValidAddress(evm[3], "eip155")) return null;
+    const address = toChecksumAddress(evm[3]);
+    return {
+      canonical: `${chain}/erc20:${address}`,
+      chain,
+      namespace: "eip155",
+      kind: "erc20",
+      address,
+    };
+  }
+  const solana = /^(solana:[1-9A-HJ-NP-Za-km-z]{32})\/token:(.+)$/.exec(value);
+  if (!solana) return null;
+  const address = canonicalSolanaAddress(solana[2]);
+  return address
+    ? {
+        canonical: `${solana[1]}/token:${address}`,
+        chain: solana[1],
+        namespace: "solana",
+        kind: "token",
+        address,
+      }
+    : null;
+}
+
+function canonicalAddress(
+  value: unknown,
+  namespace: ParsedAsset["namespace"],
+): string | null {
+  if (typeof value !== "string" || !isValidAddress(value, namespace))
+    return null;
+  return namespace === "eip155"
+    ? toChecksumAddress(value)
+    : canonicalSolanaAddress(value);
+}
+
+function canonicalPrincipal(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const account = parseCaip10(value);
+  if (
+    !account ||
+    (account.namespace !== "eip155" && account.namespace !== "solana")
+  ) {
+    return null;
+  }
+  const address = canonicalAddress(account.address, account.namespace);
+  if (!address) return null;
+  if (account.namespace === "eip155") {
+    const reference = eip155Reference(account.chainId);
+    return reference === null ? null : `eip155:${reference}:${address}`;
+  }
+  if (!/^solana:[1-9A-HJ-NP-Za-km-z]{32}$/.test(account.chainId)) return null;
+  return `${account.chainId}:${address}`;
+}
+
+export function validateAuthorization(value: unknown): AuthorizationValidation {
+  if (
+    !isRecord(value) ||
+    !exactKeys(
+      value,
+      ["version", "principal", "grants", "expiresAt"],
+      ["label", "notBefore"],
+    ) ||
+    value.version !== 1 ||
+    !Array.isArray(value.grants) ||
+    value.grants.length === 0 ||
+    !Number.isSafeInteger(value.expiresAt) ||
+    (value.expiresAt as number) <= 0 ||
+    (value.notBefore !== undefined &&
+      (!Number.isSafeInteger(value.notBefore) ||
+        (value.notBefore as number) < 0)) ||
+    (value.notBefore !== undefined &&
+      (value.expiresAt as number) <= (value.notBefore as number)) ||
+    (value.label !== undefined && typeof value.label !== "string")
+  ) {
+    return { ok: false, reason: "invalid authorization structure" };
+  }
+  const principal = canonicalPrincipal(value.principal);
+  if (!principal) return { ok: false, reason: "invalid principal" };
+
+  const grants: Grant[] = [];
+  for (const raw of value.grants) {
+    if (
+      !isRecord(raw) ||
+      !exactKeys(
+        raw,
+        ["asset", "recipients", "maxPerPayment", "maxTotal", "rails"],
+        ["maxCount"],
+      ) ||
+      !Array.isArray(raw.recipients) ||
+      raw.recipients.length === 0 ||
+      typeof raw.maxPerPayment !== "bigint" ||
+      typeof raw.maxTotal !== "bigint" ||
+      raw.maxPerPayment <= 0n ||
+      raw.maxPerPayment > raw.maxTotal ||
+      (raw.maxCount !== undefined &&
+        (!Number.isSafeInteger(raw.maxCount) ||
+          (raw.maxCount as number) <= 0)) ||
+      !Array.isArray(raw.rails) ||
+      raw.rails.length === 0 ||
+      raw.rails.some(
+        (rail) => typeof rail !== "string" || !RAILS.has(rail as Rail),
+      )
+    ) {
+      return { ok: false, reason: "invalid grant structure" };
+    }
+    const asset = parseAsset(raw.asset);
+    if (!asset) return { ok: false, reason: "invalid asset" };
+    const recipients = raw.recipients.map((recipient) =>
+      canonicalAddress(recipient, asset.namespace),
+    );
+    if (recipients.some((recipient) => recipient === null)) {
+      return { ok: false, reason: "invalid recipient" };
+    }
+    const canonicalRecipients = recipients as string[];
+    const rails = raw.rails as Rail[];
+    if (
+      new Set(canonicalRecipients).size !== canonicalRecipients.length ||
+      new Set(rails).size !== rails.length
+    ) {
+      return { ok: false, reason: "duplicate recipient or rail" };
+    }
+    grants.push({
+      asset: asset.canonical,
+      recipients: canonicalRecipients,
+      maxPerPayment: raw.maxPerPayment,
+      maxTotal: raw.maxTotal,
+      ...(raw.maxCount === undefined
+        ? {}
+        : { maxCount: raw.maxCount as number }),
+      rails: [...rails],
+    });
+  }
+
+  for (let left = 0; left < grants.length; left++) {
+    for (let right = left + 1; right < grants.length; right++) {
+      const a = grants[left];
+      const b = grants[right];
+      if (
+        a.asset === b.asset &&
+        a.recipients.some((recipient) => b.recipients.includes(recipient)) &&
+        a.rails.some((rail) => b.rails.includes(rail))
+      ) {
+        return { ok: false, reason: "overlapping grants" };
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    authorization: {
+      version: 1,
+      principal,
+      ...(value.label === undefined ? {} : { label: value.label as string }),
+      grants,
+      ...(value.notBefore === undefined
+        ? {}
+        : { notBefore: value.notBefore as number }),
+      expiresAt: value.expiresAt as number,
+    },
+  };
+}
+
+export function evaluateSpend(
+  value: Authorization,
+  request: SpendRequest,
+): SpendVerdict {
+  const validated = validateAuthorization(value);
+  if (!validated.ok) return { allow: false, reason: "invalid-authorization" };
+  if (
+    !isRecord(request) ||
+    !exactKeys(request, [
+      "asset",
+      "recipient",
+      "amount",
+      "rail",
+      "at",
+      "spentSoFar",
+      "countSoFar",
+    ]) ||
+    typeof request.amount !== "bigint" ||
+    request.amount <= 0n ||
+    typeof request.spentSoFar !== "bigint" ||
+    request.spentSoFar < 0n ||
+    !Number.isSafeInteger(request.at) ||
+    !Number.isSafeInteger(request.countSoFar) ||
+    request.countSoFar < 0 ||
+    !RAILS.has(request.rail)
+  ) {
+    return { allow: false, reason: "invalid-authorization" };
+  }
+  const authorization = validated.authorization;
+  if (request.at >= authorization.expiresAt)
+    return { allow: false, reason: "expired" };
+  if (
+    authorization.notBefore !== undefined &&
+    request.at < authorization.notBefore
+  ) {
+    return { allow: false, reason: "not-yet-valid" };
+  }
+  const asset = parseAsset(request.asset);
+  if (!asset) return { allow: false, reason: "no-matching-grant" };
+  const assetMatches = authorization.grants
+    .map((grant, index) => ({ grant, index }))
+    .filter(({ grant }) => grant.asset === asset.canonical);
+  if (assetMatches.length === 0)
+    return { allow: false, reason: "no-matching-grant" };
+  const railMatches = assetMatches.filter(({ grant }) =>
+    grant.rails.includes(request.rail),
+  );
+  if (railMatches.length === 0)
+    return { allow: false, reason: "rail-not-allowed" };
+  const recipient = canonicalAddress(request.recipient, asset.namespace);
+  if (!recipient) return { allow: false, reason: "recipient-not-allowed" };
+  const match = railMatches.find(({ grant }) =>
+    grant.recipients.includes(recipient),
+  );
+  if (!match) return { allow: false, reason: "recipient-not-allowed" };
+  if (request.amount > match.grant.maxPerPayment)
+    return { allow: false, reason: "over-per-payment" };
+  if (request.spentSoFar + request.amount > match.grant.maxTotal) {
+    return { allow: false, reason: "over-total" };
+  }
+  if (
+    match.grant.maxCount !== undefined &&
+    request.countSoFar >= match.grant.maxCount
+  ) {
+    return { allow: false, reason: "over-count" };
+  }
+  return { allow: true, grant: match.index };
+}
+
+function validatedForCompile(value: Authorization): Authorization | string {
+  const result = validateAuthorization(value);
+  if (!result.ok) return result.reason;
+  return result.authorization.notBefore === undefined
+    ? result.authorization
+    : "notBefore is not expressible by existing session scopes";
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length &&
+    [...left].sort().every((value, index) => value === [...right].sort()[index])
+  );
+}
+
+export function compileEvmSessionScope(
+  value: Authorization,
+  chainId: number,
+): CompileResult<SessionKeyScope> {
+  const authorization = validatedForCompile(value);
+  if (typeof authorization === "string")
+    return { ok: false, reason: authorization };
+  if (!Number.isSafeInteger(chainId) || chainId <= 0)
+    return { ok: false, reason: "invalid chainId" };
+  const chain = `eip155:${chainId}`;
+  const selected = authorization.grants.filter(
+    (grant) => parseAsset(grant.asset)?.chain === chain,
+  );
+  if (selected.length === 0) return { ok: false, reason: "no grants on chain" };
+  if (
+    selected.some((grant) =>
+      grant.rails.some((rail) => rail !== "transfer" && rail !== "x402-exact"),
+    )
+  ) {
+    return { ok: false, reason: "rail is not expressible by EVM scope" };
+  }
+  if (selected.some((grant) => parseAsset(grant.asset)?.kind === "native")) {
+    return {
+      ok: false,
+      reason: "native EVM grants are not faithfully expressible",
+    };
+  }
+  if (
+    selected.some(
+      (grant) =>
+        parseAsset(grant.asset)?.kind === "erc20" &&
+        grant.maxPerPayment < grant.maxTotal,
+    )
+  ) {
+    return { ok: false, reason: "ERC-20 per-payment limit is not expressible" };
+  }
+  const recipients = selected[0].recipients;
+  const maxCount = selected[0].maxCount;
+  if (
+    selected.some(
+      (grant) =>
+        !sameStrings(grant.recipients, recipients) ||
+        grant.maxCount !== maxCount,
+    )
+  ) {
+    return { ok: false, reason: "recipient sets or counts differ" };
+  }
+  const seen = new Set<string>();
+  for (const grant of selected) {
+    if (seen.has(grant.asset))
+      return {
+        ok: false,
+        reason: "duplicate asset grants are not faithfully expressible",
+      };
+    seen.add(grant.asset);
+  }
+  const scope: SessionKeyScope = {
+    expiry: authorization.expiresAt,
+    maxValuePerTx: 0n,
+    maxTotalValue: 0n,
+    allowedContracts: selected.map(
+      (grant) => (parseAsset(grant.asset) as ParsedAsset).address,
+    ) as `0x${string}`[],
+    allowedMethods: ["0xa9059cbb"],
+    allowedChainIds: [chainId],
+    allowedRecipients: recipients as `0x${string}`[],
+    mode: "offchain",
+    ...(maxCount === undefined ? {} : { maxTxCount: maxCount }),
+  };
+  for (const grant of selected) {
+    const asset = parseAsset(grant.asset) as ParsedAsset;
+    scope.tokenAllowances ??= {};
+    scope.tokenAllowances[asset.address as `0x${string}`] = grant.maxTotal;
+  }
+  return { ok: true, scope };
+}
+
+export function compileSolanaSessionScope(
+  value: Authorization,
+  cluster: string,
+): CompileResult<SolanaSessionKeyScope> {
+  const authorization = validatedForCompile(value);
+  if (typeof authorization === "string")
+    return { ok: false, reason: authorization };
+  if (!/^solana:[1-9A-HJ-NP-Za-km-z]{32}$/.test(cluster))
+    return { ok: false, reason: "invalid cluster" };
+  const selected = authorization.grants.filter(
+    (grant) => parseAsset(grant.asset)?.chain === cluster,
+  );
+  if (selected.length !== 1)
+    return { ok: false, reason: "exactly one token grant is required" };
+  const grant = selected[0];
+  if (
+    grant.rails.some(
+      (rail) =>
+        rail !== "transfer" && rail !== "mpp-charge" && rail !== "x402-exact",
+    )
+  ) {
+    return { ok: false, reason: "rail is not expressible by Solana scope" };
+  }
+  if (grant.maxTotal > U64_MAX || grant.maxPerPayment > U64_MAX) {
+    return { ok: false, reason: "amount exceeds Solana u64" };
+  }
+  const asset = parseAsset(grant.asset) as ParsedAsset;
+  return {
+    ok: true,
+    scope: {
+      cluster,
+      mint: asset.address as string,
+      budget: grant.maxTotal,
+      maxPerPayment: grant.maxPerPayment,
+      allowedRecipients: [...grant.recipients],
+      expiry: authorization.expiresAt,
+      ...(grant.maxCount === undefined ? {} : { maxTxCount: grant.maxCount }),
+    },
+  };
+}
+
+export function compileMppSession(
+  value: Authorization,
+  cluster: string,
+  context: MppSessionCompileContext,
+): CompileResult<CompiledMppSession> {
+  const authorization = validatedForCompile(value);
+  if (typeof authorization === "string")
+    return { ok: false, reason: authorization };
+  if (!/^solana:[1-9A-HJ-NP-Za-km-z]{32}$/.test(cluster))
+    return { ok: false, reason: "invalid cluster" };
+  const selected = authorization.grants.filter(
+    (grant) =>
+      parseAsset(grant.asset)?.chain === cluster &&
+      grant.rails.includes("mpp-session"),
+  );
+  if (selected.length !== 1)
+    return { ok: false, reason: "exactly one mpp-session grant is required" };
+  const grant = selected[0];
+  if (grant.rails.length !== 1)
+    return { ok: false, reason: "mixed rails are not faithfully expressible" };
+  if (grant.recipients.length !== 1)
+    return { ok: false, reason: "MPP session requires exactly one recipient" };
+  if (grant.maxCount !== undefined)
+    return { ok: false, reason: "MPP session cannot enforce maxCount" };
+  const channelProgram = canonicalSolanaAddress(context.channelProgram);
+  const payer = canonicalSolanaAddress(context.payer);
+  if (
+    !channelProgram ||
+    !payer ||
+    typeof context.pricePerUnit !== "bigint" ||
+    context.pricePerUnit <= 0n ||
+    context.pricePerUnit > U64_MAX
+  ) {
+    return { ok: false, reason: "invalid MPP context" };
+  }
+  if (
+    typeof context.deposit !== "bigint" ||
+    context.deposit < grant.maxTotal ||
+    context.deposit > U64_MAX
+  ) {
+    return { ok: false, reason: "deposit must cover maxTotal" };
+  }
+  if (grant.maxTotal > U64_MAX || BigInt(authorization.expiresAt) > I64_MAX) {
+    return { ok: false, reason: "authorization exceeds MPP integer bounds" };
+  }
+  if (
+    context.minimumGracePeriodSeconds !== undefined &&
+    (!Number.isSafeInteger(context.minimumGracePeriodSeconds) ||
+      context.minimumGracePeriodSeconds <= 0)
+  ) {
+    return { ok: false, reason: "invalid minimum grace period" };
+  }
+  const mint = (parseAsset(grant.asset) as ParsedAsset).address as string;
+  const recipient = grant.recipients[0];
+  return {
+    ok: true,
+    scope: {
+      voucher: {
+        cluster,
+        channelProgram,
+        payer,
+        mint,
+        payee: recipient,
+        pricePerUnit: context.pricePerUnit,
+        maxCumulative: grant.maxTotal,
+        maxDelta: grant.maxPerPayment,
+        expiry: authorization.expiresAt,
+      },
+      client: {
+        recipient,
+        amount: context.pricePerUnit,
+        deposit: context.deposit,
+        maxCumulative: grant.maxTotal,
+        maxDelta: grant.maxPerPayment,
+        expiresAt: authorization.expiresAt,
+        ...(context.minimumGracePeriodSeconds === undefined
+          ? {}
+          : { minimumGracePeriodSeconds: context.minimumGracePeriodSeconds }),
+      },
+    },
+  };
+}

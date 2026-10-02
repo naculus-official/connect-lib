@@ -1,5 +1,6 @@
 import {
   ChannelVoucherKeyManager,
+  type CompiledMppSessionPolicy,
   encodeChannelVoucher,
   MemoryStorageAdapter,
   parseSolanaTransaction,
@@ -18,7 +19,12 @@ import {
   type MppCredential,
   type MppSolanaSigner,
 } from "./index";
-import type { MppSessionRpc } from "./session";
+import type { MppSessionPolicy, MppSessionRpc } from "./session";
+
+const _authorizationCompilerPolicyIsAssignable = (
+  policy: CompiledMppSessionPolicy,
+): MppSessionPolicy => policy;
+void _authorizationCompilerPolicyIsAssignable;
 
 const LOADER = "BPFLoaderUpgradeab1e11111111111111111111111";
 const BLOCKHASH = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N";
