@@ -1,6 +1,6 @@
 # Unified authorization model
 
-Status: **proposed 2026-10-02**, awaiting maintainer approval. Implements
+Status: **approved 2026-10-02** — decisions 1–3 below accepted as recommended. Implements
 gap 1 of [authorization-boundary.md](./authorization-boundary.md); read that
 first — its invariants are binding here.
 
@@ -152,17 +152,17 @@ owning manager's existing revoke. The aggregate stores nothing of its own.
 3. **`listAuthorizations`** across managers.
 4. **appkit consent / preview / revoke** components on top.
 
-## Decisions requested
+## Decisions (approved 2026-10-02)
 
 1. Scope of v1: **value transfers only** (the four rails above). Arbitrary
    EVM contract-call permissions (`allowedContracts` / `allowedMethods`)
-   stay EVM-specific and are not part of `Authorization` v1. *Recommended.*
+   stay EVM-specific and are not part of `Authorization` v1. **Accepted.**
 2. `recipients` required everywhere, including EVM where it is optional
    today. Existing EVM keys without recipients are listed as
    "unrestricted recipient (legacy)" and cannot be produced by the compiler.
-   *Recommended.*
+   **Accepted.**
 3. Phase order as above (evaluator before the EVM per-token limit).
-   *Recommended.*
+   **Accepted.**
 
 ## Out of scope
 
