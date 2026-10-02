@@ -72,6 +72,9 @@ jobs:
       - name: Run lint
         run: pnpm lint
 
+      - name: Spell check
+        run: pnpm spell-check
+
       - name: Duplication threshold
         run: pnpm dup:check
 
