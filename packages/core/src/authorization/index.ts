@@ -410,21 +410,6 @@ export function compileEvmSessionScope(
   ) {
     return { ok: false, reason: "rail is not expressible by EVM scope" };
   }
-  if (selected.some((grant) => parseAsset(grant.asset)?.kind === "native")) {
-    return {
-      ok: false,
-      reason: "native EVM grants are not faithfully expressible",
-    };
-  }
-  if (
-    selected.some(
-      (grant) =>
-        parseAsset(grant.asset)?.kind === "erc20" &&
-        grant.maxPerPayment < grant.maxTotal,
-    )
-  ) {
-    return { ok: false, reason: "ERC-20 per-payment limit is not expressible" };
-  }
   const recipients = selected[0].recipients;
   const maxCount = selected[0].maxCount;
   if (
@@ -445,23 +430,36 @@ export function compileEvmSessionScope(
       };
     seen.add(grant.asset);
   }
+  const tokenGrants = selected.filter(
+    (grant) => parseAsset(grant.asset)?.kind === "erc20",
+  );
+  const nativeGrant = selected.find(
+    (grant) => parseAsset(grant.asset)?.kind === "native",
+  );
   const scope: SessionKeyScope = {
     expiry: authorization.expiresAt,
-    maxValuePerTx: 0n,
-    maxTotalValue: 0n,
-    allowedContracts: selected.map(
+    maxValuePerTx: nativeGrant?.maxPerPayment ?? 0n,
+    maxTotalValue: nativeGrant?.maxTotal ?? 0n,
+    allowedContracts: tokenGrants.map(
       (grant) => (parseAsset(grant.asset) as ParsedAsset).address,
     ) as `0x${string}`[],
-    allowedMethods: ["0xa9059cbb"],
+    ...(tokenGrants.length === 0 ? {} : { allowedMethods: ["0xa9059cbb"] }),
     allowedChainIds: [chainId],
     allowedRecipients: recipients as `0x${string}`[],
+    ...(nativeGrant
+      ? { nativeTransfer: "empty-calldata-to-recipients" as const }
+      : {}),
     mode: "offchain",
     ...(maxCount === undefined ? {} : { maxTxCount: maxCount }),
   };
-  for (const grant of selected) {
+  for (const grant of tokenGrants) {
     const asset = parseAsset(grant.asset) as ParsedAsset;
     scope.tokenAllowances ??= {};
     scope.tokenAllowances[asset.address as `0x${string}`] = grant.maxTotal;
+    if (grant.maxPerPayment < grant.maxTotal) {
+      scope.tokenMaxPerTx ??= {};
+      scope.tokenMaxPerTx[asset.address as `0x${string}`] = grant.maxPerPayment;
+    }
   }
   return { ok: true, scope };
 }

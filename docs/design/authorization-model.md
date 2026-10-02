@@ -105,25 +105,22 @@ Rules, all fail-closed:
 | Authorization | EVM `SessionKeyScope` | Solana `SolanaSessionKeyScope` | MPP voucher + client |
 |---|---|---|---|
 | grants on one chain | `allowedChainIds: [id]` | `cluster` | `cluster` |
-| `asset` | ERC-20 → `tokenAllowances[token] = maxTotal`; native is not expressible | `mint` | `mint` |
+| `asset` | ERC-20 → `tokenAllowances[token] = maxTotal`; native → recipient-bounded empty-calldata transfers | `mint` | `mint` |
 | `recipients` | `allowedRecipients` | `allowedRecipients` | single `payee` (more than one → not compilable) |
-| `maxPerPayment` | per-token per-tx and native transfers are **not expressible today** | `maxPerPayment` | `maxDelta` |
+| `maxPerPayment` | ERC-20 → `tokenMaxPerTx[token]`; native → `maxValuePerTx` | `maxPerPayment` | `maxDelta` |
 | `maxTotal` | as above | `budget` | `maxCumulative`; `deposit` chosen by the app ≥ `maxTotal` |
 | `maxCount` | `maxTxCount` | `maxTxCount` | not expressible |
 | `expiresAt` | `expiry` | `expiry` | `expiry` / `expiresAt` |
 | rails | x402-exact / transfer → mode `offchain` | mpp-charge / x402 SVM | mpp-session |
 
 A compiler returns `{ ok: true, scope }` or `{ ok: false, reason }`; it never
-silently widens. Two cells above are not expressible by the current
-enforcers. The compiler refuses them, and the doc records them as follow-ups:
+silently widens. EVM token per-payment limits and native transfers are
+expressible: the former compile to `tokenMaxPerTx`, and the latter compile to
+`nativeTransfer: "empty-calldata-to-recipients"` plus the existing recipient
+and native-value limits.
 
-- **EVM per-token per-payment limit** (`tokenAllowances` caps the total
-  only). Follow-up: add `tokenMaxPerTx` to `SessionKeyScope`, enforced in
-  `checkSessionScope` — a signing-path change, reviewed on its own.
-- **Native EVM transfers** (`slip44:60`). The current scope cannot allow only
-  empty-calldata value transfers to recipients without also permitting calls
-  with arbitrary calldata to recipient contracts, so the compiler refuses
-  native grants. Follow-up: add a faithfully enforced native-transfer shape.
+One cell above remains inexpressible and is refused:
+
 - **`maxCount` for MPP sessions** — vouchers are cumulative; a count limit
   has no meaning there and is refused rather than ignored.
 

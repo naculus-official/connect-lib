@@ -1,4 +1,3 @@
-
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -123,6 +122,8 @@ describe("SessionKeyManager", () => {
       expect(info.scope.mode).toBe("offchain");
       expect(info.authorized).toBe(false);
       expect(info.authorizationType).toBe("offchain");
+      expect(info.scope.tokenMaxPerTx).toBeUndefined();
+      expect(info.scope.nativeTransfer).toBeUndefined();
     });
 
     it("should create a session key with custom scope", async () => {
@@ -163,6 +164,30 @@ describe("SessionKeyManager", () => {
           signerAddress,
         ),
       ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+    });
+
+    it("should reject malformed token per-tx limits and native transfer modes", async () => {
+      const malformed = [
+        makeScope({ tokenMaxPerTx: { [tokenAddress]: 1n } }),
+        makeScope({
+          tokenAllowances: { [tokenAddress]: 10n },
+          tokenMaxPerTx: { [tokenAddress]: 11n },
+        }),
+        makeScope({
+          tokenAllowances: { [tokenAddress]: 10n },
+          tokenMaxPerTx: { [tokenAddress]: 1 as unknown as bigint },
+        }),
+        makeScope({ nativeTransfer: "other" as never }),
+        makeScope({
+          nativeTransfer: "empty-calldata-to-recipients",
+          allowedRecipients: [],
+        }),
+      ];
+      for (const scope of malformed) {
+        await expect(
+          manager.createSessionKey(scope, signerAddress),
+        ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+      }
     });
 
     it("should reject sessions beyond the configured expiry ceiling", async () => {
@@ -388,6 +413,98 @@ describe("SessionKeyManager", () => {
       await expect(
         manager.checkSessionScope(info.id, erc20Transfer(101n)),
       ).resolves.toMatchObject({ valid: false });
+    });
+
+    it("should enforce per-token per-transaction limits on transfer and transferFrom", async () => {
+      const info = await manager.createSessionKey(
+        makeScope({
+          allowedMethods: ["0xa9059cbb", "0x23b872dd"],
+          tokenAllowances: { [tokenAddress]: 100n },
+          tokenMaxPerTx: { [tokenAddress]: 40n },
+        }),
+        signerAddress,
+      );
+
+      await expect(
+        manager.checkSessionScope(info.id, erc20Transfer(40n)),
+      ).resolves.toMatchObject({ valid: true });
+      await expect(
+        manager.checkSessionScope(info.id, erc20TransferFrom(40n)),
+      ).resolves.toMatchObject({ valid: true });
+      await expect(
+        manager.checkSessionScope(info.id, erc20Transfer(41n)),
+      ).resolves.toMatchObject({ valid: false });
+      await expect(
+        manager.checkSessionScope(info.id, erc20TransferFrom(41n)),
+      ).resolves.toMatchObject({ valid: false });
+    });
+
+    it("should permit only positive-value empty-calldata native transfers to recipients", async () => {
+      const recipient = "0x1111111111111111111111111111111111111111";
+      const other = "0x2222222222222222222222222222222222222222";
+      const info = await manager.createSessionKey(
+        makeScope({
+          allowedContracts: [tokenAddress],
+          allowedMethods: ["0xa9059cbb"],
+          allowedRecipients: [recipient],
+          nativeTransfer: "empty-calldata-to-recipients",
+        }),
+        signerAddress,
+      );
+
+      const absentCalldata = await manager.checkSessionScope(info.id, {
+        to: recipient,
+        value: "1",
+        chainId: 1,
+      });
+      expect(absentCalldata).toMatchObject({ valid: true });
+      await expect(
+        manager.checkSessionScope(info.id, {
+          to: recipient,
+          value: "1",
+          data: "0x",
+          chainId: 1,
+        }),
+      ).resolves.toMatchObject({ valid: true });
+      await expect(
+        manager.checkSessionScope(info.id, {
+          to: other,
+          value: "1",
+          chainId: 1,
+        }),
+      ).resolves.toMatchObject({ valid: false });
+      await expect(
+        manager.checkSessionScope(info.id, {
+          to: recipient,
+          value: "1",
+          data: "0x12345678",
+          chainId: 1,
+        }),
+      ).resolves.toMatchObject({ valid: false });
+      // A zero-value empty-calldata no-op is not a native transfer and does
+      // not receive either the contract or method bypass.
+      await expect(
+        manager.checkSessionScope(info.id, {
+          to: recipient,
+          value: "0",
+          chainId: 1,
+        }),
+      ).resolves.toMatchObject({ valid: false });
+    });
+
+    it("loads an old record without the new fields and enforces it unchanged", async () => {
+      const adapter = new MemoryStorageAdapter();
+      const first = createManagerWithAdapter(adapter);
+      const info = await first.createSessionKey(makeScope(), signerAddress);
+      const stored = await new SessionKeyStorage(adapter).get(info.id);
+      expect(stored?.scope).not.toHaveProperty("tokenMaxPerTx");
+      expect(stored?.scope).not.toHaveProperty("nativeTransfer");
+
+      const second = createManagerWithAdapter(adapter);
+      await expect(
+        second.checkSessionScope(info.id, testTx),
+      ).resolves.toMatchObject({ valid: true });
+      await first.clearAll();
     });
 
     it("should reject unknown or malformed calls to an allowance-scoped token", async () => {

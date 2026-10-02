@@ -255,7 +255,9 @@ export class SessionKeyManager {
 
     if (
       this.config.requireAllowedContracts &&
-      (!fullScope.allowedContracts || fullScope.allowedContracts.length === 0)
+      (!fullScope.allowedContracts ||
+        fullScope.allowedContracts.length === 0) &&
+      fullScope.nativeTransfer !== "empty-calldata-to-recipients"
     ) {
       throw createSessionKeyError(
         "session_key_required_fields_missing",
@@ -1156,8 +1158,10 @@ export class SessionKeyManager {
         (this.config.requireAllowedContracts ? [] : undefined),
       allowedMethods: scope?.allowedMethods ?? undefined,
       tokenAllowances: scope?.tokenAllowances ?? undefined,
+      tokenMaxPerTx: scope?.tokenMaxPerTx ?? undefined,
       allowedChainIds: scope?.allowedChainIds ?? undefined,
       allowedRecipients: scope?.allowedRecipients ?? undefined,
+      nativeTransfer: scope?.nativeTransfer ?? undefined,
       mode: scope?.mode ?? "offchain",
     };
   }
@@ -1267,6 +1271,57 @@ export class SessionKeyManager {
         normalizedAddresses.add(normalizedAddress);
       }
     }
+    if (scope.tokenMaxPerTx) {
+      const normalizedAddresses = new Set<string>();
+      for (const [address, amount] of Object.entries(scope.tokenMaxPerTx)) {
+        const normalizedAddress = address.toLowerCase();
+        const allowanceEntry = Object.entries(scope.tokenAllowances ?? {}).find(
+          ([token]) => token.toLowerCase() === normalizedAddress,
+        );
+        if (
+          !isValidAddress(address, "eip155") ||
+          isZeroAddress(address) ||
+          typeof amount !== "bigint" ||
+          amount < 0n
+        ) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "tokenMaxPerTx must contain non-negative bigint values keyed by non-zero EVM addresses",
+          );
+        }
+        if (normalizedAddresses.has(normalizedAddress)) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "tokenMaxPerTx cannot contain duplicate token addresses",
+          );
+        }
+        if (!allowanceEntry || amount > allowanceEntry[1]) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "tokenMaxPerTx entries must have a matching tokenAllowances entry and not exceed its allowance",
+          );
+        }
+        normalizedAddresses.add(normalizedAddress);
+      }
+    }
+    if (
+      scope.nativeTransfer !== undefined &&
+      scope.nativeTransfer !== "empty-calldata-to-recipients"
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        'nativeTransfer must be "empty-calldata-to-recipients"',
+      );
+    }
+    if (
+      scope.nativeTransfer === "empty-calldata-to-recipients" &&
+      (!scope.allowedRecipients || scope.allowedRecipients.length === 0)
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        "nativeTransfer requires at least one allowed recipient",
+      );
+    }
   }
 
   /**
@@ -1366,8 +1421,27 @@ export class SessionKeyManager {
       };
     }
 
-    // Contract check
-    if (scope.allowedContracts && scope.allowedContracts.length > 0 && tx.to) {
+    const hasCalldata = Boolean(tx.data && tx.data !== "0x");
+    const nativeRecipientTransfer =
+      scope.nativeTransfer === "empty-calldata-to-recipients" &&
+      txValue > 0n &&
+      !hasCalldata &&
+      Boolean(
+        tx.to &&
+          scope.allowedRecipients?.some(
+            (recipient) => recipient.toLowerCase() === tx.to?.toLowerCase(),
+          ),
+      );
+
+    // Contract check. The native-transfer mode bypasses it only for its exact
+    // positive-value, empty-calldata, recipient-bounded shape.
+    if (nativeRecipientTransfer) {
+      // The recipient check below still runs, along with all value limits.
+    } else if (
+      scope.allowedContracts &&
+      scope.allowedContracts.length > 0 &&
+      tx.to
+    ) {
       const txToLower = tx.to.toLowerCase();
       const allowed = scope.allowedContracts.some(
         (c) => c.toLowerCase() === txToLower,
@@ -1378,7 +1452,10 @@ export class SessionKeyManager {
           reason: `Contract ${tx.to} not in allowed list`,
         };
       }
-    } else if (scope.allowedContracts?.length) {
+    } else if (
+      scope.allowedContracts?.length ||
+      scope.nativeTransfer === "empty-calldata-to-recipients"
+    ) {
       return {
         valid: false,
         reason: "Transaction target is required by scope",
@@ -1411,6 +1488,15 @@ export class SessionKeyManager {
     }
     if (tokenSpendResult.spend) {
       const { tokenAddress, amount, allowance } = tokenSpendResult.spend;
+      const perTxEntry = Object.entries(scope.tokenMaxPerTx ?? {}).find(
+        ([token]) => token.toLowerCase() === tokenAddress.toLowerCase(),
+      );
+      if (perTxEntry && amount > perTxEntry[1]) {
+        return {
+          valid: false,
+          reason: `Token spend ${amount} exceeds max per-tx amount ${perTxEntry[1]} for ${tokenAddress}`,
+        };
+      }
       const spent = accumulatedTokenSpend(accumulatedTokenSpends, tokenAddress);
       if (spent + amount > allowance) {
         return {
@@ -1422,7 +1508,6 @@ export class SessionKeyManager {
     if (scope.allowedRecipients && scope.allowedRecipients.length > 0) {
       // The recipient is knowable for exactly two shapes; anything else is
       // refused rather than guessed.
-      const hasCalldata = Boolean(tx.data && tx.data !== "0x");
       const recipient = tokenSpendResult.spend
         ? tokenSpendResult.spend.recipient
         : hasCalldata
@@ -1462,7 +1547,7 @@ export class SessionKeyManager {
           reason: `Method ${methodId} not in allowed list`,
         };
       }
-    } else if (scope.allowedMethods?.length) {
+    } else if (scope.allowedMethods?.length && !nativeRecipientTransfer) {
       return { valid: false, reason: "Transaction data is required by scope" };
     }
 

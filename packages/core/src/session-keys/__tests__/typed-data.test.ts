@@ -162,6 +162,27 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
     ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
 
+  it("enforces tokenMaxPerTx on TransferWithAuthorization", async () => {
+    const m = manager();
+    const info = await authorizedKey(m, {
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 2_000_000n },
+      tokenMaxPerTx: { [USDC]: 1_500_000n },
+      allowedRecipients: [PAYEE],
+    });
+    const self = sessionKeyAddress(info.publicKey);
+    await expect(
+      m.signTypedDataWithSessionKey(info.id, request(self)),
+    ).resolves.toMatch(/^0x/);
+    await expect(
+      m.signTypedDataWithSessionKey(
+        info.id,
+        request(self, { value: "1500001", nonce: `0x${"cd".repeat(32)}` }),
+      ),
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+  });
+
   it("refuses: wrong from, foreign payee, other primary type, window outliving the key, unknown chain", async () => {
     const m = manager();
     const info = await authorizedKey(m, {

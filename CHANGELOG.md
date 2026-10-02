@@ -9,6 +9,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **Fully expressible EVM authorization grants** (`@naculus/connect-core`) — session scopes can independently cap each allowance-scoped token transfer with `tokenMaxPerTx`, including EIP-3009 typed-data signing, and can opt into positive-value empty-calldata native transfers only to `allowedRecipients`. The authorization compiler now emits both shapes without widening contract calls or native-value budgets.
 - **Opt-in settlement verification** (`@naculus/connect-core`, `@naculus/payments-x402`, `@naculus/payments-mpp`) — verifies EIP-3009 receipts by chain, confirmation depth, exact `Transfer`, and signed `AuthorizationUsed` nonce; verifies Solana charges by genesis, transaction outcome, exact owner balance deltas, and signed-message hash; and verifies MPP session closes by program ownership, distributed channel state, and the last voucher cumulative. Fetch remains unchanged and never verifies or broadcasts implicitly.
 
 ## 0.7.0 — 2026-10-01

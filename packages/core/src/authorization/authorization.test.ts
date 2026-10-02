@@ -175,7 +175,6 @@ describe("compilers", () => {
     ["notBefore", evmAuthorization(), 1],
     ["missing chain", evmAuthorization(), 2],
     ["unsupported rail", invalidGrant({ rails: ["mpp-charge"] }), 1],
-    ["ERC-20 per-payment limit", invalidGrant({ maxPerPayment: 999n }), 1],
     [
       "different recipients",
       evmAuthorization({
@@ -219,7 +218,7 @@ describe("compilers", () => {
     });
   });
 
-  it("EVM refuses native grants because recipient-only value transfers are not expressible", () => {
+  it("EVM compiles native grants to recipient-bounded empty-calldata transfers", () => {
     const value = evmAuthorization({
       notBefore: undefined,
       grants: [
@@ -233,8 +232,37 @@ describe("compilers", () => {
       ],
     });
     expect(compileEvmSessionScope(value, 1)).toEqual({
-      ok: false,
-      reason: "native EVM grants are not faithfully expressible",
+      ok: true,
+      scope: {
+        expiry: NOW + 100,
+        maxValuePerTx: 3n,
+        maxTotalValue: 9n,
+        allowedContracts: [],
+        allowedChainIds: [1],
+        allowedRecipients: [EVM_PAYEE],
+        nativeTransfer: "empty-calldata-to-recipients",
+        mode: "offchain",
+      },
+    });
+  });
+
+  it("EVM compiles a lower ERC-20 per-payment limit", () => {
+    const value = evmAuthorization({
+      notBefore: undefined,
+      grants: [
+        {
+          ...evmAuthorization().grants[0],
+          maxPerPayment: 250n,
+          maxTotal: 1_000n,
+        },
+      ],
+    });
+    expect(compileEvmSessionScope(value, 1)).toMatchObject({
+      ok: true,
+      scope: {
+        tokenAllowances: { [TOKEN]: 1_000n },
+        tokenMaxPerTx: { [TOKEN]: 250n },
+      },
     });
   });
 
@@ -412,7 +440,177 @@ describe("differential enforcer checks", () => {
     await expect(
       manager.signTypedDataWithSessionKey(info.id, typedData),
     ).resolves.toMatch(/^0x[0-9a-f]{130}$/);
+
+    const nativeCompiled = compileEvmSessionScope(
+      evmAuthorization({
+        notBefore: undefined,
+        grants: [
+          {
+            asset: "eip155:1/slip44:60",
+            recipients: [EVM_PAYEE],
+            maxPerPayment: 25n,
+            maxTotal: 100n,
+            maxCount: 5,
+            rails: ["transfer"],
+          },
+        ],
+      }),
+      1,
+    );
+    expect(nativeCompiled.ok).toBe(true);
+    if (!nativeCompiled.ok) return;
+    const nativeInfo = await manager.createSessionKey(
+      nativeCompiled.scope,
+      EVM_OWNER,
+    );
+    const nativeRefused = [
+      { to: EVM_PAYEE, value: "1", data: "0x12345678", chainId: 1 },
+      { to: OTHER_EVM, value: "1", chainId: 1 },
+      { to: TOKEN, value: "0", data: transfer, chainId: 1 },
+      {
+        to: TOKEN,
+        value: "0",
+        data: erc20Call("0x095ea7b3", EVM_PAYEE, 10n),
+        chainId: 1,
+      },
+      {
+        to: TOKEN,
+        value: "0",
+        data: erc20Call("0x23b872dd", EVM_PAYEE, 10n),
+        chainId: 1,
+      },
+      {
+        to: TOKEN,
+        value: "0",
+        data: erc20Call("0x39509351", EVM_PAYEE, 10n),
+        chainId: 1,
+      },
+      { to: EVM_PAYEE, value: "1", chainId: 2 },
+    ];
+    for (const tx of nativeRefused) {
+      await expect(
+        manager.checkSessionScope(nativeInfo.id, tx),
+      ).resolves.toMatchObject({ valid: false });
+    }
     vi.useRealTimers();
+  });
+
+  it("matches ERC-20 per-payment and total limits for 500 seeded requests", () => {
+    const authorization = evmAuthorization({
+      notBefore: undefined,
+      grants: [
+        {
+          ...evmAuthorization().grants[0],
+          maxPerPayment: 400n,
+          maxTotal: 1_000n,
+        },
+      ],
+    });
+    const compiled = compileEvmSessionScope(authorization, 1);
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+    const manager = new SessionKeyManager({ forbiddenMethods: [] });
+    const check = (
+      manager as unknown as {
+        checkScopeAgainstTx(
+          scope: SessionKeyScope,
+          count: number,
+          tx: SessionKeyTransaction,
+          value: bigint,
+          gas: bigint,
+          token: Record<`0x${string}`, bigint>,
+        ): { valid: boolean };
+      }
+    ).checkScopeAgainstTx.bind(manager);
+    const random = lcg(0x20c0);
+    for (let index = 0; index < 500; index++) {
+      const amount = BigInt(Math.floor(random() * 600) + 1);
+      const spent = BigInt(Math.floor(random() * 1_100));
+      const count = Math.floor(random() * 8);
+      const request = {
+        asset: `eip155:1/erc20:${TOKEN}`,
+        recipient: EVM_PAYEE,
+        amount,
+        rail: "transfer" as const,
+        at: NOW,
+        spentSoFar: spent,
+        countSoFar: count,
+      };
+      const actual = check(
+        compiled.scope,
+        count,
+        {
+          to: TOKEN,
+          value: "0",
+          data: erc20Transfer(EVM_PAYEE, amount),
+          chainId: 1,
+        },
+        0n,
+        0n,
+        { [TOKEN]: spent },
+      ).valid;
+      expect(actual, `ERC-20 differential case ${index}`).toBe(
+        evaluateSpend(authorization, request).allow,
+      );
+    }
+  });
+
+  it("matches native per-payment and total limits for 500 seeded requests", () => {
+    const authorization = evmAuthorization({
+      notBefore: undefined,
+      grants: [
+        {
+          asset: "eip155:1/slip44:60",
+          recipients: [EVM_PAYEE],
+          maxPerPayment: 400n,
+          maxTotal: 1_000n,
+          maxCount: 5,
+          rails: ["transfer"],
+        },
+      ],
+    });
+    const compiled = compileEvmSessionScope(authorization, 1);
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) return;
+    const manager = new SessionKeyManager({ forbiddenMethods: [] });
+    const check = (
+      manager as unknown as {
+        checkScopeAgainstTx(
+          scope: SessionKeyScope,
+          count: number,
+          tx: SessionKeyTransaction,
+          value: bigint,
+          gas: bigint,
+          token: Record<`0x${string}`, bigint>,
+        ): { valid: boolean };
+      }
+    ).checkScopeAgainstTx.bind(manager);
+    const random = lcg(0xa711);
+    for (let index = 0; index < 500; index++) {
+      const amount = BigInt(Math.floor(random() * 600) + 1);
+      const spent = BigInt(Math.floor(random() * 1_100));
+      const count = Math.floor(random() * 8);
+      const request = {
+        asset: "eip155:1/slip44:60",
+        recipient: EVM_PAYEE,
+        amount,
+        rail: "transfer" as const,
+        at: NOW,
+        spentSoFar: spent,
+        countSoFar: count,
+      };
+      const actual = check(
+        compiled.scope,
+        count,
+        { to: EVM_PAYEE, value: amount.toString(), chainId: 1 },
+        spent,
+        0n,
+        {},
+      ).valid;
+      expect(actual, `native differential case ${index}`).toBe(
+        evaluateSpend(authorization, request).allow,
+      );
+    }
   });
 
   it("matches the EVM scope checker for 500 seeded requests", () => {
