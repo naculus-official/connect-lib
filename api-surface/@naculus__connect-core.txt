@@ -24,6 +24,7 @@
   associatedTokenAddress
   type AtomicityRequirement
   type Authorization
+  type AuthorizationManagers
   type AuthorizationValidation
   AUTO_RECONNECT_TIMEOUT_MS
   type AutoReconnectConfig
@@ -220,6 +221,10 @@
   isZeroAddress
   LAMPORTS_PER_SOL
   latestStage
+  listAuthorizations
+  type ListedAuthorization
+  type ListedAuthorizationFlag
+  type ListedAuthorizationStatus
   LocalStorageAdapter
   LocalStorageSessionStorage
   logger
@@ -304,6 +309,8 @@
   type ResolverProvider
   REVOKE_DELEGATE
   revokeDelegation
+  revokeListedAuthorization
+  type RevokeListedAuthorizationResult
   type RiskAssessment
   type RiskLevel
   type RiskWarning

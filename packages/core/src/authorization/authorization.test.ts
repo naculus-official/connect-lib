@@ -2,9 +2,15 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { base58 } from "@scure/base";
 import { describe, expect, it, vi } from "vitest";
 import { SOLANA_MAINNET } from "../constants";
-import { ChannelVoucherKeyManager } from "../session-keys/channel-voucher-keys";
+import {
+  type ChannelVoucherKeyInfo,
+  ChannelVoucherKeyManager,
+} from "../session-keys/channel-voucher-keys";
 import { SessionKeyManager } from "../session-keys/SessionKeyManager";
-import { SolanaSessionKeyManager } from "../session-keys/solana-session-keys";
+import {
+  type SolanaSessionKeyInfo,
+  SolanaSessionKeyManager,
+} from "../session-keys/solana-session-keys";
 import {
   type SessionKeyTypedDataRequest,
   sessionKeyAddress,
@@ -13,6 +19,7 @@ import type {
   SessionKeyScope,
   SessionKeyTransaction,
 } from "../session-keys/types";
+import type { SolanaPaymentRpc } from "../solana-payment";
 import { MemoryStorageAdapter } from "../storage";
 import {
   type Authorization,
@@ -20,6 +27,9 @@ import {
   compileMppSession,
   compileSolanaSessionScope,
   evaluateSpend,
+  type ListedAuthorization,
+  listAuthorizations,
+  revokeListedAuthorization,
   validateAuthorization,
 } from ".";
 
@@ -34,6 +44,25 @@ const OTHER_SOL = "3XZXfFJHF5ox3yPop16oqYfSWxLpkjsEuvTe2S67G2rj";
 const PAYER = "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu";
 const PROGRAM = "CHNLxDScvchfR2c9YJtDi2tt4LRtkvDVdnFf7bgXDEH";
 const NOW = 2_000_000_000;
+const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+const BLOCKHASH = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N";
+
+function solanaRpc(): SolanaPaymentRpc {
+  const mint = new Uint8Array(82);
+  mint[44] = 6;
+  mint[45] = 1;
+  return {
+    getGenesisHash: async () => MAINNET_GENESIS,
+    getLatestBlockhash: async () => BLOCKHASH,
+    getAccountInfo: async (address) =>
+      address === MINT
+        ? {
+            owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+            data: mint,
+          }
+        : null,
+  };
+}
 
 function evmAuthorization(over: Partial<Authorization> = {}): Authorization {
   return {
@@ -340,6 +369,266 @@ function context(over: Record<string, unknown> = {}) {
     deposit: bigint;
   };
 }
+
+describe("authorization listing", () => {
+  it("round-trips every compiler through its manager", async () => {
+    vi.setSystemTime(new Date(NOW * 1_000));
+
+    const evmValue = evmAuthorization({ notBefore: undefined });
+    const evmCompiled = compileEvmSessionScope(evmValue, 1);
+    expect(evmCompiled.ok).toBe(true);
+    if (!evmCompiled.ok) return;
+    const evm = new SessionKeyManager(undefined, new MemoryStorageAdapter());
+    await evm.createSessionKey(evmCompiled.scope, EVM_OWNER);
+
+    const solanaValue = solanaAuthorization();
+    const solanaCompiled = compileSolanaSessionScope(
+      solanaValue,
+      SOLANA_MAINNET,
+    );
+    expect(solanaCompiled.ok).toBe(true);
+    if (!solanaCompiled.ok) return;
+    const solana = new SolanaSessionKeyManager(
+      {
+        encryptionKey: "listing-test",
+        pbkdf2Iterations: 1_000,
+        unsafeAllowWeakKdf: true,
+      },
+      new MemoryStorageAdapter(),
+    );
+    await solana.createSessionKey(solanaCompiled.scope, PAYER, solanaRpc());
+
+    const mppValue = mppAuthorization();
+    const mppCompiled = compileMppSession(mppValue, SOLANA_MAINNET, context());
+    expect(mppCompiled.ok).toBe(true);
+    if (!mppCompiled.ok) return;
+    const mppVoucher = new ChannelVoucherKeyManager(
+      {
+        encryptionKey: "listing-test",
+        pbkdf2Iterations: 1_000,
+        unsafeAllowWeakKdf: true,
+        channelProgramOverrides: { [SOLANA_MAINNET]: PROGRAM },
+      },
+      new MemoryStorageAdapter(),
+    );
+    await mppVoucher.create(mppCompiled.scope.voucher);
+
+    const listed = await listAuthorizations({ evm, solana, mppVoucher });
+    expect(listed).toHaveLength(3);
+    expect(listed.map((entry) => entry.enforcer)).toEqual([
+      "evm-session",
+      "solana-session",
+      "mpp-voucher",
+    ]);
+    expect(listed[0]?.grants).toEqual(evmValue.grants);
+    expect(listed[1]?.grants).toEqual(solanaValue.grants);
+    expect(listed[2]?.grants).toEqual(mppValue.grants);
+    expect(listed[0]).toMatchObject({
+      principal: evmValue.principal,
+      status: "active",
+      flags: [],
+    });
+    expect(listed[1]).toMatchObject({
+      principal: solanaValue.principal,
+      status: "pending",
+      spent: { [`${SOLANA_MAINNET}/token:${MINT}`]: 0n },
+      flags: [],
+    });
+    expect(listed[2]).toMatchObject({
+      principal: mppValue.principal,
+      status: "active",
+      spent: { [`${SOLANA_MAINNET}/token:${MINT}`]: 0n },
+      flags: [],
+    });
+    vi.useRealTimers();
+  });
+
+  it("omits a token whose per-payment cap it cannot state, and a zero-address principal", async () => {
+    const entryFor = {
+      id: "zero-cap",
+      publicKey: `0x${"11".repeat(33)}`,
+      status: "active" as const,
+      createdAt: 0,
+      expiresAt: NOW * 1_000,
+      useCount: 0,
+      signerAddress:
+        "0x0000000000000000000000000000000000000000" as `0x${string}`,
+      scope: {
+        expiry: NOW,
+        allowedChainIds: [1],
+        allowedContracts: [TOKEN as `0x${string}`],
+        allowedMethods: ["0xa9059cbb"],
+        allowedRecipients: [EVM_PAYEE as `0x${string}`],
+        tokenAllowances: { [TOKEN]: 100n } as Record<`0x${string}`, bigint>,
+        tokenMaxPerTx: { [TOKEN]: 0n } as Record<`0x${string}`, bigint>,
+        maxValuePerTx: 0n,
+        maxTotalValue: 0n,
+        mode: "offchain" as const,
+      },
+    };
+    const evm = {
+      listSessions: vi.fn().mockResolvedValue([entryFor]),
+    } as unknown as SessionKeyManager;
+    const [entry] = await listAuthorizations({ evm });
+    expect(entry.grants).toEqual([]);
+    expect(entry.flags).toContain("not-expressible");
+    expect(entry).not.toHaveProperty("principal");
+  });
+
+  it("flags legacy unrestricted recipients and non-expressible EVM scope without inventing grants", async () => {
+    const base = {
+      id: "legacy",
+      publicKey: `0x${"11".repeat(33)}`,
+      status: "revoked" as const,
+      createdAt: 0,
+      expiresAt: NOW * 1_000,
+      useCount: 0,
+      signerAddress: EVM_OWNER as `0x${string}`,
+      scope: {
+        expiry: NOW,
+        allowedChainIds: [1],
+        allowedContracts: [TOKEN as `0x${string}`],
+        allowedMethods: ["0x095ea7b3"],
+        mode: "offchain" as const,
+      },
+    };
+    const evm = {
+      listSessions: vi.fn().mockResolvedValue([base]),
+    } as unknown as SessionKeyManager;
+    const [entry] = await listAuthorizations({ evm });
+    expect(entry).toMatchObject({
+      status: "revoked",
+      grants: [],
+      flags: ["unrestricted-recipient-legacy", "not-expressible"],
+    });
+  });
+
+  it.each([
+    [
+      "an arbitrary method",
+      {
+        allowedContracts: [TOKEN],
+        allowedMethods: ["0xa9059cbb", "0x095ea7b3"],
+        tokenAllowances: { [TOKEN]: 1_000n },
+      },
+      1,
+    ],
+    [
+      "a contract permission without a token limit",
+      { allowedContracts: [TOKEN], allowedMethods: ["0xa9059cbb"] },
+      0,
+    ],
+  ])("flags %s and returns only exact grants", async (_name, extra, count) => {
+    const raw = {
+      id: "broader-evm",
+      publicKey: `0x${"11".repeat(33)}`,
+      status: "active" as const,
+      createdAt: 0,
+      expiresAt: NOW * 1_000,
+      useCount: 0,
+      signerAddress: EVM_OWNER as `0x${string}`,
+      scope: {
+        expiry: NOW,
+        allowedChainIds: [1],
+        allowedRecipients: [EVM_PAYEE as `0x${string}`],
+        maxValuePerTx: 0n,
+        maxTotalValue: 0n,
+        mode: "offchain" as const,
+        ...extra,
+      },
+    };
+    const evm = {
+      listSessions: vi.fn().mockResolvedValue([raw]),
+    } as unknown as SessionKeyManager;
+    const [entry] = await listAuthorizations({ evm });
+    expect(entry?.flags).toEqual(["not-expressible"]);
+    expect(entry?.grants).toHaveLength(count);
+    if (count === 1) {
+      expect(entry?.grants[0]).toEqual({
+        asset: `eip155:1/erc20:${TOKEN}`,
+        recipients: [EVM_PAYEE],
+        maxPerPayment: 1_000n,
+        maxTotal: 1_000n,
+        rails: ["transfer", "x402-exact"],
+      });
+    }
+  });
+
+  it("normalizes expired manager records and preserves exactly stated grants", async () => {
+    const raw = {
+      id: "expired-solana",
+      address: SOL_PAYEE,
+      owner: PAYER,
+      scope: {
+        cluster: SOLANA_MAINNET,
+        mint: MINT,
+        budget: 1_000n,
+        maxPerPayment: 400n,
+        allowedRecipients: [SOL_PAYEE],
+        expiry: NOW - 1,
+      },
+      tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      decimals: 6,
+      status: "expired" as const,
+      spent: 12n,
+      useCount: 1,
+      createdAt: 0,
+    } satisfies SolanaSessionKeyInfo;
+    const solana = {
+      listSessions: vi.fn().mockResolvedValue([raw]),
+    } as unknown as SolanaSessionKeyManager;
+    await expect(listAuthorizations({ solana })).resolves.toMatchObject([
+      {
+        status: "expired",
+        spent: { [`${SOLANA_MAINNET}/token:${MINT}`]: 12n },
+      },
+    ]);
+  });
+
+  it.each([
+    ["evm-session", "revokeSession", false],
+    ["solana-session", "revoke", true],
+    ["mpp-voucher", "revoke", false],
+  ] as const)(
+    "revokes only the %s manager",
+    async (enforcer, method, onChain) => {
+      const evmRevoke = vi.fn().mockResolvedValue(undefined);
+      const solanaRevoke = vi.fn().mockResolvedValue(undefined);
+      const voucherRevoke = vi.fn().mockResolvedValue(undefined);
+      const managers = {
+        evm: { revokeSession: evmRevoke } as unknown as SessionKeyManager,
+        solana: { revoke: solanaRevoke } as unknown as SolanaSessionKeyManager,
+        mppVoucher: {
+          revoke: voucherRevoke,
+        } as unknown as ChannelVoucherKeyManager,
+      };
+      const raw = { id: "key" } as SolanaSessionKeyInfo | ChannelVoucherKeyInfo;
+      const entry = {
+        enforcer,
+        keyId: "key",
+        status: "active",
+        expiresAt: NOW,
+        grants: [],
+        flags: [],
+        raw,
+      } as ListedAuthorization;
+      await expect(revokeListedAuthorization(managers, entry)).resolves.toEqual(
+        {
+          onChainRevocationRequired: onChain,
+        },
+      );
+      expect(evmRevoke).toHaveBeenCalledTimes(
+        method === "revokeSession" ? 1 : 0,
+      );
+      expect(solanaRevoke).toHaveBeenCalledTimes(
+        enforcer === "solana-session" ? 1 : 0,
+      );
+      expect(voucherRevoke).toHaveBeenCalledTimes(
+        enforcer === "mpp-voucher" ? 1 : 0,
+      );
+    },
+  );
+});
 
 function lcg(seed: number) {
   let state = seed >>> 0;

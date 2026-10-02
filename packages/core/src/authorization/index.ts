@@ -1,9 +1,22 @@
 import { base58 } from "@scure/base";
-import { isValidAddress, toChecksumAddress } from "../address-validation";
+import {
+  isValidAddress,
+  isZeroAddress,
+  toChecksumAddress,
+} from "../address-validation";
 import { eip155Reference, parseCaip10 } from "../caip";
-import type { ChannelVoucherPolicy } from "../session-keys/channel-voucher-keys";
-import type { SolanaSessionKeyScope } from "../session-keys/solana-session-keys";
-import type { SessionKeyScope } from "../session-keys/types";
+import type {
+  ChannelVoucherKeyInfo,
+  ChannelVoucherKeyManager,
+  ChannelVoucherPolicy,
+} from "../session-keys/channel-voucher-keys";
+import type { SessionKeyManager } from "../session-keys/SessionKeyManager";
+import type {
+  SolanaSessionKeyInfo,
+  SolanaSessionKeyManager,
+  SolanaSessionKeyScope,
+} from "../session-keys/solana-session-keys";
+import type { SessionKeyInfo, SessionKeyScope } from "../session-keys/types";
 
 export type Rail = "transfer" | "x402-exact" | "mpp-charge" | "mpp-session";
 
@@ -15,6 +28,52 @@ export interface Grant {
   maxCount?: number;
   rails: Rail[];
 }
+
+export type ListedAuthorizationStatus =
+  | "active"
+  | "pending"
+  | "revoked"
+  | "expired";
+
+export type ListedAuthorizationFlag =
+  | "unrestricted-recipient-legacy"
+  | "not-expressible";
+
+interface ListedAuthorizationBase {
+  keyId: string;
+  status: ListedAuthorizationStatus;
+  principal?: string;
+  /** Unix timestamp in seconds. */
+  expiresAt: number;
+  grants: Grant[];
+  /** Cumulative spend keyed by canonical CAIP-19 asset ID. */
+  spent?: Record<string, bigint>;
+  flags: ListedAuthorizationFlag[];
+}
+
+export type ListedAuthorization =
+  | (ListedAuthorizationBase & {
+      enforcer: "evm-session";
+      raw: SessionKeyInfo;
+    })
+  | (ListedAuthorizationBase & {
+      enforcer: "solana-session";
+      raw: SolanaSessionKeyInfo;
+    })
+  | (ListedAuthorizationBase & {
+      enforcer: "mpp-voucher";
+      raw: ChannelVoucherKeyInfo;
+    });
+
+export interface AuthorizationManagers {
+  evm?: SessionKeyManager;
+  solana?: SolanaSessionKeyManager;
+  mppVoucher?: ChannelVoucherKeyManager;
+}
+
+export type RevokeListedAuthorizationResult =
+  | { onChainRevocationRequired: false }
+  | { onChainRevocationRequired: true };
 
 export interface Authorization {
   version: 1;
@@ -586,4 +645,229 @@ export function compileMppSession(
       },
     },
   };
+}
+
+const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
+
+function sameAddresses(left: string[] | undefined, right: string[]): boolean {
+  if (!left || left.length !== right.length) return false;
+  const normalized = left.map((value) => value.toLowerCase()).sort();
+  return right
+    .map((value) => value.toLowerCase())
+    .sort()
+    .every((value, index) => value === normalized[index]);
+}
+
+function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
+  const { scope } = raw;
+  const flags: ListedAuthorizationFlag[] = [];
+  const grants: Grant[] = [];
+  const recipients = scope.allowedRecipients;
+  const chains = scope.allowedChainIds;
+
+  if (!recipients?.length) flags.push("unrestricted-recipient-legacy");
+  if (!chains?.length) flags.push("not-expressible");
+
+  if (recipients?.length && chains?.length) {
+    for (const chainId of chains) {
+      for (const [token, maxTotal] of Object.entries(
+        scope.tokenAllowances ?? {},
+      )) {
+        if (maxTotal <= 0n) {
+          if (!flags.includes("not-expressible")) flags.push("not-expressible");
+          continue;
+        }
+        const perPayment = Object.entries(scope.tokenMaxPerTx ?? {}).find(
+          ([limited]) => limited.toLowerCase() === token.toLowerCase(),
+        )?.[1];
+        if (
+          perPayment !== undefined &&
+          (perPayment <= 0n || perPayment > maxTotal)
+        ) {
+          // A cap the model cannot state: list nothing rather than a limit
+          // looser than the one the key enforces.
+          if (!flags.includes("not-expressible")) flags.push("not-expressible");
+          continue;
+        }
+        const exactPerPayment = perPayment ?? maxTotal;
+        grants.push({
+          asset: `eip155:${chainId}/erc20:${toChecksumAddress(token)}`,
+          recipients: recipients.map(toChecksumAddress),
+          maxPerPayment: exactPerPayment,
+          maxTotal,
+          ...(scope.maxTxCount === undefined
+            ? {}
+            : { maxCount: scope.maxTxCount }),
+          rails: ["transfer", "x402-exact"],
+        });
+      }
+      if (
+        scope.nativeTransfer === "empty-calldata-to-recipients" &&
+        scope.maxValuePerTx !== undefined &&
+        scope.maxValuePerTx > 0n &&
+        scope.maxTotalValue !== undefined &&
+        scope.maxTotalValue > 0n
+      ) {
+        grants.push({
+          asset: `eip155:${chainId}/slip44:60`,
+          recipients: recipients.map(toChecksumAddress),
+          maxPerPayment: scope.maxValuePerTx,
+          maxTotal: scope.maxTotalValue,
+          ...(scope.maxTxCount === undefined
+            ? {}
+            : { maxCount: scope.maxTxCount }),
+          rails: ["transfer"],
+        });
+      }
+    }
+  }
+
+  const tokenAddresses = Object.keys(scope.tokenAllowances ?? {});
+  const compiledContractShape = sameAddresses(
+    scope.allowedContracts,
+    tokenAddresses,
+  );
+  const compiledMethodShape =
+    tokenAddresses.length === 0
+      ? scope.allowedMethods === undefined || scope.allowedMethods.length === 0
+      : scope.allowedMethods?.length === 1 &&
+        scope.allowedMethods[0]?.toLowerCase() === ERC20_TRANSFER_SELECTOR;
+  const nativeLimits =
+    (scope.maxValuePerTx ?? 0n) > 0n || (scope.maxTotalValue ?? 0n) > 0n;
+  const nativeShape = nativeLimits
+    ? scope.nativeTransfer === "empty-calldata-to-recipients" &&
+      (scope.maxValuePerTx ?? 0n) > 0n &&
+      (scope.maxTotalValue ?? 0n) > 0n
+    : scope.nativeTransfer === undefined;
+  const tokenCapsValid = Object.entries(scope.tokenMaxPerTx ?? {}).every(
+    ([token, cap]) =>
+      cap > 0n &&
+      Object.entries(scope.tokenAllowances ?? {}).some(
+        ([allowed, total]) =>
+          allowed.toLowerCase() === token.toLowerCase() && cap <= total,
+      ),
+  );
+  if (
+    !compiledContractShape ||
+    !compiledMethodShape ||
+    !nativeShape ||
+    !tokenCapsValid ||
+    scope.maxGasPerTx !== undefined ||
+    scope.maxTotalGas !== undefined
+  ) {
+    if (!flags.includes("not-expressible")) flags.push("not-expressible");
+  }
+
+  // A key created without its owner records the zero address; that is not a
+  // principal.
+  const principal =
+    chains?.length === 1 && !isZeroAddress(raw.signerAddress)
+      ? `eip155:${chains[0]}:${toChecksumAddress(raw.signerAddress)}`
+      : undefined;
+  return {
+    enforcer: "evm-session",
+    keyId: raw.id,
+    status: raw.status,
+    ...(principal ? { principal } : {}),
+    expiresAt: scope.expiry,
+    grants,
+    flags,
+    raw,
+  };
+}
+
+function decompileSolana(raw: SolanaSessionKeyInfo): ListedAuthorization {
+  const asset = `${raw.scope.cluster}/token:${raw.scope.mint}`;
+  return {
+    enforcer: "solana-session",
+    keyId: raw.id,
+    status: raw.status,
+    principal: `${raw.scope.cluster}:${raw.owner}`,
+    expiresAt: raw.scope.expiry,
+    grants: [
+      {
+        asset,
+        recipients: [...raw.scope.allowedRecipients],
+        maxPerPayment: raw.scope.maxPerPayment,
+        maxTotal: raw.scope.budget,
+        ...(raw.scope.maxTxCount === undefined
+          ? {}
+          : { maxCount: raw.scope.maxTxCount }),
+        rails: ["transfer", "mpp-charge", "x402-exact"],
+      },
+    ],
+    spent: { [asset]: raw.spent },
+    flags: [],
+    raw,
+  };
+}
+
+function decompileMppVoucher(raw: ChannelVoucherKeyInfo): ListedAuthorization {
+  const asset = `${raw.policy.cluster}/token:${raw.policy.mint}`;
+  return {
+    enforcer: "mpp-voucher",
+    keyId: raw.id,
+    status: raw.status,
+    principal: `${raw.policy.cluster}:${raw.policy.payer}`,
+    expiresAt: raw.policy.expiry,
+    grants: [
+      {
+        asset,
+        recipients: [raw.policy.payee],
+        maxPerPayment: raw.policy.maxDelta,
+        maxTotal: raw.policy.maxCumulative,
+        rails: ["mpp-session"],
+      },
+    ],
+    spent: { [asset]: raw.lastCumulative },
+    flags: [],
+    raw,
+  };
+}
+
+/**
+ * Read the managers' public records and present their effective value-transfer
+ * authorizations. Voucher listing retains the manager's existing behavior of
+ * decrypting every stored voucher key; this helper adds no cache or storage.
+ */
+export async function listAuthorizations(
+  managers: AuthorizationManagers,
+): Promise<ListedAuthorization[]> {
+  const [evm, solana, mppVoucher] = await Promise.all([
+    managers.evm?.listSessions() ?? [],
+    managers.solana?.listSessions() ?? [],
+    managers.mppVoucher?.list() ?? [],
+  ]);
+  return [
+    ...evm.map(decompileEvm),
+    ...solana.map(decompileSolana),
+    ...mppVoucher.map(decompileMppVoucher),
+  ];
+}
+
+/**
+ * Revoke the owning manager's local record. Solana delegate authority remains
+ * live on chain until the app calls `prepareRevocation`, obtains the owner's
+ * signature, and broadcasts that signed transaction; this helper never signs
+ * or broadcasts.
+ */
+export async function revokeListedAuthorization(
+  managers: AuthorizationManagers,
+  entry: ListedAuthorization,
+): Promise<RevokeListedAuthorizationResult> {
+  if (entry.enforcer === "evm-session") {
+    if (!managers.evm) throw new Error("EVM session-key manager is required");
+    await managers.evm.revokeSession(entry.keyId);
+    return { onChainRevocationRequired: false };
+  }
+  if (entry.enforcer === "solana-session") {
+    if (!managers.solana)
+      throw new Error("Solana session-key manager is required");
+    await managers.solana.revoke(entry.keyId);
+    return { onChainRevocationRequired: true };
+  }
+  if (!managers.mppVoucher)
+    throw new Error("MPP voucher-key manager is required");
+  await managers.mppVoucher.revoke(entry.keyId);
+  return { onChainRevocationRequired: false };
 }
