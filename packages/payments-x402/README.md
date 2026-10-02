@@ -81,6 +81,28 @@ expiry and count, and only when the facilitator pays the fee. Approving
 replaces any delegate the owner's token account already had.
 `keys.prepareRevocation(id, rpc)` builds the owner's `Revoke`.
 
+## Verifying a receipt
+
+`createX402Fetch` returns `settlementBinding`, the nonce or Solana message
+hash plus the exact chain, asset, payer, recipient, and amount the client
+signed. Verification is explicit and never delays or changes fetch:
+
+```ts
+import { verifyX402Settlement } from "@naculus/payments-x402";
+
+const result = await pay(url);
+const verification = await verifyX402Settlement(result, rpc);
+if (verification.status !== "verified") {
+  // pending is retryable; mismatch, failed, and unavailable are not proof.
+}
+```
+
+The caller-supplied `rpc.request(method, params)` must serve the expected
+chain. EVM verification requires a successful, sufficiently confirmed receipt
+containing both the exact USDC `Transfer` and `AuthorizationUsed` nonce.
+Solana verification checks the genesis hash, transaction success, exact owner
+token-balance deltas, and the hash of the signed message bytes.
+
 ## Server side (`@naculus/payments-x402/server`)
 
 Challenge, verify and settle x402 payments in a resource server or a

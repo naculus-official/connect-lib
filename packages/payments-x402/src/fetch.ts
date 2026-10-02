@@ -1,4 +1,11 @@
 import {
+  hashSolanaTransactionMessage,
+  type SettlementRpc,
+  type SettlementVerification,
+  verifyEip3009Settlement,
+  verifySolanaTransferSettlement,
+} from "@naculus/connect-core";
+import {
   createPaymentPayload,
   type SelectOptions,
   selectRequirement,
@@ -23,6 +30,27 @@ import {
   type X402SettlementResponse,
 } from "./wire";
 
+export type X402SettlementBinding =
+  | {
+      rail: "eip3009";
+      chainId: string;
+      token: string;
+      from: string;
+      to: string;
+      amount: string;
+      nonce: string;
+    }
+  | {
+      rail: "solana";
+      cluster: string;
+      mint: string;
+      payer: string;
+      signer: string;
+      recipient: string;
+      amount: string;
+      signedMessageHash: string;
+    };
+
 export interface X402FetchOptions
   extends Omit<SelectOptions, "evm" | "solana"> {
   /** Pays EVM requirements: a policy-bound session key (EIP-3009). */
@@ -46,6 +74,8 @@ export interface X402FetchResult {
   /** The requirement that was paid, or null when no payment was asked for. */
   paid: X402PaymentRequirements | null;
   settlement: X402SettlementResponse | null;
+  /** Client-signed facts required to verify `settlement` on chain. */
+  settlementBinding: X402SettlementBinding | null;
 }
 
 /**
@@ -77,7 +107,12 @@ export function createX402Fetch(options: X402FetchOptions) {
     const request = new Request(input, init);
     const first = await send(request.clone());
     if (first.status !== 402) {
-      return { response: first, paid: null, settlement: null };
+      return {
+        response: first,
+        paid: null,
+        settlement: null,
+        settlementBinding: null,
+      };
     }
 
     // The challenge body is not part of the protocol; release the connection.
@@ -149,6 +184,13 @@ export function createX402Fetch(options: X402FetchOptions) {
           requirement,
           signer as X402TypedDataSigner,
         );
+    const settlementBinding = bindingFor(
+      requirement,
+      payload,
+      requirement.network.startsWith("solana:")
+        ? await solanaBindingParties(solana as X402SolanaOptions)
+        : undefined,
+    );
 
     const headers = new Headers(request.headers);
     headers.set(PAYMENT_SIGNATURE_HEADER, encodeHeader(payload));
@@ -172,8 +214,87 @@ export function createX402Fetch(options: X402FetchOptions) {
         `Server refused the payment${settlement?.errorReason ? `: ${settlement.errorReason}` : "."}`,
       );
     }
-    return { response: second, paid: requirement, settlement };
+    return {
+      response: second,
+      paid: requirement,
+      settlement,
+      settlementBinding,
+    };
   };
+}
+
+function bindingFor(
+  requirement: X402PaymentRequirements,
+  payload: { payload: Record<string, unknown> },
+  solanaParties?: { payer: string; signer: string },
+): X402SettlementBinding {
+  if (requirement.network.startsWith("solana:")) {
+    const transaction = payload.payload.transaction;
+    if (typeof transaction !== "string")
+      throw new X402Error(
+        "invalid_input",
+        "Signed Solana transaction is missing.",
+      );
+    return {
+      rail: "solana",
+      cluster: requirement.network,
+      mint: requirement.asset,
+      payer: solanaParties?.payer as string,
+      signer: solanaParties?.signer as string,
+      recipient: requirement.payTo,
+      amount: requirement.amount,
+      signedMessageHash: hashSolanaTransactionMessage(transaction),
+    };
+  }
+  const authorization = payload.payload.authorization as Record<
+    string,
+    unknown
+  >;
+  return {
+    rail: "eip3009",
+    chainId: requirement.network,
+    token: requirement.asset,
+    from: String(authorization.from),
+    to: String(authorization.to),
+    amount: String(authorization.value),
+    nonce: String(authorization.nonce),
+  };
+}
+
+async function solanaBindingParties(
+  options: X402SolanaOptions,
+): Promise<{ payer: string; signer: string }> {
+  if (!options.sessionKey)
+    return { payer: options.signer.address, signer: options.signer.address };
+  const info = (await options.sessionKey.manager.listSessions()).find(
+    ({ id }) => id === options.sessionKey?.id,
+  );
+  if (!info)
+    throw new X402Error(
+      "invalid_input",
+      "Solana session key disappeared after signing.",
+    );
+  return { payer: info.owner, signer: info.address };
+}
+
+/** Verify an x402 result without changing fetch or settlement timing. */
+export function verifyX402Settlement(
+  result: X402FetchResult,
+  rpc: SettlementRpc,
+): Promise<SettlementVerification> {
+  const binding = result.settlementBinding;
+  const transaction = result.settlement?.transaction;
+  if (!binding || !transaction)
+    return Promise.resolve({
+      status: "mismatch",
+      reason: "Result has no settlement binding or transaction.",
+    });
+  return binding.rail === "eip3009"
+    ? verifyEip3009Settlement(rpc, { ...binding, txHash: transaction })
+    : verifySolanaTransferSettlement(rpc, {
+        ...binding,
+        signature: transaction,
+      });
 }
 
 async function filterAsync<T>(

@@ -19,8 +19,30 @@ import {
   PAYMENT_RECEIPT_HEADER,
   parsePaymentChallenges,
   parsePaymentReceipt,
+  problemDetail,
   WWW_AUTHENTICATE_HEADER,
 } from "./wire";
+
+export type MppChargeSettlementBinding =
+  | {
+      rail: "eip3009";
+      chainId: string;
+      token: string;
+      from: string;
+      to: string;
+      amount: string;
+      nonce: string;
+    }
+  | {
+      rail: "solana";
+      cluster: string;
+      mint: string;
+      payer: string;
+      signer: string;
+      recipient: string;
+      amount: string;
+      signedMessageHash: string;
+    };
 
 export interface MppFetchOptions
   extends Omit<SelectOptions, "now" | "evm" | "solana" | "solanaNetworks"> {
@@ -46,51 +68,7 @@ export interface MppFetchResult {
   /** The charge that was paid, or null when no payment was asked for. */
   paid: SelectedCharge | null;
   receipt: MppReceipt | null;
-}
-
-/** Bytes of a 402 problem body read for its `detail`; the rest is dropped. */
-const PROBLEM_BODY_LIMIT = 4096;
-
-async function problemDetail(response: Response): Promise<string> {
-  const reader = response.body?.getReader();
-  if (
-    !reader ||
-    !response.headers.get("content-type")?.includes("application/problem+json")
-  ) {
-    void reader?.cancel().catch(() => {});
-    return "";
-  }
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (size < PROBLEM_BODY_LIMIT) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      size += value.length;
-    }
-  } catch {
-    return "";
-  } finally {
-    void reader.cancel().catch(() => {});
-  }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.length;
-  }
-  try {
-    const problem = JSON.parse(new TextDecoder().decode(body)) as {
-      detail?: unknown;
-    };
-    if (typeof problem.detail !== "string") return "";
-    // Server text goes into an error message: no control or escape codes.
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them
-    return `: ${problem.detail.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, 200)}`;
-  } catch {
-    return "";
-  }
+  settlementBinding: MppChargeSettlementBinding | null;
 }
 
 /**
@@ -124,7 +102,12 @@ export function createMppFetch(options: MppFetchOptions) {
     const request = new Request(input, init);
     const first = await send(request.clone());
     if (first.status !== 402) {
-      return { response: first, paid: null, receipt: null };
+      return {
+        response: first,
+        paid: null,
+        receipt: null,
+        settlementBinding: null,
+      };
     }
 
     void first.body?.cancel().catch(() => {});
@@ -179,6 +162,7 @@ export function createMppFetch(options: MppFetchOptions) {
             solana as MppSolanaOptions,
           )
         : await createChargeCredential(selected, signer as MppTypedDataSigner);
+    const settlementBinding = credential.binding;
 
     const headers = new Headers(request.headers);
     headers.set(credential.header, credential.value);
@@ -206,7 +190,7 @@ export function createMppFetch(options: MppFetchOptions) {
     ) {
       receipt = null;
     }
-    return { response: second, paid: selected, receipt };
+    return { response: second, paid: selected, receipt, settlementBinding };
   };
 }
 

@@ -369,7 +369,8 @@
     "promptless",
     "permissionless",
     "secp",
-    "unsponsored"
+    "unsponsored",
+    "Surfpool"
   ],
   "ignoreWords": [
     "eykt",

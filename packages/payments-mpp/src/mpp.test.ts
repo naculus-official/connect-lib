@@ -397,6 +397,12 @@ describe("createMppFetch", () => {
     const result = await pay(URL_, { method: "POST", body: "q=1" });
     expect(result.response.status).toBe(200);
     expect(result.receipt?.reference).toBe(`0x${"ab".repeat(32)}`);
+    expect(result.settlementBinding).toMatchObject({
+      rail: "eip3009",
+      from: signer.address,
+      to: PAYEE,
+      amount: "10000",
+    });
     expect(seen).toHaveLength(2);
     expect(await seen[1]?.text()).toBe("q=1");
 

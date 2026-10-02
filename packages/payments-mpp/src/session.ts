@@ -84,6 +84,7 @@ export interface MppSessionMeter {
 }
 
 export interface MppOpenChannel {
+  cluster: string;
   channelId: string;
   payer: string;
   payee: string;
@@ -95,14 +96,25 @@ export interface MppOpenChannel {
   salt: bigint;
 }
 
+export interface MppSessionSettlementBinding {
+  cluster: string;
+  channelId: string;
+  channelProgram: string;
+  expectedSettled: string;
+  afterForcedClose?: boolean;
+}
+
 export interface MppSessionFetchResult {
   response: Response;
   receipt: MppReceipt | null;
   channel: MppOpenChannel | null;
+  /** Present on cooperative close once the final voucher was sent. */
+  settlementBinding?: MppSessionSettlementBinding;
 }
 
 export interface MppForceCloseResult {
   requestCloseTxHash: string;
+  settlementBinding: MppSessionSettlementBinding;
   /** Seal the channel once its grace period has elapsed, then withdraw the payer's remainder. */
   withdrawPayer(): Promise<string>;
 }
@@ -616,6 +628,7 @@ export function createMppSessionFetch(
       );
       const transaction = verifySignedChannelOpen(signed, openInput);
       const channel: MppOpenChannel = {
+        cluster: session.cluster,
         channelId: derived.channelId,
         payer: signer.address,
         payee: session.recipient,
@@ -737,10 +750,19 @@ export function createMppSessionFetch(
             voucher: active.lastVoucher,
           },
         );
+        const voucher = active.lastVoucher.voucher as {
+          cumulativeAmount: string;
+        };
+        const settlementBinding: MppSessionSettlementBinding = {
+          cluster: active.channel.cluster,
+          channelId: active.channel.channelId,
+          channelProgram: active.channel.channelProgram,
+          expectedSettled: voucher.cumulativeAmount,
+        };
         await keyManager.revoke(active.keyId);
         channels.splice(0, channels.length);
         active = undefined;
-        return result;
+        return { ...result, settlementBinding };
       },
     },
     forceClose: {
@@ -752,6 +774,19 @@ export function createMppSessionFetch(
             "forceClose requires app-supplied sendTransaction.",
           );
         const snapshot = active;
+        const lastVoucher = snapshot.lastVoucher?.voucher as
+          | { cumulativeAmount?: unknown }
+          | undefined;
+        const settlementBinding: MppSessionSettlementBinding = {
+          cluster: snapshot.channel.cluster,
+          channelId: snapshot.channel.channelId,
+          channelProgram: snapshot.channel.channelProgram,
+          expectedSettled:
+            typeof lastVoucher?.cumulativeAmount === "string"
+              ? lastVoucher.cumulativeAmount
+              : "0",
+          afterForcedClose: true,
+        };
         const signAndSend = async (transaction: Uint8Array) => {
           const signed = await signer.signTransaction(transaction);
           return options.sendTransaction?.(
@@ -772,6 +807,7 @@ export function createMppSessionFetch(
         active = undefined;
         return {
           requestCloseTxHash,
+          settlementBinding,
           withdrawPayer: async () => {
             const closureStartedAt = readClosingChannel(
               await rpc.getAccountInfo(snapshot.channel.channelId),

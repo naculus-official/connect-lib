@@ -309,6 +309,15 @@ describe("createX402Fetch", () => {
     expect(auth.from).toBe(self);
     expect(auth.to).toBe(PAYEE);
     expect(auth.value).toBe("10000");
+    expect(result.settlementBinding).toEqual({
+      rail: "eip3009",
+      chainId: "eip155:84532",
+      token: USDC,
+      from: self,
+      to: PAYEE,
+      amount: "10000",
+      nonce: auth.nonce,
+    });
 
     const digest = typedDataDigest({
       domain: {

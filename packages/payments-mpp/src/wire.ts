@@ -16,6 +16,48 @@ export const WWW_AUTHENTICATE_HEADER = "WWW-Authenticate";
 export const PAYMENT_RECEIPT_HEADER = "Payment-Receipt";
 export const PAYMENT_AUTHORIZATION_HEADER = "Payment-Authorization";
 
+/** Internal: bounded, sanitized detail from an RFC 9457 response. */
+export async function problemDetail(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (
+    !reader ||
+    !response.headers.get("content-type")?.includes("application/problem+json")
+  ) {
+    void reader?.cancel().catch(() => {});
+    return "";
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < 4096) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.length;
+    }
+  } catch {
+    return "";
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.length;
+  }
+  try {
+    const detail = (
+      JSON.parse(new TextDecoder().decode(body)) as { detail?: unknown }
+    ).detail;
+    if (typeof detail !== "string") return "";
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them
+    return `: ${detail.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, 200)}`;
+  } catch {
+    return "";
+  }
+}
+
 export type MppErrorCode =
   | "invalid_challenge"
   | "no_acceptable_challenge"

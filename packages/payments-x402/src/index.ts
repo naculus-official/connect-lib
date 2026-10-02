@@ -18,8 +18,10 @@ export {
 } from "./svm-exact";
 export {
   createX402Fetch,
+  verifyX402Settlement,
   type X402FetchOptions,
   type X402FetchResult,
+  type X402SettlementBinding,
 } from "./fetch";
 export {
   decodeHeader,

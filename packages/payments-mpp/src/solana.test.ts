@@ -12,16 +12,17 @@ import { base58, base64 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import {
   createMppFetch,
+  createSolanaChargeCredential,
   decodeBase64UrlJson,
   encodeBase64UrlJson,
   type MppCredential,
   type MppSolanaSigner,
   parsePaymentChallenges,
-  createSolanaChargeCredential,
   readSolanaRequest,
   selectCharge,
   sessionKeyMismatch,
   unsupportedReason,
+  verifyMppSettlement,
 } from "./index";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -376,6 +377,63 @@ describe("MPP solana charge, paid by a session key", () => {
     expect(tx.instructions[2]?.accounts[3]).toBe(info.address);
     expect(new TextDecoder().decode(tx.instructions[3]?.data)).toBe("order-42");
     expect((await manager.listSessions())[0]?.spent).toBe(250_000n);
+    expect(result.settlementBinding).toMatchObject({
+      payer: PAYER,
+      signer: info.address,
+    });
+    const binding = result.settlementBinding;
+    if (!binding || binding.rail !== "solana")
+      throw new Error("missing Solana settlement binding");
+
+    const transaction = c.payload.transaction as string;
+    const reference = base58.encode(tx.signatures[0] as Uint8Array);
+    const recorded = {
+      slot: 135_790,
+      transaction: [transaction, "base64"],
+      meta: {
+        err: null,
+        preTokenBalances: [
+          { mint: USDC, owner: PAYER, uiTokenAmount: { amount: "500000" } },
+          { mint: USDC, owner: RECIPIENT, uiTokenAmount: { amount: "10" } },
+        ],
+        postTokenBalances: [
+          { mint: USDC, owner: PAYER, uiTokenAmount: { amount: "250000" } },
+          { mint: USDC, owner: RECIPIENT, uiTokenAmount: { amount: "250010" } },
+        ],
+      },
+    };
+    const settlementResult = {
+      ...result,
+      receipt: { reference },
+    };
+    const settlementRpc = {
+      request: async (method: string) =>
+        (method === "getGenesisHash" ? MAINNET_GENESIS : recorded) as never,
+    };
+    await expect(
+      verifyMppSettlement(settlementResult, settlementRpc),
+    ).resolves.toEqual({ status: "verified", slot: 135_790n });
+    await expect(
+      verifyMppSettlement(
+        {
+          ...settlementResult,
+          settlementBinding: { ...binding, signer: PAYER },
+        },
+        settlementRpc,
+      ),
+    ).resolves.toMatchObject({ status: "mismatch" });
+    await expect(
+      verifyMppSettlement(
+        {
+          ...settlementResult,
+          settlementBinding: {
+            ...binding,
+            payer: RECIPIENT,
+          },
+        },
+        settlementRpc,
+      ),
+    ).resolves.toMatchObject({ status: "mismatch" });
   });
 
   it.each([

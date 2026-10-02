@@ -1,7 +1,12 @@
 import {
   type SessionKeyManager,
   type SessionKeyTypedDataRequest,
+  type SettlementRpc,
+  type SettlementVerification,
   sessionKeyAddress,
+  verifyChannelSettlement,
+  verifyEip3009Settlement,
+  verifySolanaTransferSettlement,
 } from "@naculus/connect-core";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
@@ -352,7 +357,19 @@ export async function createChargeCredential(
   selected: SelectedEvmCharge,
   signer: MppTypedDataSigner,
   options: { now?: number } = {},
-): Promise<{ header: string; value: string }> {
+): Promise<{
+  header: string;
+  value: string;
+  binding: {
+    rail: "eip3009";
+    chainId: string;
+    token: string;
+    from: string;
+    to: string;
+    amount: string;
+    nonce: string;
+  };
+}> {
   const typedData = buildChargeAuthorization(selected, signer.address, options);
   const signature = await signer.signTypedData(typedData);
   if (!/^0x[0-9a-fA-F]{130}$/.test(signature)) {
@@ -361,9 +378,71 @@ export async function createChargeCredential(
       "Signer did not return a 65-byte signature.",
     );
   }
-  return encodeCredential({
-    challenge: selected.challenge.params,
-    payload: { type: "authorization", ...typedData.message, signature },
-    source: `did:pkh:eip155:${selected.request.chainId}:${signer.address}`,
-  });
+  return {
+    ...encodeCredential({
+      challenge: selected.challenge.params,
+      payload: { type: "authorization", ...typedData.message, signature },
+      source: `did:pkh:eip155:${selected.request.chainId}:${signer.address}`,
+    }),
+    binding: {
+      rail: "eip3009",
+      chainId: `eip155:${selected.request.chainId}`,
+      token: selected.request.currency,
+      from: signer.address,
+      to: selected.request.recipient,
+      amount: selected.request.amount,
+      nonce: typedData.message.nonce,
+    },
+  };
+}
+
+type VerifiableMppResult = {
+  settlementBinding?:
+    | {
+        rail: "eip3009";
+        chainId: string;
+        token: string;
+        from: string;
+        to: string;
+        amount: string;
+        nonce: string;
+      }
+    | {
+        rail: "solana";
+        cluster: string;
+        mint: string;
+        payer: string;
+        signer: string;
+        recipient: string;
+        amount: string;
+        signedMessageHash: string;
+      }
+    | {
+        cluster: string;
+        channelId: string;
+        channelProgram: string;
+        expectedSettled: string;
+        afterForcedClose?: boolean;
+      }
+    | null;
+  receipt?: { reference: string } | null;
+};
+
+/** Verify an MPP charge or session-close result without changing fetch timing. */
+export function verifyMppSettlement(
+  result: VerifiableMppResult,
+  rpc: SettlementRpc,
+): Promise<SettlementVerification> {
+  const binding = result.settlementBinding;
+  if (binding && "channelId" in binding)
+    return verifyChannelSettlement(rpc, binding);
+  const reference = result.receipt?.reference;
+  if (!binding || !reference)
+    return Promise.resolve({
+      status: "mismatch",
+      reason: "Result has no settlement binding or reference.",
+    });
+  return binding.rail === "eip3009"
+    ? verifyEip3009Settlement(rpc, { ...binding, txHash: reference })
+    : verifySolanaTransferSettlement(rpc, { ...binding, signature: reference });
 }

@@ -61,6 +61,7 @@
   type ChannelCapability
   type ChannelMintAccount
   type ChannelPdaInput
+  type ChannelSettlementExpected
   type ChannelVoucher
   type ChannelVoucherKeyConfig
   type ChannelVoucherKeyInfo
@@ -130,6 +131,7 @@
   EIP155_POLYGON
   EIP155_SEPOLIA
   eip155Reference
+  type Eip3009SettlementExpected
   encodeChannelVoucher
   encodeGasFees
   encodeGasLimits
@@ -193,6 +195,7 @@
   getSignatureStatus
   getSolanaBalance
   type Grant
+  hashSolanaTransactionMessage
   hashUserOperation
   hashUserOperationV06
   hasPermission
@@ -351,6 +354,8 @@
   setLogLevel
   setLogSink
   setPlatformOverride
+  type SettlementRpc
+  type SettlementVerification
   type SignedAuthorization
   type SignedChannelVoucher
   type SignedDelegationAuthorization
@@ -391,6 +396,7 @@
   type SolanaSessionKeyStatus
   type SolanaSessionPayment
   solanaTransactionId
+  type SolanaTransferSettlementExpected
   type SpendRefusal
   type SpendRequest
   type SpendVerdict
@@ -449,10 +455,13 @@
   validateAuthorization
   validateChainId
   validateTypedDataRequest
+  verifyChannelSettlement
+  verifyEip3009Settlement
   verifySignedChannelOpen
   verifySignedOwnerTransaction
   verifySignedSplTransfer
   verifySolanaSignature
+  verifySolanaTransferSettlement
   verifyVoucher
   type WalletCapabilities
   WalletError

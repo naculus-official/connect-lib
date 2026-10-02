@@ -20,6 +20,7 @@ import {
   selectRequirement,
   sessionKeyMismatch,
   svmUnsupportedReason,
+  verifyX402Settlement,
   type X402PaymentPayload,
   type X402PaymentRequirements,
   type X402SolanaSigner,
@@ -306,6 +307,64 @@ describe("x402 exact on Solana, paid by a session key", () => {
       "pi_3abc123def456",
     );
     expect((await manager.listSessions())[0]?.spent).toBe(1000n);
+    expect(result.settlementBinding).toMatchObject({
+      payer: PAYER,
+      signer: info.address,
+    });
+    const binding = result.settlementBinding;
+    if (!binding || binding.rail !== "solana")
+      throw new Error("missing Solana settlement binding");
+
+    const transaction = payload.payload.transaction as string;
+    const reference = base58.encode(tx.signatures[0] as Uint8Array);
+    const recorded = {
+      slot: 246_810,
+      transaction: [transaction, "base64"],
+      meta: {
+        err: null,
+        preTokenBalances: [
+          { mint: USDC, owner: PAYER, uiTokenAmount: { amount: "5000" } },
+          { mint: USDC, owner: PAY_TO, uiTokenAmount: { amount: "10" } },
+        ],
+        postTokenBalances: [
+          { mint: USDC, owner: PAYER, uiTokenAmount: { amount: "4000" } },
+          { mint: USDC, owner: PAY_TO, uiTokenAmount: { amount: "1010" } },
+        ],
+      },
+    };
+    const settlementResult = {
+      ...result,
+      settlement: {
+        success: true,
+        transaction: reference,
+        network: SOLANA_MAINNET,
+      },
+    };
+    const settlementRpc = {
+      request: async (method: string) =>
+        (method === "getGenesisHash" ? MAINNET_GENESIS : recorded) as never,
+    };
+    await expect(
+      verifyX402Settlement(settlementResult, settlementRpc),
+    ).resolves.toEqual({ status: "verified", slot: 246_810n });
+    await expect(
+      verifyX402Settlement(
+        {
+          ...settlementResult,
+          settlementBinding: { ...binding, signer: PAYER },
+        },
+        settlementRpc,
+      ),
+    ).resolves.toMatchObject({ status: "mismatch" });
+    await expect(
+      verifyX402Settlement(
+        {
+          ...settlementResult,
+          settlementBinding: { ...binding, payer: PAY_TO },
+        },
+        settlementRpc,
+      ),
+    ).resolves.toMatchObject({ status: "mismatch" });
   });
 
   it("refuses a mismatched requirement even when called directly", async () => {

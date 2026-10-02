@@ -14,9 +14,11 @@ export {
   type TokenDomain,
   USDC_DOMAINS,
   unsupportedReason,
+  verifyMppSettlement,
 } from "./evm-charge";
 export {
   createMppFetch,
+  type MppChargeSettlementBinding,
   type MppFetchOptions,
   type MppFetchResult,
 } from "./fetch";
@@ -27,6 +29,7 @@ export {
   type MppSessionFetch,
   type MppSessionFetchOptions,
   type MppSessionFetchResult,
+  type MppSessionSettlementBinding,
   type MppSessionMeter,
   type MppSessionPolicy,
   type MppSessionRequestInit,

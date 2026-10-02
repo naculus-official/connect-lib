@@ -18,6 +18,7 @@
   sessionKeyX402Signer
   svmUnsupportedReason
   unsupportedReason
+  verifyX402Settlement
   X402_VERSION
   X402Error
   X402ErrorCode
@@ -27,6 +28,7 @@
   X402PaymentRequired
   X402PaymentRequirements
   X402ResourceInfo
+  type X402SettlementBinding
   X402SettlementResponse
   type X402SolanaOptions
   type X402SolanaSessionKey

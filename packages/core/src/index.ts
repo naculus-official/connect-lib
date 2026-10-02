@@ -56,6 +56,7 @@ export type {
 } from "./routes/types";
 export * from "./rpc";
 export * from "./session";
+export * from "./settlement-verification";
 // ── Session Keys / Ephemeral Keys ────────────────────────────────────
 export * from "./session-keys";
 export * from "./session-manager";

@@ -1,6 +1,7 @@
 import {
   assertSolanaCluster,
   buildSplTransferTransaction,
+  hashSolanaTransactionMessage,
   isValidAddress,
   readMint,
   SOLANA_DEVNET,
@@ -11,6 +12,44 @@ import {
   type SplTransferPayment,
   verifySignedSplTransfer,
 } from "@naculus/connect-core";
+
+interface SolanaChargeBinding {
+  rail: "solana";
+  cluster: string;
+  mint: string;
+  payer: string;
+  signer: string;
+  recipient: string;
+  amount: string;
+  signedMessageHash: string;
+}
+
+function boundCredential(
+  challenge: MppChallenge,
+  request: SolanaChargeRequest,
+  transaction: string,
+  payer: string,
+  signer = payer,
+): { header: string; value: string; binding: SolanaChargeBinding } {
+  return {
+    ...encodeCredential({
+      challenge: challenge.params,
+      payload: { type: "transaction", transaction },
+      source: `did:pkh:${request.network}:${signer}`,
+    }),
+    binding: {
+      rail: "solana",
+      cluster: request.network,
+      mint: request.currency,
+      payer,
+      signer,
+      recipient: request.recipient,
+      amount: request.amount,
+      signedMessageHash: hashSolanaTransactionMessage(transaction),
+    },
+  };
+}
+
 import {
   encodeCredential,
   isRecord,
@@ -189,7 +228,7 @@ export async function createSolanaChargeCredential(
   challenge: MppChallenge,
   request: SolanaChargeRequest,
   solana: MppSolanaOptions,
-): Promise<{ header: string; value: string }> {
+): Promise<{ header: string; value: string; binding: SolanaChargeBinding }> {
   if (solana.sessionKey) {
     return payWithSessionKey(challenge, request, solana.sessionKey, solana.rpc);
   }
@@ -243,11 +282,7 @@ export async function createSolanaChargeCredential(
   const transaction = verifySignedSplTransfer(signed, payment, {
     allowLighthouse: false,
   });
-  return encodeCredential({
-    challenge: challenge.params,
-    payload: { type: "transaction", transaction },
-    source: `did:pkh:${request.network}:${payer}`,
-  });
+  return boundCredential(challenge, request, transaction, payer);
 }
 
 /** Why `key` cannot pay `request`, or null. */
@@ -280,12 +315,12 @@ async function payWithSessionKey(
   request: SolanaChargeRequest,
   key: MppSolanaSessionKey,
   rpc: SolanaPaymentRpc,
-): Promise<{ header: string; value: string }> {
+): Promise<{ header: string; value: string; binding: SolanaChargeBinding }> {
   const mismatch = await sessionKeyMismatch(request, key);
   if (mismatch) throw new MppError("no_acceptable_challenge", mismatch);
   const info = (await key.manager.listSessions()).find(
     (s) => s.id === key.id,
-  ) as { address: string };
+  ) as { address: string; owner: string };
   // The manager checks recipient, amount, budget, expiry, sponsor and
   // cluster, builds the transfer itself and takes the blockhash from `rpc`.
   const transaction = await key.manager.signPayment(
@@ -300,11 +335,13 @@ async function payWithSessionKey(
     },
     rpc,
   );
-  return encodeCredential({
-    challenge: challenge.params,
-    payload: { type: "transaction", transaction },
-    source: `did:pkh:${request.network}:${info.address}`,
-  });
+  return boundCredential(
+    challenge,
+    request,
+    transaction,
+    info.owner,
+    info.address,
+  );
 }
 
 function randomMemo(): string {

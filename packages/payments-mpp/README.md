@@ -137,6 +137,26 @@ lacks a matching receipt, the thrown `MppError` has a `channelId` property and
 the channel remains in `pay.channels` for `forceClose()` recovery. The voucher
 key is still revoked; failures before the transaction is sent retain nothing.
 
+## Verifying a receipt
+
+Charge results expose `settlementBinding` with the EIP-3009 nonce or Solana
+signed-message hash and all expected transfer facts. Session `close()` results
+expose the channel and final voucher cumulative. Verification is opt-in:
+
+```ts
+import { verifyMppSettlement } from "@naculus/payments-mpp";
+
+const chargeCheck = await verifyMppSettlement(chargeResult, rpc);
+const closeCheck = await verifyMppSettlement(closeResult, rpc);
+```
+
+Only `status: "verified"` proves settlement. `pending` may be retried; a
+server receipt or reference alone remains untrusted. The caller-supplied RPC
+is checked against the expected chain or cluster. Channel verification also
+requires the reviewed program to own the account, distributed status, and a
+settled watermark equal to the last signed voucher; a reclaimed account is
+reported as unavailable, not verified.
+
 ## Server: `@naculus/payments-mpp/server`
 
 The other side of the same charges: issue challenges, verify credentials,

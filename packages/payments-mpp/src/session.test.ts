@@ -247,7 +247,13 @@ describe("createMppSessionFetch", () => {
     ).toHaveLength(50);
     expect(base58.decode(first.signature)).toHaveLength(64);
 
-    await pay.close();
+    const closed = await pay.close();
+    expect(closed.settlementBinding).toEqual({
+      cluster: SOLANA_MAINNET,
+      channelId: opened.channel?.channelId,
+      channelProgram: SOLANA_CHANNEL_PROGRAM,
+      expectedSettled: "50",
+    });
     expect(actions[3]).toEqual({
       action: "close",
       channelId: opened.channel?.channelId,
