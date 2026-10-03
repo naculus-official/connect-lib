@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.8.1 — 2026-10-03
+
+Additive; no breaking change.
+
 ### Added
 
 - **EVM session-key usage in authorization listings** (`@naculus/connect-core`) — `SessionKeyInfo` can expose the authoritative persisted native value, per-token spend, and transaction count, allowing `listAuthorizations` to report EVM spend without changing signing, enforcement, or legacy records.
