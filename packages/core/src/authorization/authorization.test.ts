@@ -475,6 +475,46 @@ describe("authorization listing", () => {
     expect(entry).not.toHaveProperty("principal");
   });
 
+  it("lists persisted EVM token and native spend under each grant asset", async () => {
+    const lowerToken = TOKEN.toLowerCase() as `0x${string}`;
+    const raw = {
+      id: "spent-evm",
+      publicKey: `0x${"11".repeat(33)}`,
+      status: "active" as const,
+      createdAt: 0,
+      expiresAt: NOW * 1_000,
+      useCount: 3,
+      signerAddress: EVM_OWNER as `0x${string}`,
+      usage: {
+        valueSpent: 25n,
+        tokenSpent: { [lowerToken]: 75n },
+        txCount: 3,
+      },
+      scope: {
+        expiry: NOW,
+        allowedChainIds: [1],
+        allowedContracts: [TOKEN as `0x${string}`],
+        allowedMethods: ["0xa9059cbb"],
+        allowedRecipients: [EVM_PAYEE as `0x${string}`],
+        tokenAllowances: { [TOKEN]: 100n } as Record<`0x${string}`, bigint>,
+        maxValuePerTx: 20n,
+        maxTotalValue: 50n,
+        nativeTransfer: "empty-calldata-to-recipients" as const,
+        mode: "offchain" as const,
+      },
+    };
+    const evm = {
+      listSessions: vi.fn().mockResolvedValue([raw]),
+    } as unknown as SessionKeyManager;
+
+    const [entry] = await listAuthorizations({ evm });
+
+    expect(entry.spent).toEqual({
+      [`eip155:1/erc20:${TOKEN}`]: 75n,
+      "eip155:1/slip44:60": 25n,
+    });
+  });
+
   it("flags legacy unrestricted recipients and non-expressible EVM scope without inventing grants", async () => {
     const base = {
       id: "legacy",

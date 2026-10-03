@@ -1679,6 +1679,16 @@ export class SessionKeyManager {
       ...(stored.authorization.message
         ? { authorizationMessage: stored.authorization.message }
         : {}),
+      ...(stored.accumulatedValue !== undefined ||
+      stored.accumulatedTokenSpends !== undefined
+        ? {
+            usage: {
+              valueSpent: stored.accumulatedValue ?? 0n,
+              tokenSpent: { ...(stored.accumulatedTokenSpends ?? {}) },
+              txCount: stored.useCount,
+            },
+          }
+        : {}),
     };
   }
 }

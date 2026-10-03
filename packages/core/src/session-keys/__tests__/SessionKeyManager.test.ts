@@ -263,6 +263,9 @@ describe("SessionKeyManager", () => {
 
       const sessions = await manager.listSessions();
       expect(sessions).toHaveLength(3);
+      expect(sessions.every((session) => session.usage === undefined)).toBe(
+        true,
+      );
     });
 
     it("should include revoked and expired keys", async () => {
@@ -649,6 +652,20 @@ describe("SessionKeyManager", () => {
           erc20TransferFrom(40n),
         ),
       ).resolves.toMatch(/^0x[a-f0-9]{130}$/i);
+
+      const listed = (await manager.listSessions()).find(
+        (session) => session.id === info.id,
+      );
+      expect(listed?.usage).toEqual({
+        valueSpent: 0n,
+        tokenSpent: { [tokenAddress]: 100n },
+        txCount: 2,
+      });
+      expect(
+        (await manager.listActiveSessions()).find(
+          (session) => session.id === info.id,
+        )?.usage,
+      ).toEqual(listed?.usage);
     });
 
     it("should serialize token allowance consumption across managers", async () => {

@@ -662,6 +662,7 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
   const { scope } = raw;
   const flags: ListedAuthorizationFlag[] = [];
   const grants: Grant[] = [];
+  const spent: Record<string, bigint> = {};
   const recipients = scope.allowedRecipients;
   const chains = scope.allowedChainIds;
 
@@ -690,8 +691,9 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
           continue;
         }
         const exactPerPayment = perPayment ?? maxTotal;
+        const asset = `eip155:${chainId}/erc20:${toChecksumAddress(token)}`;
         grants.push({
-          asset: `eip155:${chainId}/erc20:${toChecksumAddress(token)}`,
+          asset,
           recipients: recipients.map(toChecksumAddress),
           maxPerPayment: exactPerPayment,
           maxTotal,
@@ -700,6 +702,12 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
             : { maxCount: scope.maxTxCount }),
           rails: ["transfer", "x402-exact"],
         });
+        if (raw.usage) {
+          spent[asset] =
+            Object.entries(raw.usage.tokenSpent).find(
+              ([usedToken]) => usedToken.toLowerCase() === token.toLowerCase(),
+            )?.[1] ?? 0n;
+        }
       }
       if (
         scope.nativeTransfer === "empty-calldata-to-recipients" &&
@@ -708,8 +716,9 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
         scope.maxTotalValue !== undefined &&
         scope.maxTotalValue > 0n
       ) {
+        const asset = `eip155:${chainId}/slip44:60`;
         grants.push({
-          asset: `eip155:${chainId}/slip44:60`,
+          asset,
           recipients: recipients.map(toChecksumAddress),
           maxPerPayment: scope.maxValuePerTx,
           maxTotal: scope.maxTotalValue,
@@ -718,6 +727,7 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
             : { maxCount: scope.maxTxCount }),
           rails: ["transfer"],
         });
+        if (raw.usage) spent[asset] = raw.usage.valueSpent;
       }
     }
   }
@@ -771,6 +781,7 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
     ...(principal ? { principal } : {}),
     expiresAt: scope.expiry,
     grants,
+    ...(raw.usage ? { spent } : {}),
     flags,
     raw,
   };

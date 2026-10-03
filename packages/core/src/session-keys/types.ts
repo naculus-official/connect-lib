@@ -187,6 +187,12 @@ export interface SessionKeyInfo {
   authorizationType?: SignedAuthorization["type"];
   /** Exact signed policy message, safe to display for audit purposes. */
   authorizationMessage?: string;
+  /** Authoritative persisted usage counters, omitted for legacy records. */
+  readonly usage?: Readonly<{
+    valueSpent: bigint;
+    tokenSpent: Readonly<Record<`0x${string}`, bigint>>;
+    txCount: number;
+  }>;
 }
 
 // ─── Session Key Status ────────────────────────────────────────────────

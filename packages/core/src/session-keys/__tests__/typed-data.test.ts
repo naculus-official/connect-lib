@@ -153,6 +153,11 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
     const self = sessionKeyAddress(info.publicKey);
     const sig = await m.signTypedDataWithSessionKey(info.id, request(self));
     expect(sig).toMatch(/^0x[0-9a-f]{130}$/);
+    expect((await m.listSessions())[0]?.usage).toEqual({
+      valueSpent: 0n,
+      tokenSpent: { [USDC]: 1_500_000n },
+      txCount: 1,
+    });
     // Second payment would exceed the 2.0 USDC allowance (1.5 + 1.5).
     await expect(
       m.signTypedDataWithSessionKey(
