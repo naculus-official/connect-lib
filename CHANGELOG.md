@@ -7,8 +7,16 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.8.0 — 2026-10-03
+
+Adds the authorization model (declare what a delegate may spend once, compile it to the existing enforcers, list and revoke it) and opt-in on-chain receipt verification. No breaking change; everything is additive:
+
+- `SessionKeyScope` gains `tokenMaxPerTx` and `nativeTransfer`, both optional and off by default. Existing keys and scopes behave exactly as before.
+- x402 and MPP fetch results gain `settlementBinding` (what the client signed), used by `verifyX402Settlement` / `verifyMppSettlement`. Fetch itself is unchanged; verification is a separate call.
+
 ### Added
 
+- **Unified authorization model** (`@naculus/connect-core`) — declares versioned, CAIP-19 asset grants once, validates them fail-closed, previews spend decisions with a pure evaluator, and compiles only faithfully expressible policies to the existing EVM, Solana, and MPP session enforcers. Deterministic differential tests keep evaluator decisions aligned with those signing-time checks.
 - **Authorization listing and revocation dispatch** (`@naculus/connect-core`) — `listAuthorizations` reads existing EVM, Solana, and MPP voucher managers into one exact-or-flagged view without new storage; legacy unrestricted-recipient EVM keys and scopes outside the shared value-transfer model are identified explicitly. `revokeListedAuthorization` routes to the owning manager, reporting when a Solana delegate still needs owner-signed on-chain revocation without signing or broadcasting itself.
 - **Fully expressible EVM authorization grants** (`@naculus/connect-core`) — session scopes can independently cap each allowance-scoped token transfer with `tokenMaxPerTx`, including EIP-3009 typed-data signing, and can opt into positive-value empty-calldata native transfers only to `allowedRecipients`. The authorization compiler now emits both shapes without widening contract calls or native-value budgets.
 - **Opt-in settlement verification** (`@naculus/connect-core`, `@naculus/payments-x402`, `@naculus/payments-mpp`) — verifies EIP-3009 receipts by chain, confirmation depth, exact `Transfer`, and signed `AuthorizationUsed` nonce; verifies Solana charges by genesis, transaction outcome, exact owner balance deltas, and signed-message hash; and verifies MPP session closes by program ownership, distributed channel state, and the last voucher cumulative. Fetch remains unchanged and never verifies or broadcasts implicitly.
@@ -22,7 +30,6 @@ Adds the client side of the Solana MPP **session** intent (metered payments over
 
 ### Added
 
-- **Unified authorization model** (`@naculus/connect-core`) — declares versioned, CAIP-19 asset grants once, validates them fail-closed, previews spend decisions with a pure evaluator, and compiles only faithfully expressible policies to the existing EVM, Solana, and MPP session enforcers. Deterministic differential tests keep evaluator decisions aligned with those signing-time checks.
 - **`createMppSessionFetch`** (`@naculus/payments-mpp`) — opens a policy-checked Solana MPP payment channel with an owner-signed transaction and a sealed delegated voucher key, signs only app-metered cumulative usage, supports cooperative and forced close, and exposes open channels for recovery UI. Program deployment, RPC cluster, mint, payee, price, grace period, split policy and server blockhash are verified before signing.
 - **`ChannelVoucherKeyManager`** (`@naculus/connect-core`) — creates record-bound encrypted ed25519 keys for Solana MPP channels, fixes channel identity at creation, verifies the channel PDA after open, and persists cumulative voucher budgets before returning canonical 50-byte voucher signatures.
 
