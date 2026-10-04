@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **Period `start` must be after zero** (`@naculus/connect-core`) — `validateAuthorization` accepted a grant `period` with `start: 0`, which the on-chain period enforcers refuse; it now refuses it (`invalid grant period`), so device and on-chain enforcement agree.
+
 ## 0.10.0 — 2026-10-04
 
 Recurring payments groundwork: an authorization can now cap spend per period, enforced by the device or, for EIP-7702 delegations, by the chain. Additive, with one fix that refuses what used to be silently widened (see Fixed).

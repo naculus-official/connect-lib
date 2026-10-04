@@ -335,7 +335,9 @@ export function validateAuthorization(value: unknown): AuthorizationValidation {
         !Number.isSafeInteger(raw.period.seconds) ||
         (raw.period.seconds as number) <= 0 ||
         !Number.isSafeInteger(raw.period.start) ||
-        (raw.period.start as number) < 0)
+        // The on-chain period enforcers require startDate > 0; refuse it
+        // here too so device and on-chain enforcement agree.
+        (raw.period.start as number) <= 0)
     ) {
       return { ok: false, reason: "invalid grant period" };
     }
