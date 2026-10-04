@@ -7,15 +7,18 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.10.0 — 2026-10-04
+
+Recurring payments groundwork: an authorization can now cap spend per period, enforced by the device or, for EIP-7702 delegations, by the chain. Additive, with one fix that refuses what used to be silently widened (see Fixed).
+
 ### Added
 
-- **Periodic authorization limits** (`@naculus/connect-core`) — grants can cap spend in fixed windows in addition to their existing per-payment, lifetime-total, and count limits. EVM and Solana off-chain session keys report device enforcement; an EVM compiler option emits an `eip7702` scope with MetaMask Delegation Framework v1.3.0 ERC-20 period caveats and reports on-chain enforcement. `requireOnChain` succeeds only for fully caveat-expressible EVM grants and continues to refuse device-only EVM, Solana, and MPP targets. Existing scopes, usage records, and Solana v1 scope bindings are unchanged.
-
-- **Periodic limits on chain** (`@naculus/connect-core`) — `periodLimits` compile to MetaMask Delegation Framework v1.3.0 `ERC20PeriodTransferEnforcer` / `NativeTokenPeriodTransferEnforcer` caveats, and the EVM compiler's `mode: "eip7702"` reports `enforcement: "on-chain"` so `requireOnChain` succeeds where every limit has a caveat. A per-payment cap is accepted on chain when the total or period caveat already bounds a single transfer (e.g. 10 per 30 days, 120 total). Verified on Sepolia: a redeemed delegation paid within a 60-second period, was refused above it, and paid again after the reset. Set `start` from chain time, not the device clock.
+- **Periodic authorization limits** (`@naculus/connect-core`) — grants take an optional `period` (`amount` per fixed window of `seconds` from `start`, unused amount forfeited), on top of the per-payment, lifetime-total and count limits. EVM and Solana off-chain session keys enforce it before signing (`enforcement: "device"`), fail closed on missing or malformed period usage, and reset per window. Existing scopes, usage records and Solana v1 scope bindings are unchanged.
+- **Periodic limits on chain** (`@naculus/connect-core`) — `periodLimits` compile to MetaMask Delegation Framework v1.3.0 `ERC20PeriodTransferEnforcer` / `NativeTokenPeriodTransferEnforcer` caveats; the EVM compiler's `mode: "eip7702"` reports `enforcement: "on-chain"`, and `requireOnChain` succeeds only when every limit has a caveat (device-only EVM, Solana and MPP targets are refused). A per-payment cap is accepted on chain when the total or period caveat already bounds a single transfer (e.g. 10 per 30 days, 120 total). Verified on Sepolia against the deployed enforcers: paid within a 60-second period, refused above it, paid again after the reset. Set `start` from chain time, not the device clock; the enforcer requires `start > 0`.
 
 ### Fixed
 
-- **EIP-7702 delegations no longer drop limits they cannot express** (`@naculus/connect-core`) — `buildDelegation` refuses `tokenMaxPerTx`, multiple token allowances, and mismatched period limits instead of producing a looser on-chain delegation. Expressible ERC-20 and native periods are additional caveats alongside their lifetime-total caveats.
+- **EIP-7702 delegations no longer drop limits they cannot express** (`@naculus/connect-core`) — since 0.8.0, `buildDelegation` silently ignored `tokenMaxPerTx`, producing an on-chain delegation without the per-transaction cap. It now refuses `tokenMaxPerTx`, multiple token allowances and mismatched period limits with `session_key_invalid_input`. Only hand-built `eip7702` scopes that set them are affected; the authorization compiler emits `offchain` scopes, or `eip7702` scopes without `tokenMaxPerTx`.
 
 ## 0.9.0 — 2026-10-04
 
