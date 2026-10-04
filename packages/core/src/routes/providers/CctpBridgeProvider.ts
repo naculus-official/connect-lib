@@ -89,8 +89,11 @@ export function encodeCctpDepositForBurn(p: CctpBurnParams): Hex {
   if (p.maxFee < 0n || p.maxFee >= p.amount) {
     refuse("maxFee must be below the burn amount");
   }
-  if (!Number.isInteger(p.destinationDomain) || p.destinationDomain < 0) {
-    refuse("invalid destination domain");
+  const isUint32 = (n: number) =>
+    Number.isInteger(n) && n >= 0 && n <= 0xffff_ffff;
+  if (!isUint32(p.destinationDomain)) refuse("invalid destination domain");
+  if (!isUint32(p.minFinalityThreshold)) {
+    refuse("invalid minFinalityThreshold");
   }
   const head = [
     word(p.amount),
@@ -183,8 +186,18 @@ export async function fetchCctpFee(
 
 /** maxFee covering the protocol fee (bps of the burn) and the forward fee. */
 export function cctpMaxFee(amount: bigint, quote: CctpFeeQuote): bigint {
-  const protocol =
-    (amount * BigInt(Math.ceil(quote.minimumFee * 100))) / 1_000_000n;
+  // Basis points in hundredths (Circle quotes e.g. 1.3), then ceiling
+  // division so maxFee never falls one base unit short of the fee.
+  const hundredths = quote.minimumFee * 100;
+  const scaled = Math.round(hundredths);
+  if (
+    !Number.isSafeInteger(scaled) ||
+    scaled < 0 ||
+    Math.abs(hundredths - scaled) > 1e-9
+  ) {
+    refuse(`fee ${quote.minimumFee} bps is not representable in hundredths`);
+  }
+  const protocol = (amount * BigInt(scaled) + 999_999n) / 1_000_000n;
   return protocol + quote.forwardFee;
 }
 
@@ -213,13 +226,55 @@ export async function waitForCctpAttestation(options: {
   const url = `${base}/v2/messages/${domainOf(options.sourceChainId)}?transactionHash=${options.txHash}`;
   const timeoutMs = options.timeoutMs ?? 30 * 60_000;
   const intervalMs = options.intervalMs ?? 5_000;
+  if (!(timeoutMs > 0) || !Number.isFinite(timeoutMs))
+    refuse("invalid timeout");
+  if (!(intervalMs > 0) || !Number.isFinite(intervalMs)) {
+    refuse("invalid poll interval");
+  }
   const sleep =
     options.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const response = await (options.fetch ?? fetch)(url);
-    if (response.ok) {
-      const body = (await response.json()) as { messages?: unknown };
+    // Bound every request by the remaining deadline: a stalled connection
+    // must not outlive timeoutMs (the burn has already happened).
+    const remaining = deadline - Date.now();
+    if (remaining <= 0)
+      refuse(`attestation not complete within ${timeoutMs} ms`);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        // Settle with the timeout first so it, not the abort, is reported.
+        reject(
+          new RouteEngineError(
+            "no_routes_available",
+            `CCTP: attestation not complete within ${timeoutMs} ms`,
+          ),
+        );
+        controller.abort();
+      }, remaining);
+    });
+    let response: Response;
+    let body: { messages?: unknown } | undefined;
+    try {
+      response = await Promise.race([
+        (options.fetch ?? fetch)(url, { signal: controller.signal }),
+        expired,
+      ]);
+      if (response.ok) {
+        body = (await Promise.race([response.json(), expired])) as {
+          messages?: unknown;
+        };
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    if (response.ok && body) {
+      // One transaction can burn more than once; refuse rather than guess
+      // which message belongs to this route.
+      if (Array.isArray(body.messages) && body.messages.length > 1) {
+        refuse("the transaction has more than one CCTP message");
+      }
       const entry = Array.isArray(body.messages) ? body.messages[0] : undefined;
       if (typeof entry === "object" && entry !== null) {
         const m = entry as Record<string, unknown>;

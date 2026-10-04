@@ -224,7 +224,10 @@ describe("waitForCctpAttestation", () => {
         ],
       }),
     ];
-    const fetchMock = vi.fn(async () => responses.shift() as Response);
+    const fetchMock = vi.fn(
+      async (_url: string | URL | Request, _init?: RequestInit) =>
+        responses.shift() as Response,
+    );
     const result = await waitForCctpAttestation({
       sourceChainId: 11155111,
       txHash,
@@ -236,7 +239,7 @@ describe("waitForCctpAttestation", () => {
       message: "0xabcd",
       attestation: "0xef01",
     });
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock.mock.calls[0][0]).toBe(
       `https://iris-api-sandbox.circle.com/v2/messages/0?transactionHash=${txHash}`,
     );
   });
@@ -272,5 +275,89 @@ describe("waitForCctpAttestation", () => {
         sleep: async () => {},
       }),
     ).rejects.toThrow(/500/);
+  });
+});
+
+describe("CCTP review fixes (2026-10-05)", () => {
+  it("M1: ceils the protocol fee to a whole base unit", () => {
+    expect(
+      cctpMaxFee(1n, {
+        finalityThreshold: 1000,
+        minimumFee: 1.3,
+        forwardFee: 0n,
+      }),
+    ).toBe(1n);
+    expect(
+      cctpMaxFee(1_000_000n, {
+        finalityThreshold: 1000,
+        minimumFee: 1.3,
+        forwardFee: 0n,
+      }),
+    ).toBe(130n);
+    expect(() =>
+      cctpMaxFee(1n, {
+        finalityThreshold: 1000,
+        minimumFee: 1.234,
+        forwardFee: 0n,
+      }),
+    ).toThrow(/hundredths/);
+  });
+
+  it("M2: a request that never settles is aborted at the deadline", async () => {
+    let aborted = false;
+    const hanging = (_url: string, init?: { signal?: AbortSignal }) =>
+      new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      });
+    await expect(
+      waitForCctpAttestation({
+        sourceChainId: 11155111,
+        txHash: `0x${"22".repeat(32)}`,
+        timeoutMs: 50,
+        intervalMs: 10,
+        fetch: hanging as unknown as typeof fetch,
+      }),
+    ).rejects.toThrow(/not complete within 50 ms/);
+    expect(aborted).toBe(true);
+  });
+
+  it("L1: refuses a transaction with more than one CCTP message", async () => {
+    await expect(
+      waitForCctpAttestation({
+        sourceChainId: 11155111,
+        txHash: `0x${"33".repeat(32)}`,
+        fetch: async () =>
+          jsonResponse({
+            messages: [
+              { status: "complete", message: "0xaa", attestation: "0xbb" },
+              { status: "complete", message: "0xcc", attestation: "0xdd" },
+            ],
+          }),
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow(/more than one/);
+  });
+
+  it("L2: refuses values outside uint32", () => {
+    const base = {
+      amount: 1_000_000n,
+      destinationDomain: 6,
+      mintRecipient: RECIPIENT,
+      burnToken: SEPOLIA_USDC,
+      maxFee: 1n,
+      minFinalityThreshold: 1000,
+    };
+    expect(() =>
+      encodeCctpDepositForBurn({ ...base, destinationDomain: 0x1_0000_0000 }),
+    ).toThrow(/domain/);
+    expect(() =>
+      encodeCctpDepositForBurn({ ...base, minFinalityThreshold: -1 }),
+    ).toThrow(/minFinalityThreshold/);
+    expect(() =>
+      encodeCctpDepositForBurn({ ...base, destinationDomain: 0xffff_ffff }),
+    ).not.toThrow();
   });
 });
