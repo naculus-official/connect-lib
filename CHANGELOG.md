@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **External-wallet x402 signer** (`@naculus/payments-x402`) — `walletX402Signer` pays EIP-3009 challenges through an EIP-1193 wallet. It switches to the typed-data chain, maps wallet rejection, and recovers the returned 65-byte signature against the requested account before the payment is sent; smart-contract wallet signatures remain explicitly unsupported.
+
 ### Fixed
 
 - **Injected wallets can add payment-supported EVM chains** (`@naculus/connect-core`, `@naculus/connector-evm-injected`) — `wallet_addEthereumChain` parameters now come from the core chain registry instead of a second connector-only list. The registry includes Base Sepolia (x402/MPP testnet) and add-chain metadata for Ethereum, Sepolia, Base, Arbitrum, Optimism, and Polygon. Unknown-chain errors retain their specific chain-naming message through the public session switch API without changing the `chain_unsupported` code.

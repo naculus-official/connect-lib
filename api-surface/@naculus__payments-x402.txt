@@ -19,7 +19,10 @@
   svmUnsupportedReason
   unsupportedReason
   verifyX402Settlement
+  walletX402Signer
+  type WalletX402SignerOptions
   X402_VERSION
+  type X402Eip1193Provider
   X402Error
   X402ErrorCode
   type X402FetchOptions

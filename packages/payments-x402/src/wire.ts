@@ -63,6 +63,7 @@ export interface X402SettlementResponse {
 }
 
 export type X402ErrorCode =
+  | "user_rejected"
   | "invalid_challenge"
   | "no_acceptable_requirement"
   | "invalid_settlement"

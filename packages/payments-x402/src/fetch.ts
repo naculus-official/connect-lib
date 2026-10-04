@@ -53,7 +53,10 @@ export type X402SettlementBinding =
 
 export interface X402FetchOptions
   extends Omit<SelectOptions, "evm" | "solana"> {
-  /** Pays EVM requirements: a policy-bound session key (EIP-3009). */
+  /**
+   * Pays EVM EIP-3009 requirements with either a policy-bound session key or
+   * an external-wallet signer created by `walletX402Signer`.
+   */
   signer?: X402TypedDataSigner;
   /** Pays Solana requirements: the connected wallet signs each one. */
   solana?: X402SolanaOptions;

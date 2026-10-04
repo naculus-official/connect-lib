@@ -24,6 +24,11 @@ export {
   type X402SettlementBinding,
 } from "./fetch";
 export {
+  type WalletX402SignerOptions,
+  type X402Eip1193Provider,
+  walletX402Signer,
+} from "./wallet-signer";
+export {
   decodeHeader,
   encodeHeader,
   PAYMENT_REQUIRED_HEADER,
