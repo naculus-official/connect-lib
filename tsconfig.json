@@ -45,6 +45,6 @@
       "@naculus/test-utils/*": ["./test-utils/*"]
     }
   },
-  "include": ["packages/*/src", "test-utils"],
+  "include": ["packages/*/src", "test-utils", "docs/guides/examples"],
   "exclude": ["node_modules", "dist"]
 }
