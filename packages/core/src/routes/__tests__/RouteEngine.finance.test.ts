@@ -6,7 +6,6 @@
  * and output amount calculation correctness.
  */
 
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeGasLimits } from "../../account-abstraction/SmartAccountManager";
 import { encodeGasLimits } from "../../account-abstraction/user-operation";

@@ -11,6 +11,22 @@ export type { ViemWalletClient } from "./executor/EVMRouteExecutor";
 export { EVMRouteExecutor } from "./executor/EVMRouteExecutor";
 export type { AxelarBridgeProviderConfig } from "./providers/AxelarBridgeProvider";
 export { AxelarBridgeProvider } from "./providers/AxelarBridgeProvider";
+export type {
+  CctpAttestation,
+  CctpBridgeProviderConfig,
+  CctpBurnParams,
+  CctpFeeQuote,
+} from "./providers/CctpBridgeProvider";
+export {
+  CctpBridgeProvider,
+  cctpMaxFee,
+  cctpMintRecipient,
+  encodeCctpApprove,
+  encodeCctpDepositForBurn,
+  encodeCctpReceiveMessage,
+  fetchCctpFee,
+  waitForCctpAttestation,
+} from "./providers/CctpBridgeProvider";
 export type { LiFISwapProviderConfig } from "./providers/LiFISwapProvider";
 // ─── Providers ─────────────────────────────────────────────────────────
 export { LiFISwapProvider } from "./providers/LiFISwapProvider";

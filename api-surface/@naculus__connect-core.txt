@@ -56,7 +56,7 @@
   caveatsFromScope
   type ChainFeeEstimator
   type ChainFeeSupport
-  type ChainInfo
+  ChainInfo
   CHAINS
   type ChainSession
   type ChannelCapability
@@ -322,10 +322,10 @@
   type RiskWarningCategory
   type RiskWarningSeverity
   ROOT_AUTHORITY
-  type Route
+  Route
   RouteEngine
-  type RouteQuote
-  type RouteStep
+  RouteQuote
+  RouteStep
   type ScopeCheckResult
   scopeRequestFrom
   type SealChannelTransaction
@@ -432,7 +432,7 @@
   toDecString
   toEthSignedMessageHash
   toHumanReadable
-  type Token
+  Token
   type TokenConfig
   type TokenInfo
   type TokenList
@@ -486,3 +486,17 @@
   XRPL_DEVNET
   XRPL_MAINNET
   XRPL_TESTNET
+./cctp:
+  CCTP_V2
+  type CctpAttestation
+  CctpBridgeProvider
+  type CctpBridgeProviderConfig
+  type CctpBurnParams
+  type CctpFeeQuote
+  cctpMaxFee
+  cctpMintRecipient
+  encodeCctpApprove
+  encodeCctpDepositForBurn
+  encodeCctpReceiveMessage
+  fetchCctpFee
+  waitForCctpAttestation

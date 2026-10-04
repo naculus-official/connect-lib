@@ -370,7 +370,10 @@
     "permissionless",
     "secp",
     "unsponsored",
-    "Surfpool"
+    "Surfpool",
+    "CCTP",
+    "cctp",
+    "Cctp"
   ],
   "ignoreWords": [
     "eykt",

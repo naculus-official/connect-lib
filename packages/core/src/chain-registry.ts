@@ -177,6 +177,9 @@ export const CHAINS: Record<number, ChainInfo> = {
   11155111: {
     name: "Sepolia",
     caip2Id: "eip155:11155111",
+    // Circle testnet USDC; source: Circle docs, "USDC contract addresses".
+    usdcAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    usdcVariant: "native",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
     nativeCurrencyName: "Sepolia Ether",
     rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:11155111"],

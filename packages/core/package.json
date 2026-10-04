@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./cctp": {
+      "types": "./dist/cctp.d.ts",
+      "import": "./dist/cctp.js",
+      "require": "./dist/cctp.cjs"
     }
   },
   "files": [

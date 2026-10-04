@@ -2,7 +2,6 @@
  * RouteEngine Tests
  */
 
-
 import { describe, it, expect, beforeEach } from "vitest";
 import { RouteEngine, RouteEngineError } from "../RouteEngine";
 import type {

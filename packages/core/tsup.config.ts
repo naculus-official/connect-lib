@@ -1,7 +1,8 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  // cctp is a separate entry so apps that do not bridge never load it.
+  entry: { index: "src/index.ts", cctp: "src/routes/providers/CctpBridgeProvider.ts" },
   format: ["esm", "cjs"],
   dts: true,
   splitting: false,

@@ -87,6 +87,8 @@ export interface BridgeProvider {
     toChain: { chainId: number };
     fromToken: Token;
     toToken: Token;
+    /** Destination address. Providers that mint to an address (CCTP) require it. */
+    recipient?: string;
   }): Promise<RouteQuote>;
   execute(route: Route): Promise<{ txHash: string }>;
 }

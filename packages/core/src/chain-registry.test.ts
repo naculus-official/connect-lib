@@ -226,7 +226,10 @@ describe("chain-registry", () => {
       expect(sepolia.factoryAddress).toBeDefined();
       // No Axelar, USDC, or USDT on Sepolia
       expect(sepolia.axelarName).toBeUndefined();
-      expect(sepolia.usdcAddress).toBeUndefined();
+      expect(sepolia.usdcAddress).toBe(
+        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+      );
+      expect(sepolia.usdcVariant).toBe("native");
       expect(sepolia.usdtAddress).toBeUndefined();
     });
 
