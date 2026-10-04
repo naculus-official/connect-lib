@@ -154,6 +154,22 @@ describe("delegation framework: encoding", () => {
 describe("delegation framework: refusals", () => {
   const cases: Array<[string, Partial<SessionKeyScope>, number, RegExp]> = [
     ["an offchain scope", { mode: "offchain" }, 8453, /mode/],
+    [
+      "a per-transaction token cap (no on-chain caveat)",
+      { tokenMaxPerTx: { [USDC]: 1_000_000n } },
+      8453,
+      /tokenMaxPerTx/,
+    ],
+    [
+      "a per-period limit (period enforcer not wired)",
+      {
+        periodLimits: {
+          [USDC]: { amount: 1_000_000n, seconds: 86_400, start: 1_700_000_000 },
+        },
+      },
+      8453,
+      /periodLimits/,
+    ],
     ["an unsupported chain", {}, 56, /not a supported/],
     [
       "a chain outside allowedChainIds",

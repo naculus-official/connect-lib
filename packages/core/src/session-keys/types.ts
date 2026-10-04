@@ -46,6 +46,9 @@ export interface SessionKeyScope {
   /** Optional per-transaction cap for allowance-scoped token transfers. */
   tokenMaxPerTx?: Record<`0x${string}`, bigint>;
 
+  /** Device-enforced fixed-window limits keyed by token address or `native`. */
+  periodLimits?: Partial<Record<`0x${string}` | "native", SessionKeyPeriod>>;
+
   /**
    * Allowed payees (empty = any). Enforced on the *recipient* of a transfer:
    * `to` of a native transfer, the decoded `to` of an ERC-20
@@ -69,6 +72,17 @@ export interface SessionKeyScope {
 
   /** Session type: off-chain agreement, EIP-7702 delegation, or AA module */
   mode: "offchain" | "eip7702" | "aa_module";
+}
+
+export interface SessionKeyPeriod {
+  amount: bigint;
+  seconds: number;
+  start: number;
+}
+
+export interface SessionKeyPeriodUsage {
+  periodIndex: number;
+  periodSpent: bigint;
 }
 
 /** Transaction facts required before a scoped session key may sign. */
@@ -166,6 +180,8 @@ export interface StoredSessionKey {
   accumulatedGas?: bigint;
   /** Cumulative ERC-20 amount spent per token address, when tracked */
   accumulatedTokenSpends?: Record<`0x${string}`, bigint>;
+  /** Device-enforced fixed-window usage, absent on legacy records. */
+  periodUsage?: Record<string, SessionKeyPeriodUsage>;
 }
 
 // ─── Public Info (no private key exposure) ─────────────────────────────

@@ -26,7 +26,14 @@ export interface Grant {
   maxPerPayment: bigint;
   maxTotal: bigint;
   maxCount?: number;
+  period?: GrantPeriod;
   rails: Rail[];
+}
+
+export interface GrantPeriod {
+  amount: bigint;
+  seconds: number;
+  start: number;
 }
 
 export type ListedAuthorizationStatus =
@@ -92,6 +99,7 @@ export interface SpendRequest {
   at: number;
   spentSoFar: bigint;
   countSoFar: number;
+  periodSpentSoFar?: bigint;
 }
 
 export type SpendRefusal =
@@ -102,6 +110,7 @@ export type SpendRefusal =
   | "over-per-payment"
   | "over-total"
   | "over-count"
+  | "period-limit-exceeded"
   | "rail-not-allowed"
   | "invalid-authorization";
 
@@ -114,8 +123,12 @@ export type AuthorizationValidation =
   | { ok: false; reason: string };
 
 export type CompileResult<T> =
-  | { ok: true; scope: T }
+  | { ok: true; scope: T; enforcement: "on-chain" | "device" }
   | { ok: false; reason: string };
+
+export interface CompileOptions {
+  requireOnChain?: boolean;
+}
 
 export interface CompiledMppSessionPolicy {
   recipient: string;
@@ -288,7 +301,7 @@ export function validateAuthorization(value: unknown): AuthorizationValidation {
       !exactKeys(
         raw,
         ["asset", "recipients", "maxPerPayment", "maxTotal", "rails"],
-        ["maxCount"],
+        ["maxCount", "period"],
       ) ||
       !Array.isArray(raw.recipients) ||
       raw.recipients.length === 0 ||
@@ -307,6 +320,20 @@ export function validateAuthorization(value: unknown): AuthorizationValidation {
     ) {
       return { ok: false, reason: "invalid grant structure" };
     }
+    if (
+      raw.period !== undefined &&
+      (!isRecord(raw.period) ||
+        !exactKeys(raw.period, ["amount", "seconds", "start"]) ||
+        typeof raw.period.amount !== "bigint" ||
+        raw.period.amount <= 0n ||
+        raw.period.amount > raw.maxTotal ||
+        !Number.isSafeInteger(raw.period.seconds) ||
+        (raw.period.seconds as number) <= 0 ||
+        !Number.isSafeInteger(raw.period.start) ||
+        (raw.period.start as number) < 0)
+    ) {
+      return { ok: false, reason: "invalid grant period" };
+    }
     const asset = parseAsset(raw.asset);
     if (!asset) return { ok: false, reason: "invalid asset" };
     const recipients = raw.recipients.map((recipient) =>
@@ -317,6 +344,9 @@ export function validateAuthorization(value: unknown): AuthorizationValidation {
     }
     const canonicalRecipients = recipients as string[];
     const rails = raw.rails as Rail[];
+    if (raw.period !== undefined && rails.includes("mpp-session")) {
+      return { ok: false, reason: "period is not expressible on an MPP rail" };
+    }
     if (
       new Set(canonicalRecipients).size !== canonicalRecipients.length ||
       new Set(rails).size !== rails.length
@@ -331,6 +361,15 @@ export function validateAuthorization(value: unknown): AuthorizationValidation {
       ...(raw.maxCount === undefined
         ? {}
         : { maxCount: raw.maxCount as number }),
+      ...(raw.period === undefined
+        ? {}
+        : {
+            period: {
+              amount: raw.period.amount as bigint,
+              seconds: raw.period.seconds as number,
+              start: raw.period.start as number,
+            },
+          }),
       rails: [...rails],
     });
   }
@@ -372,19 +411,26 @@ export function evaluateSpend(
   if (!validated.ok) return { allow: false, reason: "invalid-authorization" };
   if (
     !isRecord(request) ||
-    !exactKeys(request, [
-      "asset",
-      "recipient",
-      "amount",
-      "rail",
-      "at",
-      "spentSoFar",
-      "countSoFar",
-    ]) ||
+    !exactKeys(
+      request,
+      [
+        "asset",
+        "recipient",
+        "amount",
+        "rail",
+        "at",
+        "spentSoFar",
+        "countSoFar",
+      ],
+      ["periodSpentSoFar"],
+    ) ||
     typeof request.amount !== "bigint" ||
     request.amount <= 0n ||
     typeof request.spentSoFar !== "bigint" ||
     request.spentSoFar < 0n ||
+    (request.periodSpentSoFar !== undefined &&
+      (typeof request.periodSpentSoFar !== "bigint" ||
+        request.periodSpentSoFar < 0n)) ||
     !Number.isSafeInteger(request.at) ||
     !Number.isSafeInteger(request.countSoFar) ||
     request.countSoFar < 0 ||
@@ -430,6 +476,20 @@ export function evaluateSpend(
   ) {
     return { allow: false, reason: "over-count" };
   }
+  if (match.grant.period !== undefined) {
+    if (request.at < match.grant.period.start) {
+      return { allow: false, reason: "period-limit-exceeded" };
+    }
+    const periodIndex = Math.floor(
+      (request.at - match.grant.period.start) / match.grant.period.seconds,
+    );
+    if (periodIndex < 0 || request.periodSpentSoFar === undefined) {
+      return { allow: false, reason: "period-limit-exceeded" };
+    }
+    if (request.periodSpentSoFar + request.amount > match.grant.period.amount) {
+      return { allow: false, reason: "period-limit-exceeded" };
+    }
+  }
   return { allow: true, grant: match.index };
 }
 
@@ -451,7 +511,10 @@ function sameStrings(left: string[], right: string[]): boolean {
 export function compileEvmSessionScope(
   value: Authorization,
   chainId: number,
+  options: CompileOptions = {},
 ): CompileResult<SessionKeyScope> {
+  if (options.requireOnChain)
+    return { ok: false, reason: "on-chain enforcement is not available" };
   const authorization = validatedForCompile(value);
   if (typeof authorization === "string")
     return { ok: false, reason: authorization };
@@ -511,6 +574,7 @@ export function compileEvmSessionScope(
     mode: "offchain",
     ...(maxCount === undefined ? {} : { maxTxCount: maxCount }),
   };
+  const periodLimits: NonNullable<SessionKeyScope["periodLimits"]> = {};
   for (const grant of tokenGrants) {
     const asset = parseAsset(grant.asset) as ParsedAsset;
     scope.tokenAllowances ??= {};
@@ -519,14 +583,22 @@ export function compileEvmSessionScope(
       scope.tokenMaxPerTx ??= {};
       scope.tokenMaxPerTx[asset.address as `0x${string}`] = grant.maxPerPayment;
     }
+    if (grant.period) {
+      periodLimits[asset.address as `0x${string}`] = { ...grant.period };
+    }
   }
-  return { ok: true, scope };
+  if (nativeGrant?.period) periodLimits.native = { ...nativeGrant.period };
+  if (Object.keys(periodLimits).length > 0) scope.periodLimits = periodLimits;
+  return { ok: true, scope, enforcement: "device" };
 }
 
 export function compileSolanaSessionScope(
   value: Authorization,
   cluster: string,
+  options: CompileOptions = {},
 ): CompileResult<SolanaSessionKeyScope> {
+  if (options.requireOnChain)
+    return { ok: false, reason: "on-chain enforcement is not available" };
   const authorization = validatedForCompile(value);
   if (typeof authorization === "string")
     return { ok: false, reason: authorization };
@@ -560,7 +632,9 @@ export function compileSolanaSessionScope(
       allowedRecipients: [...grant.recipients],
       expiry: authorization.expiresAt,
       ...(grant.maxCount === undefined ? {} : { maxTxCount: grant.maxCount }),
+      ...(grant.period === undefined ? {} : { period: { ...grant.period } }),
     },
+    enforcement: "device",
   };
 }
 
@@ -568,7 +642,10 @@ export function compileMppSession(
   value: Authorization,
   cluster: string,
   context: MppSessionCompileContext,
+  options: CompileOptions = {},
 ): CompileResult<CompiledMppSession> {
+  if (options.requireOnChain)
+    return { ok: false, reason: "on-chain enforcement is not available" };
   const authorization = validatedForCompile(value);
   if (typeof authorization === "string")
     return { ok: false, reason: authorization };
@@ -582,6 +659,8 @@ export function compileMppSession(
   if (selected.length !== 1)
     return { ok: false, reason: "exactly one mpp-session grant is required" };
   const grant = selected[0];
+  if (grant.period !== undefined)
+    return { ok: false, reason: "MPP session cannot enforce period" };
   if (grant.rails.length !== 1)
     return { ok: false, reason: "mixed rails are not faithfully expressible" };
   if (grant.recipients.length !== 1)
@@ -644,6 +723,7 @@ export function compileMppSession(
           : { minimumGracePeriodSeconds: context.minimumGracePeriodSeconds }),
       },
     },
+    enforcement: "device",
   };
 }
 

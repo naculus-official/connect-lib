@@ -449,6 +449,7 @@ export class SessionKeyStorage {
     id: string,
     tx?: { value?: string; gas?: string },
     tokenSpend?: { tokenAddress: `0x${string}`; amount: bigint },
+    periodUsage?: { asset: string; periodIndex: number; amount: bigint },
   ): Promise<void> {
     await this.withStorageLock(async () => {
       const keys = await this.loadAllStrict();
@@ -475,6 +476,17 @@ export class SessionKeyStorage {
           tokenSpend.tokenAddress;
         key.accumulatedTokenSpends[tokenAddress] =
           (key.accumulatedTokenSpends[tokenAddress] ?? 0n) + tokenSpend.amount;
+      }
+      if (periodUsage) {
+        key.periodUsage ??= {};
+        const existing = key.periodUsage[periodUsage.asset];
+        key.periodUsage[periodUsage.asset] = {
+          periodIndex: periodUsage.periodIndex,
+          periodSpent:
+            existing?.periodIndex === periodUsage.periodIndex
+              ? existing.periodSpent + periodUsage.amount
+              : periodUsage.amount,
+        };
       }
       await this.persistAll(keys);
     });

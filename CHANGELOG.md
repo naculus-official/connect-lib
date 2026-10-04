@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **Periodic authorization limits** (`@naculus/connect-core`) — grants can cap spend in fixed windows in addition to their existing per-payment, lifetime-total, and count limits. The evaluator and EVM/Solana off-chain session-key compilers report device enforcement and fail closed on missing or malformed period usage; MPP periods and `requireOnChain` remain refused until an on-chain compiler is added. Existing scopes, usage records, and Solana v1 scope bindings are unchanged.
+
+### Fixed
+
+- **EIP-7702 delegations no longer drop limits they cannot express** (`@naculus/connect-core`) — `buildDelegation` silently ignored `tokenMaxPerTx` (since 0.8.0) and would have ignored `periodLimits`, producing an on-chain delegation looser than the session-key scope. Both now refuse with `session_key_invalid_input` until a matching caveat exists. Behavior change only for hand-built `eip7702` scopes that set them; the authorization compiler emits `offchain` scopes and is unaffected.
+
 ## 0.9.0 — 2026-10-04
 
 Additive; no breaking change. Pay x402 from MetaMask, Coinbase Wallet, Rabby, OKX or Phantom with `walletX402Signer`, and switch to chains the wallet has not added yet (Base Sepolia among them).

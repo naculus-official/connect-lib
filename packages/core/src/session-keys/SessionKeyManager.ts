@@ -1067,6 +1067,7 @@ export class SessionKeyManager {
       stored.accumulatedValue,
       stored.accumulatedGas,
       stored.accumulatedTokenSpends,
+      stored.periodUsage,
     );
     if (!check.valid) {
       throw createSessionKeyError(
@@ -1106,7 +1107,18 @@ export class SessionKeyManager {
     // Usage accounting is part of authorization, not best-effort telemetry.
     // If it cannot be persisted, do not return a usable signature.
     const tokenSpend = decodeScopedTokenSpend(stored.scope, tx).spend;
-    await this.storage.incrementUsageUnlocked(stored.id, tx, tokenSpend);
+    const periodUsage = this.periodUsageFor(
+      stored.scope,
+      tx,
+      stored.periodUsage,
+      tokenSpend,
+    );
+    await this.storage.incrementUsageUnlocked(
+      stored.id,
+      tx,
+      tokenSpend,
+      periodUsage ?? undefined,
+    );
     this.cache.delete(stored.id);
     return signature;
   }
@@ -1159,6 +1171,7 @@ export class SessionKeyManager {
       allowedMethods: scope?.allowedMethods ?? undefined,
       tokenAllowances: scope?.tokenAllowances ?? undefined,
       tokenMaxPerTx: scope?.tokenMaxPerTx ?? undefined,
+      periodLimits: scope?.periodLimits ?? undefined,
       allowedChainIds: scope?.allowedChainIds ?? undefined,
       allowedRecipients: scope?.allowedRecipients ?? undefined,
       nativeTransfer: scope?.nativeTransfer ?? undefined,
@@ -1215,6 +1228,34 @@ export class SessionKeyManager {
         "session_key_invalid_input",
         "allowedChainIds must contain positive safe integers",
       );
+    }
+    if (scope.periodLimits !== undefined) {
+      for (const [asset, period] of Object.entries(scope.periodLimits)) {
+        const cumulativeLimit =
+          asset === "native"
+            ? scope.maxTotalValue
+            : Object.entries(scope.tokenAllowances ?? {}).find(
+                ([token]) => token.toLowerCase() === asset.toLowerCase(),
+              )?.[1];
+        if (
+          (asset !== "native" && !isValidAddress(asset, "eip155")) ||
+          typeof period !== "object" ||
+          period === null ||
+          typeof period.amount !== "bigint" ||
+          period.amount <= 0n ||
+          !Number.isSafeInteger(period.seconds) ||
+          period.seconds <= 0 ||
+          !Number.isSafeInteger(period.start) ||
+          period.start < 0 ||
+          cumulativeLimit === undefined ||
+          period.amount > cumulativeLimit
+        ) {
+          throw createSessionKeyError(
+            "session_key_invalid_input",
+            "periodLimits must contain valid fixed-window limits",
+          );
+        }
+      }
     }
     if (
       scope.allowedContracts?.some(
@@ -1366,6 +1407,7 @@ export class SessionKeyManager {
     accumulatedValue = 0n,
     accumulatedGas = 0n,
     accumulatedTokenSpends?: StoredSessionKey["accumulatedTokenSpends"],
+    periodUsage?: StoredSessionKey["periodUsage"],
   ): ScopeCheckResult {
     const result: ScopeCheckResult = { valid: true };
     let txValue = 0n;
@@ -1505,6 +1547,39 @@ export class SessionKeyManager {
         };
       }
     }
+    let periodCheck: ReturnType<SessionKeyManager["periodUsageFor"]>;
+    try {
+      periodCheck = this.periodUsageFor(
+        scope,
+        tx,
+        periodUsage,
+        tokenSpendResult.spend,
+      );
+    } catch (error) {
+      return {
+        valid: false,
+        reason: error instanceof Error ? error.message : "Invalid period usage",
+      };
+    }
+    if (periodCheck) {
+      const limit =
+        scope.periodLimits?.[
+          periodCheck.asset as keyof NonNullable<
+            SessionKeyScope["periodLimits"]
+          >
+        ];
+      const current = periodUsage?.[periodCheck.asset];
+      const spent =
+        current?.periodIndex === periodCheck.periodIndex
+          ? current.periodSpent
+          : 0n;
+      if (spent + periodCheck.amount > limit!.amount) {
+        return {
+          valid: false,
+          reason: `Period spend ${spent + periodCheck.amount} exceeds limit ${limit!.amount} for ${periodCheck.asset}`,
+        };
+      }
+    }
     if (scope.allowedRecipients && scope.allowedRecipients.length > 0) {
       // The recipient is knowable for exactly two shapes; anything else is
       // refused rather than guessed.
@@ -1607,6 +1682,69 @@ export class SessionKeyManager {
     }
 
     return result;
+  }
+
+  private periodUsageFor(
+    scope: SessionKeyScope,
+    tx: SessionKeyTransaction,
+    usage: StoredSessionKey["periodUsage"],
+    tokenSpend?: { tokenAddress: `0x${string}`; amount: bigint },
+  ): { asset: string; periodIndex: number; amount: bigint } | null {
+    const asset = tokenSpend
+      ? Object.keys(scope.periodLimits ?? {}).find(
+          (key) => key.toLowerCase() === tokenSpend.tokenAddress.toLowerCase(),
+        )
+      : scope.periodLimits?.native
+        ? "native"
+        : undefined;
+    if (!asset) return null;
+    const period =
+      scope.periodLimits?.[
+        asset as keyof NonNullable<SessionKeyScope["periodLimits"]>
+      ];
+    if (!period) return null;
+    const at = Math.floor(Date.now() / 1000);
+    if (at < period.start) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "The period has not started",
+      );
+    }
+    const periodIndex = Math.floor((at - period.start) / period.seconds);
+    if (usage !== undefined) {
+      if (typeof usage !== "object" || usage === null || Array.isArray(usage)) {
+        throw createSessionKeyError(
+          "session_key_scope_exceeded",
+          "The stored period usage is malformed",
+        );
+      }
+      const current = usage[asset];
+      if (
+        current !== undefined &&
+        (typeof current !== "object" ||
+          current === null ||
+          !Number.isSafeInteger(current.periodIndex) ||
+          current.periodIndex < 0 ||
+          current.periodIndex > periodIndex ||
+          typeof current.periodSpent !== "bigint" ||
+          current.periodSpent < 0n)
+      ) {
+        throw createSessionKeyError(
+          "session_key_scope_exceeded",
+          "The stored period usage is malformed",
+        );
+      }
+    }
+    let amount: bigint;
+    try {
+      amount = tokenSpend?.amount ?? (tx.value ? BigInt(tx.value) : 0n);
+    } catch {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "Transaction value must be a valid integer",
+      );
+    }
+    return { asset, periodIndex, amount };
   }
 
   /** Serialize sign/check/usage updates per key within this manager instance. */

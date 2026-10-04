@@ -975,3 +975,90 @@ describe("SessionKeyManager", () => {
     });
   });
 });
+
+describe("SessionKeyManager periodic usage", () => {
+  it("enforces and resets a token period under the signing lock", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2033-05-18T03:33:20.000Z"));
+    const start = Math.floor(Date.now() / 1000);
+    const adapter = new MemoryStorageAdapter();
+    const manager = createManagerWithAdapter(adapter);
+    const info = await manager.createSessionKey(
+      makeScope({
+        tokenAllowances: { [tokenAddress]: 1_000n },
+        tokenMaxPerTx: { [tokenAddress]: 100n },
+        periodLimits: {
+          [tokenAddress]: { amount: 100n, seconds: 10, start },
+        },
+      }),
+      signerAddress,
+    );
+    await authorize(manager, info.id);
+    await manager.signWithSessionKey(
+      info.id,
+      `0x${"01".repeat(32)}`,
+      erc20Transfer(60n),
+    );
+    await expect(
+      manager.signWithSessionKey(
+        info.id,
+        `0x${"02".repeat(32)}`,
+        erc20Transfer(41n),
+      ),
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+    vi.setSystemTime(new Date((start + 10) * 1_000));
+    await expect(
+      manager.signWithSessionKey(
+        info.id,
+        `0x${"03".repeat(32)}`,
+        erc20Transfer(60n),
+      ),
+    ).resolves.toMatch(/^0x/);
+    vi.useRealTimers();
+  });
+
+  it("leaves legacy scopes unchanged and refuses malformed period usage", async () => {
+    const adapter = new MemoryStorageAdapter();
+    const manager = createManagerWithAdapter(adapter);
+    const legacy = await manager.createSessionKey(makeScope(), signerAddress);
+    await authorize(manager, legacy.id);
+    await expect(
+      manager.signWithSessionKey(
+        legacy.id,
+        `0x${"04".repeat(32)}`,
+        erc20Transfer(1n),
+      ),
+    ).resolves.toMatch(/^0x/);
+
+    const start = Math.floor(Date.now() / 1000) - 1;
+    const periodic = await manager.createSessionKey(
+      makeScope({
+        tokenAllowances: { [tokenAddress]: 1_000n },
+        periodLimits: {
+          [tokenAddress]: { amount: 100n, seconds: 10, start },
+        },
+      }),
+      signerAddress,
+    );
+    await authorize(manager, periodic.id);
+    const raw = await adapter.get<string>("session_keys");
+    const records = JSON.parse(
+      typeof raw === "string" ? raw : JSON.stringify(raw),
+    ) as Array<Record<string, unknown>>;
+    const record = records.find((item) => item.id === periodic.id)!;
+    record.periodUsage = {
+      [tokenAddress]: {
+        periodIndex: "broken",
+        periodSpent: { __bigint__: "0" },
+      },
+    };
+    await adapter.set("session_keys", JSON.stringify(records) as never);
+    await expect(
+      manager.signWithSessionKey(
+        periodic.id,
+        `0x${"05".repeat(32)}`,
+        erc20Transfer(1n),
+      ),
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+  });
+});

@@ -131,6 +131,29 @@ describe("validateAuthorization", () => {
       invalidGrant({ maxPerPayment: 2n, maxTotal: 1n }),
     ],
     ["invalid count", invalidGrant({ maxCount: 0 })],
+    [
+      "zero period amount",
+      invalidGrant({ period: { amount: 0n, seconds: 1, start: 0 } }),
+    ],
+    [
+      "period amount over total",
+      invalidGrant({ period: { amount: 1_001n, seconds: 1, start: 0 } }),
+    ],
+    [
+      "non-positive period seconds",
+      invalidGrant({ period: { amount: 1n, seconds: 0, start: 0 } }),
+    ],
+    [
+      "negative period start",
+      invalidGrant({ period: { amount: 1n, seconds: 1, start: -1 } }),
+    ],
+    [
+      "period on MPP rail",
+      invalidGrant({
+        rails: ["mpp-session"],
+        period: { amount: 1n, seconds: 1, start: 0 },
+      }),
+    ],
     ["empty rails", invalidGrant({ rails: [] })],
     ["unknown rail", invalidGrant({ rails: ["wire"] })],
     ["invalid asset namespace", invalidGrant({ asset: "cosmos:1/token:x" })],
@@ -197,6 +220,62 @@ describe("evaluateSpend", () => {
       }),
     ).toEqual({ allow: false, reason });
   });
+
+  it.each([
+    ["at start", NOW, 99n, true],
+    ["last second", NOW + 9, 99n, true],
+    ["next period", NOW + 10, 0n, true],
+    ["before start", NOW - 1, 0n, false],
+    ["over period", NOW, 100n, false],
+  ] as const)(
+    "enforces a fixed window %s",
+    (_name, at, periodSpentSoFar, allow) => {
+      const authorization = evmAuthorization({
+        notBefore: undefined,
+        grants: [
+          {
+            ...evmAuthorization().grants[0],
+            period: { amount: 100n, seconds: 10, start: NOW },
+          },
+        ],
+      });
+      expect(
+        evaluateSpend(authorization, {
+          asset: `eip155:1/erc20:${TOKEN}`,
+          recipient: EVM_PAYEE,
+          amount: 1n,
+          rail: "transfer",
+          at,
+          spentSoFar: 0n,
+          countSoFar: 0,
+          periodSpentSoFar,
+        }).allow,
+      ).toBe(allow);
+    },
+  );
+
+  it("refuses missing period usage rather than assuming zero", () => {
+    const authorization = evmAuthorization({
+      notBefore: undefined,
+      grants: [
+        {
+          ...evmAuthorization().grants[0],
+          period: { amount: 100n, seconds: 10, start: NOW },
+        },
+      ],
+    });
+    expect(
+      evaluateSpend(authorization, {
+        asset: `eip155:1/erc20:${TOKEN}`,
+        recipient: EVM_PAYEE,
+        amount: 1n,
+        rail: "transfer",
+        at: NOW,
+        spentSoFar: 0n,
+        countSoFar: 0,
+      }),
+    ).toEqual({ allow: false, reason: "period-limit-exceeded" });
+  });
 });
 
 describe("compilers", () => {
@@ -262,6 +341,7 @@ describe("compilers", () => {
     });
     expect(compileEvmSessionScope(value, 1)).toEqual({
       ok: true,
+      enforcement: "device",
       scope: {
         expiry: NOW + 100,
         maxValuePerTx: 3n,
@@ -273,6 +353,40 @@ describe("compilers", () => {
         mode: "offchain",
       },
     });
+  });
+
+  it("compiles device periods and refuses requireOnChain in phase a", () => {
+    const period = { amount: 100n, seconds: 10, start: NOW };
+    const evm = evmAuthorization({
+      notBefore: undefined,
+      grants: [{ ...evmAuthorization().grants[0], period }],
+    });
+    const solana = solanaAuthorization({
+      grants: [{ ...solanaAuthorization().grants[0], period }],
+    });
+    expect(compileEvmSessionScope(evm, 1)).toMatchObject({
+      ok: true,
+      enforcement: "device",
+      scope: { periodLimits: { [TOKEN]: period } },
+    });
+    expect(compileSolanaSessionScope(solana, SOLANA_MAINNET)).toMatchObject({
+      ok: true,
+      enforcement: "device",
+      scope: { period },
+    });
+    expect(
+      compileEvmSessionScope(evm, 1, { requireOnChain: true }),
+    ).toMatchObject({ ok: false });
+    expect(
+      compileSolanaSessionScope(solana, SOLANA_MAINNET, {
+        requireOnChain: true,
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      compileMppSession(mppAuthorization(), SOLANA_MAINNET, context(), {
+        requireOnChain: true,
+      }),
+    ).toMatchObject({ ok: false });
   });
 
   it("EVM compiles a lower ERC-20 per-payment limit", () => {
@@ -1049,6 +1163,128 @@ describe("differential enforcer checks", () => {
     }
     vi.useRealTimers();
   });
+
+  it.each(["evm", "solana"] as const)(
+    "matches the %s device period enforcer across boundaries",
+    (target) => {
+      const period = { amount: 100n, seconds: 10, start: NOW };
+      const authorization =
+        target === "evm"
+          ? evmAuthorization({
+              notBefore: undefined,
+              grants: [
+                {
+                  ...evmAuthorization().grants[0],
+                  maxPerPayment: 100n,
+                  period,
+                },
+              ],
+            })
+          : solanaAuthorization({
+              grants: [
+                {
+                  ...solanaAuthorization().grants[0],
+                  maxPerPayment: 100n,
+                  period,
+                },
+              ],
+            });
+      const times = [NOW - 1, NOW, NOW + 9, NOW + 10];
+      for (const at of times) {
+        for (const periodSpent of [0n, 99n, 100n]) {
+          const amount = 1n;
+          const request = {
+            asset:
+              target === "evm"
+                ? `eip155:1/erc20:${TOKEN}`
+                : `${SOLANA_MAINNET}/token:${MINT}`,
+            recipient: target === "evm" ? EVM_PAYEE : SOL_PAYEE,
+            amount,
+            rail: "transfer" as const,
+            at,
+            spentSoFar: 0n,
+            countSoFar: 0,
+            periodSpentSoFar: periodSpent,
+          };
+          vi.setSystemTime(new Date(at * 1_000));
+          let actual = true;
+          if (target === "evm") {
+            const compiled = compileEvmSessionScope(authorization, 1);
+            expect(compiled.ok).toBe(true);
+            if (!compiled.ok) continue;
+            const manager = new SessionKeyManager({ forbiddenMethods: [] });
+            const check = (
+              manager as unknown as {
+                checkScopeAgainstTx(
+                  scope: SessionKeyScope,
+                  count: number,
+                  tx: SessionKeyTransaction,
+                  value: bigint,
+                  gas: bigint,
+                  token: Record<string, bigint>,
+                  periods: Record<
+                    string,
+                    { periodIndex: number; periodSpent: bigint }
+                  >,
+                ): { valid: boolean };
+              }
+            ).checkScopeAgainstTx.bind(manager);
+            const index = at < NOW ? 0 : Math.floor((at - NOW) / 10);
+            actual = check(
+              compiled.scope,
+              0,
+              {
+                to: TOKEN,
+                value: "0",
+                data: erc20Transfer(EVM_PAYEE, amount),
+                chainId: 1,
+              },
+              0n,
+              0n,
+              {},
+              { [TOKEN]: { periodIndex: index, periodSpent } },
+            ).valid;
+          } else {
+            const compiled = compileSolanaSessionScope(
+              authorization,
+              SOLANA_MAINNET,
+            );
+            expect(compiled.ok).toBe(true);
+            if (!compiled.ok) continue;
+            const manager = new SolanaSessionKeyManager(
+              { encryptionKey: "test" },
+              new MemoryStorageAdapter(),
+            );
+            const check = (
+              manager as unknown as {
+                check(key: unknown, payment: unknown): void;
+              }
+            ).check.bind(manager);
+            try {
+              const index = at < NOW ? 0 : Math.floor((at - NOW) / 10);
+              check(
+                {
+                  status: "active",
+                  scope: compiled.scope,
+                  spent: 0n,
+                  useCount: 0,
+                  periodIndex: index,
+                  periodSpent,
+                },
+                { recipient: SOL_PAYEE, amount, feePayer: PAYER, memo: null },
+              );
+            } catch {
+              actual = false;
+            }
+          }
+          expect(actual, `${target} at=${at} spent=${periodSpent}`).toBe(
+            evaluateSpend(authorization, request).allow,
+          );
+        }
+      }
+      vi.useRealTimers();
+    },
+  );
 
   it("matches signVoucher limits for 500 seeded requests", async () => {
     vi.setSystemTime(new Date(NOW * 1_000));

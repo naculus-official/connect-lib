@@ -59,6 +59,7 @@ export interface SolanaSessionKeyScope {
   /** Unix seconds. The chain does not expire a delegate: revoke after this. */
   expiry: number;
   maxTxCount?: number;
+  period?: { amount: bigint; seconds: number; start: number };
 }
 
 export type SolanaSessionKeyStatus =
@@ -86,6 +87,8 @@ interface StoredSolanaSessionKey extends Omit<SolanaSessionKeyInfo, "status"> {
   status: SolanaSessionKeyStatus;
   keyPair: EncryptedKeyPair;
   lastUsedAt: number;
+  periodIndex?: number;
+  periodSpent?: bigint;
 }
 
 export interface SolanaSessionKeyConfig {
@@ -144,7 +147,9 @@ function recordBinding(key: {
 }): `0x${string}` {
   const { scope } = key;
   const facts = JSON.stringify([
-    "naculus-solana-session-key/v1",
+    scope.period
+      ? "naculus-solana-session-key/v2"
+      : "naculus-solana-session-key/v1",
     key.id,
     key.address,
     key.owner,
@@ -157,6 +162,13 @@ function recordBinding(key: {
     scope.allowedRecipients,
     scope.expiry,
     scope.maxTxCount ?? null,
+    ...(scope.period
+      ? [
+          scope.period.amount.toString(),
+          scope.period.seconds,
+          scope.period.start,
+        ]
+      : []),
   ]);
   return toHex(sha256(utf8ToBytes(facts)));
 }
@@ -223,7 +235,13 @@ export class SolanaSessionKeyManager {
   }
 
   private info(key: StoredSolanaSessionKey): SolanaSessionKeyInfo {
-    const { keyPair: _k, lastUsedAt: _l, ...info } = key;
+    const {
+      keyPair: _k,
+      lastUsedAt: _l,
+      periodIndex: _periodIndex,
+      periodSpent: _periodSpent,
+      ...info
+    } = key;
     const status =
       key.status === "active" && key.scope.expiry <= Date.now() / 1000
         ? "expired"
@@ -280,6 +298,17 @@ export class SolanaSessionKeyManager {
       (!Number.isSafeInteger(scope.maxTxCount) || scope.maxTxCount <= 0)
     ) {
       fail("maxTxCount must be a positive integer.");
+    }
+    if (
+      scope.period !== undefined &&
+      (scope.period.amount <= 0n ||
+        scope.period.amount > scope.budget ||
+        !Number.isSafeInteger(scope.period.seconds) ||
+        scope.period.seconds <= 0 ||
+        !Number.isSafeInteger(scope.period.start) ||
+        scope.period.start < 0)
+    ) {
+      fail("period must have a positive amount within budget and valid times.");
     }
     await assertSolanaCluster(rpc, scope.cluster);
     const mintAccount = await rpc.getAccountInfo(scope.mint);
@@ -532,6 +561,7 @@ export class SolanaSessionKeyManager {
       });
       // Recorded before it is returned; a failed save withholds it.
       key.spent += payment.amount;
+      this.accountPeriod(key, payment.amount);
       key.useCount += 1;
       key.lastUsedAt = Date.now();
       return transaction;
@@ -551,6 +581,7 @@ export class SolanaSessionKeyManager {
     if (key.spent + payment.amount > key.scope.budget) {
       refuse("The amount exceeds the key's remaining budget.");
     }
+    this.checkPeriod(key, payment.amount);
     if (
       key.scope.maxTxCount !== undefined &&
       key.useCount >= key.scope.maxTxCount
@@ -561,5 +592,46 @@ export class SolanaSessionKeyManager {
     if (payment.feePayer === key.address || payment.feePayer === key.owner) {
       refuse("The fee must be paid by the sponsor, not the key or the owner.");
     }
+  }
+
+  private periodState(key: StoredSolanaSessionKey): {
+    index: number;
+    spent: bigint;
+  } | null {
+    const period = key.scope.period;
+    if (!period) return null;
+    const at = Math.floor(Date.now() / 1000);
+    if (at < period.start) refuse("The period has not started.");
+    const index = Math.floor((at - period.start) / period.seconds);
+    const hasIndex = Object.hasOwn(key, "periodIndex");
+    const hasSpent = Object.hasOwn(key, "periodSpent");
+    if (hasIndex !== hasSpent) refuse("The stored period usage is malformed.");
+    if (!hasIndex) return { index, spent: 0n };
+    if (
+      !Number.isSafeInteger(key.periodIndex) ||
+      (key.periodIndex as number) < 0 ||
+      typeof key.periodSpent !== "bigint" ||
+      key.periodSpent < 0n ||
+      (key.periodIndex as number) > index
+    ) {
+      refuse("The stored period usage is malformed.");
+    }
+    return key.periodIndex === index
+      ? { index, spent: key.periodSpent }
+      : { index, spent: 0n };
+  }
+
+  private checkPeriod(key: StoredSolanaSessionKey, amount: bigint): void {
+    const state = this.periodState(key);
+    if (state && state.spent + amount > key.scope.period!.amount) {
+      refuse("The amount exceeds the key's period limit.");
+    }
+  }
+
+  private accountPeriod(key: StoredSolanaSessionKey, amount: bigint): void {
+    const state = this.periodState(key);
+    if (!state) return;
+    key.periodIndex = state.index;
+    key.periodSpent = state.spent + amount;
   }
 }

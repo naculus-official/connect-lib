@@ -77,6 +77,7 @@
   type CompiledMppSessionPolicy
   compileEvmSessionScope
   compileMppSession
+  type CompileOptions
   type CompileResult
   compileSolanaSessionScope
   CONNECTOR_ERROR_MESSAGES
@@ -198,6 +199,7 @@
   getSignatureStatus
   getSolanaBalance
   type Grant
+  type GrantPeriod
   hashSolanaTransactionMessage
   hashUserOperation
   hashUserOperationV06

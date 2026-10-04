@@ -226,6 +226,16 @@ export function caveatsFromScope(
     }
   }
 
+  // Limits the device enforces but no caveat here expresses yet. Building
+  // the delegation without them would hand the delegate more on chain than
+  // the scope allows, so refuse until the matching enforcer is wired.
+  if (Object.keys(scope.tokenMaxPerTx ?? {}).length > 0) {
+    refuse("tokenMaxPerTx has no on-chain caveat yet");
+  }
+  if (Object.keys(scope.periodLimits ?? {}).length > 0) {
+    refuse("periodLimits needs ERC20PeriodTransferEnforcer (not wired yet)");
+  }
+
   const tokens = Object.entries(scope.tokenAllowances ?? {});
   if (tokens.length > 1) refuse("more than one token allowance");
   const recipients = scope.allowedRecipients ?? [];

@@ -1,6 +1,8 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { base58, base64 } from "@scure/base";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SOLANA_MAINNET } from "../../constants";
 import {
   associatedTokenAddress,
@@ -14,6 +16,7 @@ import {
   type SolanaSessionKeyScope,
   SolanaSessionKeyManager,
 } from "../solana-session-keys";
+import { bigintReviver } from "../storage";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const PAY_TO = "2wKupLR9q6wXYppw8Gr2NvWxKBUqm4PPJKkQfoxHDBg4";
@@ -175,6 +178,86 @@ describe("SolanaSessionKeyManager: approval", () => {
         rpc("EtWTRABZaYq6iMfeYKouRu166VU2xqa1xxxxxxxxxxxx"),
       ),
     ).rejects.toMatchObject({ code: "chain_mismatch" });
+  });
+});
+
+describe("SolanaSessionKeyManager: periodic usage", () => {
+  it("enforces a period and resets at the next boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2033-05-18T03:33:20.000Z"));
+    const start = Math.floor(Date.now() / 1000);
+    const { m, info } = await activeKey({
+      period: { amount: 500n, seconds: 10, start },
+    });
+    await m.signPayment(info.id, payment({ amount: 300n }), rpc());
+    await expect(
+      m.signPayment(info.id, payment({ amount: 201n }), rpc()),
+    ).rejects.toThrow(/period limit/);
+    vi.setSystemTime(new Date((start + 10) * 1_000));
+    await expect(
+      m.signPayment(info.id, payment({ amount: 300n }), rpc()),
+    ).resolves.toBeTypeOf("string");
+    vi.useRealTimers();
+  });
+
+  it("refuses malformed period records", async () => {
+    const start = Math.floor(Date.now() / 1000) - 1;
+    const { m, info, adapter } = await activeKey({
+      period: { amount: 500n, seconds: 10, start },
+    });
+    const raw = await adapter.get<string>("solana_session_keys");
+    const records = JSON.parse(
+      typeof raw === "string" ? raw : JSON.stringify(raw),
+    ) as Array<Record<string, unknown>>;
+    const record = records.find((item) => item.id === info.id)!;
+    record.periodIndex = "broken";
+    record.periodSpent = { __bigint__: "0" };
+    await adapter.set("solana_session_keys", JSON.stringify(records) as never);
+    await expect(m.signPayment(info.id, payment(), rpc())).rejects.toThrow(
+      /period usage is malformed/,
+    );
+  });
+
+  it("keeps the legacy v1 scope binding byte-for-byte unchanged", async () => {
+    const adapter = new MemoryStorageAdapter();
+    const m = manager(adapter);
+    const info = await m.createSessionKey(scope(), OWNER, rpc());
+    const raw = await adapter.get<string>("solana_session_keys");
+    const [stored] = JSON.parse(
+      typeof raw === "string" ? raw : JSON.stringify(raw),
+      bigintReviver,
+    ) as Array<{
+      id: string;
+      address: string;
+      owner: string;
+      scope: SolanaSessionKeyScope;
+      tokenProgram: string;
+      decimals: number;
+      keyPair: { publicKey: string };
+    }>;
+    const expected = `0x${bytesToHex(
+      sha256(
+        utf8ToBytes(
+          JSON.stringify([
+            "naculus-solana-session-key/v1",
+            stored.id,
+            stored.address,
+            stored.owner,
+            stored.scope.cluster,
+            stored.scope.mint,
+            stored.tokenProgram,
+            stored.decimals,
+            stored.scope.budget.toString(),
+            stored.scope.maxPerPayment.toString(),
+            stored.scope.allowedRecipients,
+            stored.scope.expiry,
+            stored.scope.maxTxCount ?? null,
+          ]),
+        ),
+      ),
+    )}`;
+    expect(info.scope.period).toBeUndefined();
+    expect(stored.keyPair.publicKey).toBe(expected);
   });
 });
 
