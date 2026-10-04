@@ -51,9 +51,13 @@ of the repository (`npx tsc --noEmit`).
 refuses, with `session_key_invalid_input`, a scope with `mode: "eip7702"` that
 has:
 
-- `tokenMaxPerTx` (no on-chain caveat for it yet);
-- more than one entry in `tokenAllowances`;
-- a `periodLimits` entry for a token other than the single token allowance.
+- `tokenMaxPerTx` (no on-chain caveat for it yet) — the only newly refused
+  field; before 0.10.0 it was dropped silently;
+- a `periodLimits` entry for a token other than the single token allowance
+  (periods are new in 0.10.0).
+
+More than one entry in `tokenAllowances` was already refused before 0.10.0;
+that is unchanged.
 
 **Who is affected.** Only code that builds an `eip7702` `SessionKeyScope` by
 hand and sets one of those. Scopes from the authorization compiler are not

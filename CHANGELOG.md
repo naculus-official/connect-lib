@@ -22,7 +22,7 @@ Recurring payments groundwork: an authorization can now cap spend per period, en
 
 ### Fixed
 
-- **EIP-7702 delegations no longer drop limits they cannot express** (`@naculus/connect-core`) — since 0.8.0, `buildDelegation` silently ignored `tokenMaxPerTx`, producing an on-chain delegation without the per-transaction cap. It now refuses `tokenMaxPerTx`, multiple token allowances and mismatched period limits with `session_key_invalid_input`. Only hand-built `eip7702` scopes that set them are affected; the authorization compiler emits `offchain` scopes, or `eip7702` scopes without `tokenMaxPerTx`.
+- **EIP-7702 delegations no longer drop limits they cannot express** (`@naculus/connect-core`) — since 0.8.0, `buildDelegation` silently ignored `tokenMaxPerTx`, producing an on-chain delegation without the per-transaction cap. It now refuses `tokenMaxPerTx` with `session_key_invalid_input` (multiple token allowances were already refused), and refuses a period limit that does not match the single token allowance. Only hand-built `eip7702` scopes that set them are affected; the authorization compiler emits `offchain` scopes, or `eip7702` scopes without `tokenMaxPerTx`.
 
 ## 0.9.0 — 2026-10-04
 
