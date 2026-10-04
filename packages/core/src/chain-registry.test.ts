@@ -7,7 +7,6 @@
  * - Consistency across entries
  */
 
-
 import { describe, expect, it } from "vitest";
 import { CHAINS, getChainInfo } from "./chain-registry";
 
@@ -16,7 +15,7 @@ describe("chain-registry", () => {
     it("contains all expected chains", () => {
       const expectedChainIds = [
         1, 10, 56, 100, 137, 250, 324, 1101, 8453, 42161, 43114, 59144, 534352,
-        11155111,
+        84532, 11155111,
       ];
       for (const id of expectedChainIds) {
         expect(CHAINS[id]).toBeDefined();
@@ -133,6 +132,15 @@ describe("chain-registry", () => {
     it("returns ChainInfo for Base", () => {
       const info = getChainInfo(8453);
       expect(info.name).toBe("Base");
+    });
+
+    it("provides EIP-3085 metadata for every payment-referenced EVM chain", () => {
+      for (const chainId of [1, 10, 137, 8453, 84532, 42161, 11155111]) {
+        const info = getChainInfo(chainId);
+        expect(info.nativeCurrencyName).toBeTruthy();
+        expect(info.rpcUrls?.[0]).toMatch(/^https:\/\//);
+        expect(info.explorerUrl).toMatch(/^https:\/\//);
+      }
     });
 
     it("throws for unknown chain IDs", () => {

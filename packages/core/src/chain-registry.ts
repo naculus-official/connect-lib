@@ -5,12 +5,18 @@
  * Do NOT create new mapping tables elsewhere — use `CHAINS` and `getChainInfo()`.
  */
 
+import { EIP155_PUBLIC_RPC_URLS } from "./constants";
+
 // ─── ChainInfo Interface ───────────────────────────────────────────────
 
 export interface ChainInfo {
   name: string;
   caip2Id: string; // e.g. "eip155:1"
   nativeCurrency: { symbol: string; decimals: number };
+  /** Full currency name required by EIP-3085 when adding a chain to a wallet. */
+  nativeCurrencyName?: string;
+  /** Public RPC endpoints used by EIP-3085 wallet_addEthereumChain. */
+  rpcUrls?: readonly string[];
   axelarName?: string; // Axelar GMP name (undefined = not supported by Axelar)
   usdcAddress?: string; // ERC-20 USDC address (undefined = no USDC on this chain)
   /** Whether usdcAddress is Circle-issued native USDC or a bridged representation. */
@@ -31,6 +37,8 @@ export const CHAINS: Record<number, ChainInfo> = {
     name: "Ethereum",
     caip2Id: "eip155:1",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
+    nativeCurrencyName: "Ether",
+    rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:1"],
     axelarName: "ethereum",
     usdcAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     usdcVariant: "native",
@@ -44,6 +52,8 @@ export const CHAINS: Record<number, ChainInfo> = {
     name: "Optimism",
     caip2Id: "eip155:10",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
+    nativeCurrencyName: "Ether",
+    rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:10"],
     usdcAddress: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
     usdcVariant: "native",
     usdtAddress: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
@@ -78,6 +88,8 @@ export const CHAINS: Record<number, ChainInfo> = {
     name: "Polygon",
     caip2Id: "eip155:137",
     nativeCurrency: { symbol: "POL", decimals: 18 },
+    nativeCurrencyName: "POL",
+    rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:137"],
     axelarName: "polygon",
     usdcAddress: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
     usdcVariant: "native",
@@ -114,6 +126,8 @@ export const CHAINS: Record<number, ChainInfo> = {
     name: "Base",
     caip2Id: "eip155:8453",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
+    nativeCurrencyName: "Ether",
+    rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:8453"],
     axelarName: "base",
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     usdcVariant: "native",
@@ -125,6 +139,8 @@ export const CHAINS: Record<number, ChainInfo> = {
     name: "Arbitrum",
     caip2Id: "eip155:42161",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
+    nativeCurrencyName: "Ether",
+    rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:42161"],
     axelarName: "arbitrum",
     usdcAddress: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
     usdcVariant: "native",
@@ -162,9 +178,21 @@ export const CHAINS: Record<number, ChainInfo> = {
     name: "Sepolia",
     caip2Id: "eip155:11155111",
     nativeCurrency: { symbol: "ETH", decimals: 18 },
+    nativeCurrencyName: "Sepolia Ether",
+    rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:11155111"],
     entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
     factoryAddress: "0x91E60e0613810449d098b0b5Ec8b51A0FE8c8985",
     explorerUrl: "https://sepolia.etherscan.io",
+  },
+  84532: {
+    name: "Base Sepolia",
+    caip2Id: "eip155:84532",
+    nativeCurrency: { symbol: "ETH", decimals: 18 },
+    nativeCurrencyName: "Ether",
+    rpcUrls: EIP155_PUBLIC_RPC_URLS["eip155:84532"],
+    usdcAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    usdcVariant: "native",
+    explorerUrl: "https://sepolia.basescan.org",
   },
 };
 

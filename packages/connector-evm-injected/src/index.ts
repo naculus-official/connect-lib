@@ -7,6 +7,7 @@ import type {
   WalletCapabilities,
 } from "@naculus/connect-core";
 import {
+  CHAINS,
   CONNECTOR_ERROR_MESSAGES,
   createEmptySession,
   detectPlatform,
@@ -20,11 +21,7 @@ import {
   scopeRequestFrom,
   WalletError,
 } from "@naculus/connect-core";
-import { CHAIN_METADATA } from "./chain";
-import {
-  EIP6963_ANNOUNCE_EVENT,
-  EIP6963_REQUEST_EVENT,
-} from "./discovery";
+import { EIP6963_ANNOUNCE_EVENT, EIP6963_REQUEST_EVENT } from "./discovery";
 import type {
   DiscoveredWallet,
   EIP6963ProviderInfo,
@@ -1072,15 +1069,44 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       });
     } catch (error: unknown) {
       // Error code 4902 = chain not recognized by wallet, add it first
-      const rpcError = error as { code?: number; message?: string } | undefined;
-      if (rpcError?.code === 4902) {
-        const chainParams = CHAIN_METADATA[hexChainId];
-        if (!chainParams) {
+      const rpcError = error as
+        | {
+            code?: number;
+            message?: string;
+            data?: { originalError?: { code?: number } };
+          }
+        | undefined;
+      // Rabby (and MetaMask Mobile) wrap 4902 in an internal error:
+      // { code: -32603, data: { originalError: { code: 4902 } } }.
+      if (
+        rpcError?.code === 4902 ||
+        rpcError?.data?.originalError?.code === 4902
+      ) {
+        const numericChainId = Number(
+          normalizedChainId.slice("eip155:".length),
+        );
+        const chain = CHAINS[numericChainId];
+        if (
+          !chain?.nativeCurrencyName ||
+          !chain.rpcUrls?.length ||
+          !chain.explorerUrl
+        ) {
           throw new WalletError(
             "chain_unsupported",
             `Chain ${hexChainId} is not recognized. No metadata available to add it.`,
           );
         }
+        const chainParams = {
+          chainId: hexChainId,
+          chainName: chain.name,
+          nativeCurrency: {
+            name: chain.nativeCurrencyName,
+            symbol: chain.nativeCurrency.symbol,
+            decimals: chain.nativeCurrency.decimals,
+          },
+          rpcUrls: [...chain.rpcUrls],
+          blockExplorerUrls: [chain.explorerUrl],
+        };
         await eip6963Session.wallet.provider.request({
           method: "wallet_addEthereumChain",
           params: [chainParams],

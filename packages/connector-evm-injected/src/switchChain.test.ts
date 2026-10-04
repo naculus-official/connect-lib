@@ -78,37 +78,58 @@ describe("EIP6963Connector.switchChain", () => {
     );
   });
 
-  it("should add chain via wallet_addEthereumChain on 4902 error and retry switch", async () => {
+  it("adds Base Sepolia via wallet_addEthereumChain on 4902 and retries switch", async () => {
     const providerRequest = provider.request as ReturnType<typeof vi.fn>;
     providerRequest
       .mockRejectedValueOnce({ code: 4902, message: "Chain not recognized" })
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
 
-    await connector.switchChain(session, "eip155:137");
+    await connector.switchChain(session, "eip155:84532");
 
     expect(providerRequest).toHaveBeenCalledTimes(3);
     expect(providerRequest).toHaveBeenNthCalledWith(1, {
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: "0x89" }],
+      params: [{ chainId: "0x14a34" }],
     });
     expect(providerRequest).toHaveBeenNthCalledWith(2, {
       method: "wallet_addEthereumChain",
       params: [
         {
-          chainId: "0x89",
-          chainName: "Polygon Mainnet",
-          nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
-          rpcUrls: ["https://polygon-rpc.com"],
-          blockExplorerUrls: ["https://polygonscan.com"],
+          chainId: "0x14a34",
+          chainName: "Base Sepolia",
+          nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+          rpcUrls: ["https://sepolia.base.org"],
+          blockExplorerUrls: ["https://sepolia.basescan.org"],
         },
       ],
     });
     expect(providerRequest).toHaveBeenNthCalledWith(3, {
       method: "wallet_switchEthereumChain",
-      params: [{ chainId: "0x89" }],
+      params: [{ chainId: "0x14a34" }],
     });
-    expect(session.namespaces.eip155?.chains).toContain("eip155:137");
+    expect(session.namespaces.eip155?.chains).toContain("eip155:84532");
+  });
+
+  it("adds the chain when the wallet wraps 4902 in an internal error (Rabby)", async () => {
+    const providerRequest = provider.request as ReturnType<typeof vi.fn>;
+    // Shape returned by Rabby 0.94 for an unknown chain.
+    providerRequest
+      .mockRejectedValueOnce({
+        code: -32603,
+        message: 'Unrecognized chain ID "0x14a34".',
+        data: { originalError: { code: 4902 } },
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null);
+
+    await connector.switchChain(session, "eip155:84532");
+
+    expect(providerRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ method: "wallet_addEthereumChain" }),
+    );
+    expect(session.namespaces.eip155?.chains).toContain("eip155:84532");
   });
 
   it("should throw chain_unsupported for 4902 error with no chain metadata", async () => {

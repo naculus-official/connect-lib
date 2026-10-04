@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **Injected wallets can add payment-supported EVM chains** (`@naculus/connect-core`, `@naculus/connector-evm-injected`) — `wallet_addEthereumChain` parameters now come from the core chain registry instead of a second connector-only list. The registry includes Base Sepolia (x402/MPP testnet) and add-chain metadata for Ethereum, Sepolia, Base, Arbitrum, Optimism, and Polygon. Unknown-chain errors retain their specific chain-naming message through the public session switch API without changing the `chain_unsupported` code.
+
 ## 0.8.1 — 2026-10-03
 
 Additive; no breaking change.

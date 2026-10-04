@@ -33,5 +33,9 @@ export function createSessionError(
   code: SessionErrorCode,
   details?: unknown,
 ): WalletError {
-  return new WalletError(code, SESSION_ERROR_MESSAGES[code], details);
+  const message =
+    code === "chain_unsupported" && details instanceof Error
+      ? details.message
+      : SESSION_ERROR_MESSAGES[code];
+  return new WalletError(code, message, details);
 }

@@ -24,6 +24,28 @@ export const EIP155_POLYGON = "eip155:137";
 export const EIP155_ARBITRUM = "eip155:42161";
 export const EIP155_OPTIMISM = "eip155:10";
 export const EIP155_BASE = "eip155:8453";
+export const EIP155_BASE_SEPOLIA = "eip155:84532";
+
+/**
+ * Public JSON-RPC endpoints used when asking an injected wallet to add a chain.
+ * Sources (official chain documentation):
+ * - Ethereum/Sepolia: https://ethereum.org/developers/docs/nodes-and-clients/nodes-as-a-service/
+ * - OP Mainnet: https://github.com/ethereum-optimism/superchain-registry/tree/main/superchain/configs/mainnet
+ * - Polygon PoS: https://docs.polygon.technology/pos/reference/rpc-endpoints/
+ * - Base: https://docs.base.org/cookbook/use-case-guides/finance/access-real-time-asset-data-pyth-price-feeds/
+ * - Arbitrum One: https://docs.arbitrum.io/build-decentralized-apps/reference/node-providers
+ */
+export const EIP155_PUBLIC_RPC_URLS: Readonly<
+  Record<string, readonly string[]>
+> = {
+  [EIP155_MAINNET]: ["https://ethereum-rpc.publicnode.com"],
+  [EIP155_SEPOLIA]: ["https://ethereum-sepolia-rpc.publicnode.com"],
+  [EIP155_POLYGON]: ["https://polygon.drpc.org"],
+  [EIP155_ARBITRUM]: ["https://arb1.arbitrum.io/rpc"],
+  [EIP155_OPTIMISM]: ["https://mainnet.optimism.io"],
+  [EIP155_BASE]: ["https://mainnet.base.org"],
+  [EIP155_BASE_SEPOLIA]: ["https://sepolia.base.org"],
+};
 
 /**
  * Common Solana Cluster IDs (CAIP-2 format)

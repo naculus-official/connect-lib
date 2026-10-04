@@ -4,21 +4,18 @@
  * @see SRS-009 §10
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { type SessionManager, createSessionManager } from "../session-manager";
-import { createSessionPersistence } from "../persistence";
-import { MemoryStorageAdapter } from "../../storage";
-import type {
-  ActiveSessionBundle,
-  SessionManagerConfig,
-} from "../types";
-import { parseChainId, validateChainId } from "../types";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ConnectorSupport, UniversalConnector } from "../../connector";
 import {
   type ConnectorManager,
   createConnectorManager,
 } from "../../connector-manager";
-import type { UniversalConnector, ConnectorSupport } from "../../connector";
 import type { UniversalWalletSession } from "../../session";
+import { MemoryStorageAdapter } from "../../storage";
+import { createSessionPersistence } from "../persistence";
+import { createSessionManager, type SessionManager } from "../session-manager";
+import type { ActiveSessionBundle, SessionManagerConfig } from "../types";
+import { parseChainId, validateChainId } from "../types";
 
 // ── Mock Connector Factory ─────────────────────────────────────────────
 
@@ -349,7 +346,9 @@ describe("SessionManager", () => {
 
       await expect(manager.switchChain("eip155:137")).rejects.toMatchObject({
         code: "chain_unsupported",
+        message: "embedded signer rejected chain state",
         details: cause,
+        cause,
       });
     });
   });
