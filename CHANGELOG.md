@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.9.0 — 2026-10-04
+
+Additive; no breaking change. Pay x402 from MetaMask, Coinbase Wallet, Rabby, OKX or Phantom with `walletX402Signer`, and switch to chains the wallet has not added yet (Base Sepolia among them).
+
 ### Added
 
 - **External-wallet x402 signer** (`@naculus/payments-x402`) — `walletX402Signer` pays EIP-3009 challenges through an EIP-1193 wallet. It switches to the typed-data chain, maps wallet rejection, and recovers the returned 65-byte signature against the requested account before the payment is sent; smart-contract wallet signatures remain explicitly unsupported.
