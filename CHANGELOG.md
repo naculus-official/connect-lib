@@ -9,11 +9,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- **Periodic authorization limits** (`@naculus/connect-core`) — grants can cap spend in fixed windows in addition to their existing per-payment, lifetime-total, and count limits. The evaluator and EVM/Solana off-chain session-key compilers report device enforcement and fail closed on missing or malformed period usage; MPP periods and `requireOnChain` remain refused until an on-chain compiler is added. Existing scopes, usage records, and Solana v1 scope bindings are unchanged.
+- **Periodic authorization limits** (`@naculus/connect-core`) — grants can cap spend in fixed windows in addition to their existing per-payment, lifetime-total, and count limits. EVM and Solana off-chain session keys report device enforcement; an EVM compiler option emits an `eip7702` scope with MetaMask Delegation Framework v1.3.0 ERC-20 period caveats and reports on-chain enforcement. `requireOnChain` succeeds only for fully caveat-expressible EVM grants and continues to refuse device-only EVM, Solana, and MPP targets. Existing scopes, usage records, and Solana v1 scope bindings are unchanged.
+
+- **Periodic limits on chain** (`@naculus/connect-core`) — `periodLimits` compile to MetaMask Delegation Framework v1.3.0 `ERC20PeriodTransferEnforcer` / `NativeTokenPeriodTransferEnforcer` caveats, and the EVM compiler's `mode: "eip7702"` reports `enforcement: "on-chain"` so `requireOnChain` succeeds where every limit has a caveat. A per-payment cap is accepted on chain when the total or period caveat already bounds a single transfer (e.g. 10 per 30 days, 120 total). Verified on Sepolia: a redeemed delegation paid within a 60-second period, was refused above it, and paid again after the reset. Set `start` from chain time, not the device clock.
 
 ### Fixed
 
-- **EIP-7702 delegations no longer drop limits they cannot express** (`@naculus/connect-core`) — `buildDelegation` silently ignored `tokenMaxPerTx` (since 0.8.0) and would have ignored `periodLimits`, producing an on-chain delegation looser than the session-key scope. Both now refuse with `session_key_invalid_input` until a matching caveat exists. Behavior change only for hand-built `eip7702` scopes that set them; the authorization compiler emits `offchain` scopes and is unaffected.
+- **EIP-7702 delegations no longer drop limits they cannot express** (`@naculus/connect-core`) — `buildDelegation` refuses `tokenMaxPerTx`, multiple token allowances, and mismatched period limits instead of producing a looser on-chain delegation. Expressible ERC-20 and native periods are additional caveats alongside their lifetime-total caveats.
 
 ## 0.9.0 — 2026-10-04
 

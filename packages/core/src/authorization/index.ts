@@ -10,6 +10,7 @@ import type {
   ChannelVoucherKeyManager,
   ChannelVoucherPolicy,
 } from "../session-keys/channel-voucher-keys";
+import { DELEGATION_FRAMEWORK_CHAIN_IDS } from "../session-keys/delegation-framework";
 import type { SessionKeyManager } from "../session-keys/SessionKeyManager";
 import type {
   SolanaSessionKeyInfo,
@@ -128,6 +129,10 @@ export type CompileResult<T> =
 
 export interface CompileOptions {
   requireOnChain?: boolean;
+}
+
+export interface EvmCompileOptions extends CompileOptions {
+  mode?: "offchain" | "eip7702";
 }
 
 export interface CompiledMppSessionPolicy {
@@ -511,9 +516,10 @@ function sameStrings(left: string[], right: string[]): boolean {
 export function compileEvmSessionScope(
   value: Authorization,
   chainId: number,
-  options: CompileOptions = {},
+  options: EvmCompileOptions = {},
 ): CompileResult<SessionKeyScope> {
-  if (options.requireOnChain)
+  const mode = options.mode ?? "offchain";
+  if (options.requireOnChain && mode !== "eip7702")
     return { ok: false, reason: "on-chain enforcement is not available" };
   const authorization = validatedForCompile(value);
   if (typeof authorization === "string")
@@ -558,6 +564,51 @@ export function compileEvmSessionScope(
   const nativeGrant = selected.find(
     (grant) => parseAsset(grant.asset)?.kind === "native",
   );
+  if (mode === "eip7702") {
+    if (!DELEGATION_FRAMEWORK_CHAIN_IDS.includes(chainId)) {
+      return {
+        ok: false,
+        reason: "chain is not supported by the delegation framework",
+      };
+    }
+    if (nativeGrant) {
+      return {
+        ok: false,
+        reason: "native authorization is not faithfully expressible on chain",
+      };
+    }
+    if (tokenGrants.length !== 1) {
+      return {
+        ok: false,
+        reason: "on-chain authorization requires exactly one token grant",
+      };
+    }
+    if (recipients.length > 1) {
+      return {
+        ok: false,
+        reason: "on-chain authorization supports at most one recipient",
+      };
+    }
+    const tokenGrant = tokenGrants[0];
+    // No caveat caps a single transfer, but the lifetime and period caveats
+    // already bound it: one transfer can never exceed min(maxTotal, period).
+    // The declared per-payment cap is honoured on chain only if it is not
+    // tighter than that bound.
+    const onChainPerPaymentBound =
+      tokenGrant.period && tokenGrant.period.amount < tokenGrant.maxTotal
+        ? tokenGrant.period.amount
+        : tokenGrant.maxTotal;
+    if (
+      tokenGrant.maxPerPayment < onChainPerPaymentBound ||
+      tokenGrant.period?.start === 0 ||
+      tokenGrant.rails.some((rail) => rail !== "transfer")
+    ) {
+      return {
+        ok: false,
+        reason: "an EVM grant limit or rail has no on-chain caveat",
+      };
+    }
+  }
   const scope: SessionKeyScope = {
     expiry: authorization.expiresAt,
     maxValuePerTx: nativeGrant?.maxPerPayment ?? 0n,
@@ -571,7 +622,7 @@ export function compileEvmSessionScope(
     ...(nativeGrant
       ? { nativeTransfer: "empty-calldata-to-recipients" as const }
       : {}),
-    mode: "offchain",
+    mode,
     ...(maxCount === undefined ? {} : { maxTxCount: maxCount }),
   };
   const periodLimits: NonNullable<SessionKeyScope["periodLimits"]> = {};
@@ -579,7 +630,9 @@ export function compileEvmSessionScope(
     const asset = parseAsset(grant.asset) as ParsedAsset;
     scope.tokenAllowances ??= {};
     scope.tokenAllowances[asset.address as `0x${string}`] = grant.maxTotal;
-    if (grant.maxPerPayment < grant.maxTotal) {
+    // eip7702: the per-payment cap is implied by the total/period caveats
+    // (checked above), and buildDelegation refuses tokenMaxPerTx.
+    if (mode === "offchain" && grant.maxPerPayment < grant.maxTotal) {
       scope.tokenMaxPerTx ??= {};
       scope.tokenMaxPerTx[asset.address as `0x${string}`] = grant.maxPerPayment;
     }
@@ -589,7 +642,11 @@ export function compileEvmSessionScope(
   }
   if (nativeGrant?.period) periodLimits.native = { ...nativeGrant.period };
   if (Object.keys(periodLimits).length > 0) scope.periodLimits = periodLimits;
-  return { ok: true, scope, enforcement: "device" };
+  return {
+    ok: true,
+    scope,
+    enforcement: mode === "eip7702" ? "on-chain" : "device",
+  };
 }
 
 export function compileSolanaSessionScope(

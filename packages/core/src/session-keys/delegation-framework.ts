@@ -15,7 +15,11 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { createSessionKeyError } from "./errors";
-import { DEFAULT_SESSION_KEY_CONFIG, type SessionKeyScope } from "./types";
+import {
+  DEFAULT_SESSION_KEY_CONFIG,
+  type SessionKeyPeriod,
+  type SessionKeyScope,
+} from "./types";
 
 /**
  * v1.3.0 deployments (github.com/MetaMask/delegation-framework,
@@ -36,8 +40,10 @@ export const DELEGATION_FRAMEWORK = {
     allowedMethods: "0x2c21fD0Cb9DC8445CB3fb0DC5E7Bb0Aca01842B5",
     allowedTargets: "0x7F20f61b1f09b08D970938F6fa563634d65c4EeB",
     erc20TransferAmount: "0xf100b0819427117EcF76Ed94B358B1A5b5C6D2Fc",
+    erc20PeriodTransfer: "0x474e3Ae7E169e940607cC624Da8A15Eb120139aB",
     limitedCalls: "0x04658B29F6b82ed55274221a06Fc97D318E25416",
     nativeTokenTransferAmount: "0xF71af580b9c3078fbc2BBF16FbB8EEd82b330320",
+    nativeTokenPeriodTransfer: "0x9BC0FAf4Aca5AE429F4c06aEEaC517520CB16BD9",
     redeemer: "0xE144b0b2618071B4E56f746313528a669c7E65c5",
     timestamp: "0x1046bb45C8d673d4ea75321280DB34899413c069",
     valueLte: "0x92Bf12322527cAA612fd31a0e810472BBB106A8F",
@@ -118,6 +124,22 @@ function address20(value: string, what: string): string {
 
 function caveat(enforcer: `0x${string}`, termsHex: string): FrameworkCaveat {
   return { enforcer, terms: `0x${termsHex}`, args: "0x" };
+}
+
+function periodTerms(period: SessionKeyPeriod): string {
+  if (
+    typeof period?.amount !== "bigint" ||
+    period.amount <= 0n ||
+    !Number.isSafeInteger(period.seconds) ||
+    period.seconds <= 0 ||
+    !Number.isSafeInteger(period.start) ||
+    period.start <= 0
+  ) {
+    refuse(
+      "a period limit must have positive uint256 amount, seconds, and start",
+    );
+  }
+  return `${word(period.amount)}${word(BigInt(period.seconds))}${word(BigInt(period.start))}`;
 }
 
 function sameAddress(a: string, b: string): boolean {
@@ -226,14 +248,10 @@ export function caveatsFromScope(
     }
   }
 
-  // Limits the device enforces but no caveat here expresses yet. Building
-  // the delegation without them would hand the delegate more on chain than
-  // the scope allows, so refuse until the matching enforcer is wired.
+  // A limit the device enforces but no caveat here expresses. Building the
+  // delegation without it would hand the delegate more authority on chain.
   if (Object.keys(scope.tokenMaxPerTx ?? {}).length > 0) {
     refuse("tokenMaxPerTx has no on-chain caveat yet");
-  }
-  if (Object.keys(scope.periodLimits ?? {}).length > 0) {
-    refuse("periodLimits needs ERC20PeriodTransferEnforcer (not wired yet)");
   }
 
   const tokens = Object.entries(scope.tokenAllowances ?? {});
@@ -277,6 +295,25 @@ export function caveatsFromScope(
         `${address20(token, "the token")}${word(max)}`,
       ),
     );
+    const tokenPeriod = Object.entries(scope.periodLimits ?? {}).find(
+      ([asset]) => sameAddress(asset, token),
+    )?.[1];
+    const unmatchedPeriods = Object.keys(scope.periodLimits ?? {}).filter(
+      (asset) => !sameAddress(asset, token),
+    );
+    if (unmatchedPeriods.length > 0) {
+      refuse("a period limit does not match the single token allowance");
+    }
+    if (tokenPeriod) {
+      // v1.3.0 ERC20PeriodTransferEnforcer.sol lines 128-132: "20 bytes:
+      // ERC20 token address", then three 32-byte amount/duration/start words.
+      caveats.push(
+        caveat(
+          e.erc20PeriodTransfer,
+          `${address20(token, "the token")}${periodTerms(tokenPeriod)}`,
+        ),
+      );
+    }
     caveats.push(caveat(e.valueLte, word(0n)));
     if (recipients.length === 1) {
       caveats.push(
@@ -301,6 +338,20 @@ export function caveatsFromScope(
     if (scope.maxTotalValue !== undefined) {
       caveats.push(
         caveat(e.nativeTokenTransferAmount, word(scope.maxTotalValue)),
+      );
+    }
+    const periods = Object.entries(scope.periodLimits ?? {});
+    if (periods.some(([asset]) => asset !== "native") || periods.length > 1) {
+      refuse("a non-token scope may only have the native period limit");
+    }
+    if (scope.periodLimits?.native) {
+      // v1.3.0 NativeTokenPeriodTransferEnforcer.sol lines 120-123: "32 bytes:
+      // periodAmount", then 32-byte periodDuration and startDate words.
+      caveats.push(
+        caveat(
+          e.nativeTokenPeriodTransfer,
+          periodTerms(scope.periodLimits.native),
+        ),
       );
     }
   }

@@ -140,6 +140,60 @@ describe("delegation framework: encoding", () => {
     ]);
   });
 
+  it("encodes ERC-20 period terms in the Solidity byte layout and caveat order", () => {
+    const period = { amount: 0x1234n, seconds: 0x5678, start: 0x9abc };
+    const caveats = caveatsFromScope(
+      {
+        ...paymentScope,
+        periodLimits: { [USDC]: period },
+      },
+      8453,
+      { delegator: OWNER, delegate: KEY },
+    );
+    expect(caveats.map((c) => c.enforcer)).toEqual([
+      E.timestamp,
+      E.allowedTargets,
+      E.allowedMethods,
+      E.erc20TransferAmount,
+      E.erc20PeriodTransfer,
+      E.valueLte,
+      E.allowedCalldata,
+      E.limitedCalls,
+      E.redeemer,
+    ]);
+    expect(caveats[4]?.terms.toLowerCase()).toBe(
+      `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913${"0".repeat(60)}1234${"0".repeat(60)}5678${"0".repeat(60)}9abc`,
+    );
+  });
+
+  it("encodes native period terms as three packed uint256 words", () => {
+    const caveats = caveatsFromScope(
+      {
+        mode: "eip7702",
+        expiry: 1_800_000_000,
+        allowedContracts: [PAYEE],
+        allowedMethods: ["0x12345678"],
+        maxTotalValue: 100n,
+        periodLimits: {
+          native: { amount: 0x12n, seconds: 0x34, start: 0x56 },
+        },
+      },
+      1,
+      { delegator: OWNER, delegate: KEY },
+    );
+    expect(caveats.map((c) => c.enforcer)).toEqual([
+      E.timestamp,
+      E.allowedTargets,
+      E.allowedMethods,
+      E.nativeTokenTransferAmount,
+      E.nativeTokenPeriodTransfer,
+      E.redeemer,
+    ]);
+    expect(caveats[4]?.terms).toBe(
+      `0x${"0".repeat(62)}12${"0".repeat(62)}34${"0".repeat(62)}56`,
+    );
+  });
+
   it("uses a random salt by default", () => {
     const input = {
       delegator: OWNER,
@@ -159,16 +213,6 @@ describe("delegation framework: refusals", () => {
       { tokenMaxPerTx: { [USDC]: 1_000_000n } },
       8453,
       /tokenMaxPerTx/,
-    ],
-    [
-      "a per-period limit (period enforcer not wired)",
-      {
-        periodLimits: {
-          [USDC]: { amount: 1_000_000n, seconds: 86_400, start: 1_700_000_000 },
-        },
-      },
-      8453,
-      /periodLimits/,
     ],
     ["an unsupported chain", {}, 56, /not a supported/],
     [

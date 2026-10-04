@@ -355,11 +355,13 @@ describe("compilers", () => {
     });
   });
 
-  it("compiles device periods and refuses requireOnChain in phase a", () => {
+  it("reports enforcement and applies the requireOnChain target matrix", () => {
     const period = { amount: 100n, seconds: 10, start: NOW };
     const evm = evmAuthorization({
       notBefore: undefined,
-      grants: [{ ...evmAuthorization().grants[0], period }],
+      grants: [
+        { ...evmAuthorization().grants[0], period, rails: ["transfer"] },
+      ],
     });
     const solana = solanaAuthorization({
       grants: [{ ...solanaAuthorization().grants[0], period }],
@@ -368,6 +370,19 @@ describe("compilers", () => {
       ok: true,
       enforcement: "device",
       scope: { periodLimits: { [TOKEN]: period } },
+    });
+    expect(
+      compileEvmSessionScope(evm, 1, {
+        mode: "eip7702",
+        requireOnChain: true,
+      }),
+    ).toMatchObject({
+      ok: true,
+      enforcement: "on-chain",
+      scope: {
+        mode: "eip7702",
+        periodLimits: { [TOKEN]: period },
+      },
     });
     expect(compileSolanaSessionScope(solana, SOLANA_MAINNET)).toMatchObject({
       ok: true,
@@ -386,6 +401,109 @@ describe("compilers", () => {
       compileMppSession(mppAuthorization(), SOLANA_MAINNET, context(), {
         requireOnChain: true,
       }),
+    ).toMatchObject({ ok: false });
+  });
+
+  it.each([
+    [
+      "a zero period start",
+      evmAuthorization({
+        notBefore: undefined,
+        grants: [
+          {
+            ...evmAuthorization().grants[0],
+            period: { amount: 1n, seconds: 1, start: 0 },
+            rails: ["transfer"],
+          },
+        ],
+      }),
+      1,
+    ],
+    [
+      "multiple tokens",
+      evmAuthorization({
+        notBefore: undefined,
+        grants: [
+          evmAuthorization().grants[0],
+          {
+            ...evmAuthorization().grants[0],
+            asset: `eip155:1/erc20:${OTHER_EVM}`,
+          },
+        ],
+      }),
+      1,
+    ],
+    [
+      "tokenMaxPerTx",
+      evmAuthorization({
+        notBefore: undefined,
+        grants: [
+          {
+            ...evmAuthorization().grants[0],
+            maxPerPayment: 1n,
+          },
+        ],
+      }),
+      1,
+    ],
+    [
+      "an unsupported framework chain",
+      evmAuthorization({
+        principal: `eip155:56:${EVM_OWNER}`,
+        notBefore: undefined,
+        grants: [
+          {
+            ...evmAuthorization().grants[0],
+            asset: `eip155:56/erc20:${TOKEN}`,
+            rails: ["transfer"],
+          },
+        ],
+      }),
+      56,
+    ],
+  ])("refuses on-chain EVM compilation with %s", (_name, value, chainId) => {
+    expect(
+      compileEvmSessionScope(value, chainId, {
+        mode: "eip7702",
+        requireOnChain: true,
+      }),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("compiles a subscription on chain when the period bounds each payment", () => {
+    // 10 per 30 days, 120 in total: no caveat caps a single transfer, but the
+    // period caveat makes one above 10 impossible, so per-payment 10 holds.
+    const period = { amount: 10n, seconds: 2_592_000, start: NOW };
+    const value = evmAuthorization({
+      notBefore: undefined,
+      grants: [
+        {
+          ...evmAuthorization().grants[0],
+          maxPerPayment: 10n,
+          maxTotal: 120n,
+          period,
+          rails: ["transfer"],
+        },
+      ],
+    });
+    const compiled = compileEvmSessionScope(value, 1, {
+      mode: "eip7702",
+      requireOnChain: true,
+    });
+    expect(compiled).toMatchObject({ ok: true, enforcement: "on-chain" });
+    if (!compiled.ok) throw new Error("unreachable");
+    expect(compiled.scope.tokenMaxPerTx).toBeUndefined();
+    expect(compiled.scope.periodLimits).toEqual({ [TOKEN]: period });
+    // A per-payment cap tighter than the period cannot be honoured on chain.
+    expect(
+      compileEvmSessionScope(
+        evmAuthorization({
+          notBefore: undefined,
+          grants: [{ ...value.grants[0], maxPerPayment: 5n }],
+        }),
+        1,
+        { mode: "eip7702", requireOnChain: true },
+      ),
     ).toMatchObject({ ok: false });
   });
 

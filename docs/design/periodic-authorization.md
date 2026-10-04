@@ -73,6 +73,14 @@ charges need an on-chain limit.
   can be allowed locally and refused on chain — the on-chain verdict wins and
   is surfaced as a failed payment, never retried in a way that skips the check.
 
+## Start time (found on Sepolia, 2026-10-04)
+
+The on-chain enforcer compares `block.timestamp`, which lags the device clock
+by a block or more. A period whose `start` is "now" by the device clock can be
+refused as `transfer-not-started` on the first charge. Set `start` from the
+latest block's timestamp (or earlier), never from `Date.now()` alone; the
+enforcer also requires `start > 0`.
+
 ## Tests
 
 - Differential: generated requests across period boundaries — evaluator verdict

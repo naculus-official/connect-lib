@@ -164,6 +164,7 @@
   EthCallProvider
   ETHEREUM_MAINNET_TOKENS
   evaluateSpend
+  type EvmCompileOptions
   type ExecutionPlan
   type ExecutionRequirements
   type ExecutionStrategy
