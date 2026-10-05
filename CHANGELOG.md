@@ -11,6 +11,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - **Circle CCTP V2 bridge provider** (`@naculus/connect-core/cctp`, a separate entry so apps that do not bridge never load it) — `CctpBridgeProvider` quotes a USDC → USDC route from Circle's fee API and returns two route steps: an exact `approve` (never unlimited) and `depositForBurnWithHook` with the Forwarding Service hook, so Circle mints native USDC on the destination and the user needs no gas there. `waitForCctpAttestation` polls Iris with a bounded timeout; calldata builders for `depositForBurn` / `receiveMessage` cover the non-forwarding path. Only native USDC on chains with a CCTP domain; anything else is refused. Verified live: 1 USDC burned on Sepolia, attestation in 11 s, 0.945597 native USDC minted on Base Sepolia to an address with no Base Sepolia ETH. Sepolia's Circle USDC is now in the chain registry.
 
+### Changed
+
+- **Session-key errors say why** (`@naculus/connect-core`) — a session-key error's `message` now ends with the specific reason (e.g. `Session key signing input is invalid. signerAddress must be a non-zero EVM address.`) instead of only the generic text for its code. The appended reason has control characters replaced and is capped at 200 code points; `code` and `details` are unchanged, so code matching on `code` is unaffected. Code that compares the full `message` string must be updated.
+
 ### Fixed
 
 - **Period `start` must be after zero** (`@naculus/connect-core`) — `validateAuthorization` accepted a grant `period` with `start: 0`, which the on-chain period enforcers refuse; it now refuses it (`invalid grant period`), so device and on-chain enforcement agree.

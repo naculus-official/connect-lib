@@ -49,6 +49,31 @@ export const SESSION_KEY_ERROR_MESSAGES: Record<SessionKeyErrorCode, string> = {
   session_key_invalid_input: "Session key signing input is invalid.",
 };
 
+const DISPLAY_DETAIL_MAX_CODE_POINTS = 200;
+
+function getDisplayDetail(details: unknown): string | undefined {
+  if (typeof details !== "string") return undefined;
+
+  const withoutControls = Array.from(details, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint <= 0x1f ||
+      (codePoint >= 0x7f && codePoint <= 0x9f) ||
+      codePoint === 0x2028 ||
+      codePoint === 0x2029
+      ? " "
+      : character;
+  }).join("");
+  const cleaned = withoutControls.replace(/\s+/g, " ").trim();
+  if (!cleaned) return undefined;
+
+  const codePoints = Array.from(cleaned);
+  if (codePoints.length > DISPLAY_DETAIL_MAX_CODE_POINTS) {
+    return `${codePoints.slice(0, DISPLAY_DETAIL_MAX_CODE_POINTS).join("")}…`;
+  }
+
+  return /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
+}
+
 /**
  * Create a WalletError with a session-key-specific error code.
  */
@@ -56,9 +81,10 @@ export function createSessionKeyError(
   code: SessionKeyErrorCode,
   details?: unknown,
 ): WalletError {
-  return new WalletError(
-    code as unknown as any,
-    SESSION_KEY_ERROR_MESSAGES[code],
-    details,
-  );
+  const displayDetail = getDisplayDetail(details);
+  const message = displayDetail
+    ? `${SESSION_KEY_ERROR_MESSAGES[code]} ${displayDetail}`
+    : SESSION_KEY_ERROR_MESSAGES[code];
+
+  return new WalletError(code as unknown as any, message, details);
 }
