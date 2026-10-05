@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.11.0 — 2026-10-05
+
+Native USDC across chains: a Circle CCTP V2 bridge that needs no gas on the destination chain. Session-key errors now say why they were raised. Additive except one message format change (see Changed). Packages other than `@naculus/connect-core` (and the `@naculus/connect` umbrella that re-exports it) are version bump only.
+
 ### Added
 
 - **Circle CCTP V2 bridge provider** (`@naculus/connect-core/cctp`, a separate entry so apps that do not bridge never load it) — `CctpBridgeProvider` quotes a USDC → USDC route from Circle's fee API and returns two route steps: an exact `approve` (never unlimited) and `depositForBurnWithHook` with the Forwarding Service hook, so Circle mints native USDC on the destination and the user needs no gas there. `waitForCctpAttestation` polls Iris with a bounded timeout; calldata builders for `depositForBurn` / `receiveMessage` cover the non-forwarding path. Only native USDC on chains with a CCTP domain; anything else is refused. Verified live: 1 USDC burned on Sepolia, attestation in 11 s, 0.945597 native USDC minted on Base Sepolia to an address with no Base Sepolia ETH. Sepolia's Circle USDC is now in the chain registry.
