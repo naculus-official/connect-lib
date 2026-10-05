@@ -120,6 +120,17 @@ inline and each got it wrong differently: one invented a "no" for a wallet that
 was never asked, one read `Boolean({ supported: false })` as true, one accepted
 `status: "supported"` and dropped `"ready"`.
 
+## Documentation
+
+Guides:
+
+- [Upgrading from 0.7 to 0.10](docs/guides/upgrading-to-0.10.md) — what changed in 0.8.0–0.10.0 and the one action needed (hand-built `eip7702` scopes).
+- [Paying x402 from an external wallet](docs/guides/x402-external-wallet.md) — MetaMask, Coinbase Wallet, Rabby, OKX or Phantom with `walletX402Signer` + `createX402Fetch`, then `verifyX402Settlement`.
+- [Charging with x402 on your server](docs/guides/x402-server.md) — `requirePayment` + `settlePayment`, settled with viem.
+- [Periodic authorization](docs/guides/periodic-authorization.md) — per-period spending limits, enforced by the device or on chain.
+
+Reference: [docs overview](docs/README.md), [architecture](docs/ARCHITECTURE.md), [design notes](docs/design/).
+
 ## Development
 
 ```sh

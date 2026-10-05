@@ -133,25 +133,29 @@ describe("validateAuthorization", () => {
     ["invalid count", invalidGrant({ maxCount: 0 })],
     [
       "zero period amount",
-      invalidGrant({ period: { amount: 0n, seconds: 1, start: 0 } }),
+      invalidGrant({ period: { amount: 0n, seconds: 1, start: 1 } }),
     ],
     [
       "period amount over total",
-      invalidGrant({ period: { amount: 1_001n, seconds: 1, start: 0 } }),
+      invalidGrant({ period: { amount: 1_001n, seconds: 1, start: 1 } }),
     ],
     [
       "non-positive period seconds",
-      invalidGrant({ period: { amount: 1n, seconds: 0, start: 0 } }),
+      invalidGrant({ period: { amount: 1n, seconds: 0, start: 1 } }),
     ],
     [
       "negative period start",
       invalidGrant({ period: { amount: 1n, seconds: 1, start: -1 } }),
     ],
     [
+      "zero period start",
+      invalidGrant({ period: { amount: 1n, seconds: 1, start: 0 } }),
+    ],
+    [
       "period on MPP rail",
       invalidGrant({
         rails: ["mpp-session"],
-        period: { amount: 1n, seconds: 1, start: 0 },
+        period: { amount: 1n, seconds: 1, start: 1 },
       }),
     ],
     ["empty rails", invalidGrant({ rails: [] })],
@@ -166,6 +170,19 @@ describe("validateAuthorization", () => {
     ["duplicate rail", invalidGrant({ rails: ["transfer", "transfer"] })],
   ])("refuses %s", (_name, value) => {
     expect(validateAuthorization(value)).toMatchObject({ ok: false });
+  });
+
+  it("requires a period start after zero, as the on-chain enforcer does", () => {
+    expect(
+      validateAuthorization(
+        invalidGrant({ period: { amount: 1n, seconds: 1, start: 0 } }),
+      ),
+    ).toEqual({ ok: false, reason: "invalid grant period" });
+    expect(
+      validateAuthorization(
+        invalidGrant({ period: { amount: 1n, seconds: 1, start: 1 } }),
+      ),
+    ).toMatchObject({ ok: true });
   });
 
   it("canonicalizes EVM assets, recipients, and principal", () => {
