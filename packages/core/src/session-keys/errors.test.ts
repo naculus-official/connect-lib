@@ -54,6 +54,16 @@ describe("createSessionKeyError", () => {
     expect(error.details).toBe(details);
   });
 
+  it("replaces bidi controls in the message without changing details", () => {
+    const details = "abc\u202Edef\u2066ghi";
+    const error = createSessionKeyError("session_key_invalid_input", details);
+
+    expect(error.message).toBe(
+      "Session key signing input is invalid. abc def ghi.",
+    );
+    expect(error.details).toBe(details);
+  });
+
   it("caps display details at 200 code points plus an ellipsis", () => {
     const details = "😀".repeat(10_000);
     const error = createSessionKeyError("session_key_not_found", details);

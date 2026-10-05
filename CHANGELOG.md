@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- **Session-key error reasons drop bidirectional controls** (`@naculus/connect-core`) — session-key error reasons no longer carry Unicode bidirectional control characters (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) into `message`; they become spaces like other control characters. `code` and `details` are unchanged.
+
 ## 0.11.0 — 2026-10-05
 
 Native USDC across chains: a Circle CCTP V2 bridge that needs no gas on the destination chain. Session-key errors now say why they were raised. Additive except one message format change (see Changed). Packages other than `@naculus/connect-core` (and the `@naculus/connect` umbrella that re-exports it) are version bump only.
