@@ -8,6 +8,22 @@
  */
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
+/** Remove every trailing EIP-712 array dimension without regex backtracking. */
+export function stripEip712ArraySuffix(type: string): string {
+  let end = type.length;
+  while (end > 0 && type.charCodeAt(end - 1) === 93) {
+    let open = end - 2;
+    while (open >= 0) {
+      const code = type.charCodeAt(open);
+      if (code < 48 || code > 57) break;
+      open--;
+    }
+    if (open < 0 || type.charCodeAt(open) !== 91) break;
+    end = open;
+  }
+  return type.slice(0, end);
+}
+
 /** The 32-byte EIP-712 digest of JSON-stringified typed data. */
 export function typedDataSigningHash(typedData: string): Uint8Array {
   const data = JSON.parse(typedData) as {
@@ -32,7 +48,7 @@ export function typedDataSigningHash(typedData: string): Uint8Array {
       for (const field of types[name] ?? []) {
         // Every array suffix: P[2] and P[][] reference P too. Stripping only a
         // trailing [] left P out of the type string for those.
-        const dependency = field.type.replace(/(\[\d*\])+$/, "");
+        const dependency = stripEip712ArraySuffix(field.type);
         if (
           types[dependency] &&
           dependency !== typeName &&

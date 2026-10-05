@@ -43,6 +43,15 @@ test("does not match a version by prefix", () => {
   assert.equal(extractSection("## 0.5.10\n\n- x\n", "0.5.1"), null);
 });
 
+test("treats every metacharacter in a version literally", () => {
+  const changelog = `## 1.0.0+build(1)\n\n- Exact\n\n## 1x0x0build1\n\n- Different\n`;
+  assert.equal(extractSection(changelog, "1.0.0+build(1)"), "- Exact");
+  assert.equal(
+    extractSection("## 1x0x0build1\n\n- Different\n", "1.0.0+build(1)"),
+    null,
+  );
+});
+
 test("refuses a missing or empty section", () => {
   assert.throws(() => releaseNotes(CHANGELOG, PACKAGES, "0.6.0"), /0\.6\.0/);
   assert.throws(

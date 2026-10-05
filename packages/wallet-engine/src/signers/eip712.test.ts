@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { stripEip712ArraySuffix } from "./eip712";
 import { EVMSigner } from "./evm";
 
 /**
@@ -91,6 +92,49 @@ const TRANSFER = {
 };
 
 describe("EIP-712 encoder", () => {
+  it("strips array suffixes exactly like the previous regex", () => {
+    const inputs = [
+      "P",
+      "P[]",
+      "P[2]",
+      "P[][]",
+      "P[2][]",
+      "P[x]",
+      "P[]x",
+      "[]",
+      "[",
+      "]",
+      "P[2",
+      "uint256[3]",
+      "",
+    ];
+    let state = 0x712;
+    const alphabet = "P[]0123456789x";
+    for (let sample = 0; sample < 200; sample++) {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      const length = state % 80;
+      let input = "";
+      for (let index = 0; index < length; index++) {
+        state = (state * 1664525 + 1013904223) >>> 0;
+        input += alphabet[state % alphabet.length];
+      }
+      inputs.push(input);
+    }
+
+    for (const input of inputs) {
+      expect(stripEip712ArraySuffix(input)).toBe(
+        input.replace(/(\[\d*\])+$/, ""),
+      );
+    }
+  });
+
+  it("handles adversarial caller data in under 100 ms", () => {
+    const input = "[]".repeat(100_000) + "x";
+    const startedAt = performance.now();
+    expect(stripEip712ArraySuffix(input)).toBe(input);
+    expect(performance.now() - startedAt).toBeLessThan(100);
+  });
+
   it.each([
     [
       "nested structs, struct arrays, bytes, bool, negative int64",
