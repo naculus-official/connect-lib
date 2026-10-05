@@ -16,6 +16,9 @@
     "jsx": "react-jsx",
     "paths": {
       "@naculus/connect-core": ["./packages/core/src"],
+      "@naculus/connect-core/cctp": [
+        "./packages/core/src/routes/providers/CctpBridgeProvider.ts"
+      ],
       "@naculus/connector-walletconnect": [
         "./packages/connector-walletconnect/src"
       ],
