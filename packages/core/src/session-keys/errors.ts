@@ -51,6 +51,16 @@ export const SESSION_KEY_ERROR_MESSAGES: Record<SessionKeyErrorCode, string> = {
 
 const DISPLAY_DETAIL_MAX_CODE_POINTS = 200;
 
+function isBidiControl(codePoint: number): boolean {
+  return (
+    codePoint === 0x061c ||
+    codePoint === 0x200e ||
+    codePoint === 0x200f ||
+    (codePoint >= 0x202a && codePoint <= 0x202e) ||
+    (codePoint >= 0x2066 && codePoint <= 0x2069)
+  );
+}
+
 function getDisplayDetail(details: unknown): string | undefined {
   if (typeof details !== "string") return undefined;
 
@@ -59,7 +69,8 @@ function getDisplayDetail(details: unknown): string | undefined {
     return codePoint <= 0x1f ||
       (codePoint >= 0x7f && codePoint <= 0x9f) ||
       codePoint === 0x2028 ||
-      codePoint === 0x2029
+      codePoint === 0x2029 ||
+      isBidiControl(codePoint)
       ? " "
       : character;
   }).join("");
