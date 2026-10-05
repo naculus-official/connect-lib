@@ -124,6 +124,7 @@ was never asked, one read `Boolean({ supported: false })` as true, one accepted
 
 Guides:
 
+- [Upgrading from 0.10 to 0.11](docs/guides/upgrading-to-0.11.md) — the CCTP V2 bridge for native USDC (`@naculus/connect-core/cctp`) and session-key error messages that now end with the reason (match on `code`).
 - [Upgrading from 0.7 to 0.10](docs/guides/upgrading-to-0.10.md) — what changed in 0.8.0–0.10.0 and the one action needed (hand-built `eip7702` scopes).
 - [Paying x402 from an external wallet](docs/guides/x402-external-wallet.md) — MetaMask, Coinbase Wallet, Rabby, OKX or Phantom with `walletX402Signer` + `createX402Fetch`, then `verifyX402Settlement`.
 - [Charging with x402 on your server](docs/guides/x402-server.md) — `requirePayment` + `settlePayment`, settled with viem.
