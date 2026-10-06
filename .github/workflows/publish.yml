@@ -27,6 +27,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    environment: npm-publish
 
     steps:
       - uses: actions/checkout@v7
