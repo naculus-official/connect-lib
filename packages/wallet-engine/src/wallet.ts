@@ -2184,24 +2184,18 @@ export class PocketWallet {
     to: `0x${string}`,
     amount: string,
   ): Promise<TransactionResult> {
-    const prevChainId = this.cfg.chainId;
-    this.setChain(`eip155:${chainId}`);
-    try {
-      return await erc20.sendERC20Transfer(
-        {
-          address: this.address,
-          rpcUrl: this.cfg.rpcUrl,
-          chainId: this.cfg.chainId,
-          sendTransaction: (tx) => this.sendTransaction(tx),
-        },
-        chainId,
-        tokenAddress,
-        to,
-        amount,
-      );
-    } finally {
-      this.cfg.chainId = prevChainId;
-    }
+    return erc20.sendERC20Transfer(
+      {
+        address: this.address,
+        rpcUrl: this.cfg.rpcUrl,
+        chainId: this.cfg.chainId,
+        sendTransaction: (tx) => this.sendTransaction(tx),
+      },
+      chainId,
+      tokenAddress,
+      to,
+      amount,
+    );
   }
 
   /**
@@ -2214,24 +2208,18 @@ export class PocketWallet {
     spender: `0x${string}`,
     amount: string,
   ): Promise<TransactionResult> {
-    const prevChainId = this.cfg.chainId;
-    this.setChain(`eip155:${chainId}`);
-    try {
-      return await erc20.sendERC20Approve(
-        {
-          address: this.address,
-          rpcUrl: this.cfg.rpcUrl,
-          chainId: this.cfg.chainId,
-          sendTransaction: (tx) => this.sendTransaction(tx),
-        },
-        chainId,
-        tokenAddress,
-        spender,
-        amount,
-      );
-    } finally {
-      this.cfg.chainId = prevChainId;
-    }
+    return erc20.sendERC20Approve(
+      {
+        address: this.address,
+        rpcUrl: this.cfg.rpcUrl,
+        chainId: this.cfg.chainId,
+        sendTransaction: (tx) => this.sendTransaction(tx),
+      },
+      chainId,
+      tokenAddress,
+      spender,
+      amount,
+    );
   }
 
   /**
