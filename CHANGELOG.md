@@ -7,7 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- **MPP session policy pins the token (breaking)** (`@naculus/payments-mpp`, `@naculus/connect-core`) — `MppSessionPolicy` requires `mint`, and `createMppSessionFetch` refuses a session challenge for any other mint before creating a voucher key or asking the wallet to sign. Previously a payee could name a different token and the policy's base-unit limits (deposit, price, cumulative) applied to it. `compileMppSession` now includes the grant's mint in the client policy (`CompiledMppSessionPolicy.mint`). Add `mint` to hand-written policies.
+
 ### Fixed
+
+- **Encrypted wallet storage no longer re-seals under an unverified passphrase** (`@naculus/wallet-engine`) — `EncryptedStorageAdapter.save` asked for the passphrase on every write and replaced the recovery wrap with whatever came back, including an empty string, and after a passkey (PRF) unlock a mistyped passphrase silently replaced the recovery passphrase. It now reuses the passphrase proven in this session (by a load or an earlier save) without asking again, and after a passkey unlock accepts a new passphrase only if it opens the stored recovery wrap. An empty passphrase is refused on save, so a callback that returns `""` now gets `invalid_input`; records sealed under `""` by the old code still load and are re-sealed under the next non-empty passphrase. To change the passphrase, call `destroySession()` (or `EncryptedStorageAdapter.forgetUnlock()`) and save with the new one; `destroySession()` now also forgets the cached passphrase. Stored records are otherwise unchanged. The docs no longer suggest `prompt(...) ?? ""`.
+- **ERC-20 send helpers refuse a different chain** (`@naculus/wallet-engine`) — `PocketWallet.sendERC20Transfer` / `sendERC20Approve` temporarily switched the wallet's chain, which bypassed their own chain check and signed for the requested chain while reading nonce, gas and decimals from (and broadcasting to) the configured chain's RPC. They now refuse a chain other than the configured one with `chain_mismatch` before any RPC call and no longer change wallet state.
+- **Revoking an EIP-7702 session key reports that on-chain revocation is needed** (`@naculus/connect-core`) — `revokeListedAuthorization` returned `onChainRevocationRequired: false` for EIP-7702 keys although the owner-signed delegation stays redeemable on chain until it expires; it now returns `true` for them (the owner must disable the delegation on chain or let it expire). Off-chain EVM keys are unchanged.
 
 - **Session-key error reasons drop bidirectional controls** (`@naculus/connect-core`) — session-key error reasons no longer carry Unicode bidirectional control characters (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) into `message`; they become spaces like other control characters. `code` and `details` are unchanged.
 
