@@ -79,11 +79,9 @@ describe("EncryptedStorageAdapter — passkey unlock", () => {
 
   it("writes both wraps when the authenticator answers", async () => {
     const inner = new MockStorage();
-    const adapter = new EncryptedStorageAdapter(
-      inner,
-      async () => PASSPHRASE,
-      { prf: fakeAuthenticator("device-a") },
-    );
+    const adapter = new EncryptedStorageAdapter(inner, async () => PASSPHRASE, {
+      prf: fakeAuthenticator("device-a"),
+    });
     await adapter.save(walletData);
 
     expect(record(inner).v).toBe(2);
@@ -117,16 +115,17 @@ describe("EncryptedStorageAdapter — passkey unlock", () => {
   // PRF would make this case a lost wallet.
   it("still opens with the passphrase when the authenticator is gone", async () => {
     const inner = new MockStorage();
-    const sealed = new EncryptedStorageAdapter(
-      inner,
-      async () => PASSPHRASE,
-      { prf: fakeAuthenticator("device-a") },
-    );
+    const sealed = new EncryptedStorageAdapter(inner, async () => PASSPHRASE, {
+      prf: fakeAuthenticator("device-a"),
+    });
     await sealed.save(walletData);
     expect(record(inner).wraps.prf).toBeDefined();
 
     // A different browser: no PRF provider configured at all.
-    const elsewhere = new EncryptedStorageAdapter(inner, async () => PASSPHRASE);
+    const elsewhere = new EncryptedStorageAdapter(
+      inner,
+      async () => PASSPHRASE,
+    );
     expect(await elsewhere.load()).toEqual(walletData);
   });
 
@@ -239,6 +238,135 @@ describe("EncryptedStorageAdapter — passkey unlock", () => {
     await expect(wrong.load()).rejects.toThrow("Invalid passphrase");
   });
 
+  it("does not replace the recovery passphrase with an empty save response", async () => {
+    const inner = new MockStorage();
+    const answers = [PASSPHRASE, PASSPHRASE, ""];
+    const adapter = new EncryptedStorageAdapter(
+      inner,
+      async () => answers.shift()!,
+    );
+    await adapter.save(walletData);
+    expect(await adapter.load()).toEqual(walletData);
+
+    await adapter.save({ ...walletData, createdAt: 2 });
+    expect(answers).toEqual([""]);
+    // The record is still sealed under the real passphrase, so "" does not open it.
+    await expect(
+      new EncryptedStorageAdapter(inner, async () => "").load(),
+    ).rejects.toMatchObject({ code: "decryption_failed" });
+    expect(
+      await new EncryptedStorageAdapter(inner, async () => PASSPHRASE).load(),
+    ).toEqual({ ...walletData, createdAt: 2 });
+  });
+
+  it("verifies the recovery passphrase before saving after a PRF unlock", async () => {
+    const inner = new MockStorage();
+    const authenticator = fakeAuthenticator("device-a");
+    await new EncryptedStorageAdapter(inner, async () => PASSPHRASE, {
+      prf: authenticator,
+    }).save(walletData);
+
+    let passphraseCalls = 0;
+    const unlocked = new EncryptedStorageAdapter(
+      inner,
+      async () => {
+        passphraseCalls++;
+        return "typo";
+      },
+      { prf: fakeAuthenticator("device-a") },
+    );
+    expect(await unlocked.load()).toEqual(walletData);
+    expect(passphraseCalls).toBe(0);
+    const before = structuredClone(inner.d);
+
+    await expect(
+      unlocked.save({ ...walletData, createdAt: 2 }),
+    ).rejects.toMatchObject({ code: "decryption_failed" });
+    expect(passphraseCalls).toBe(1);
+    expect(inner.d).toEqual(before);
+    expect(
+      await new EncryptedStorageAdapter(inner, async () => PASSPHRASE, {
+        prf: unavailableAuthenticator,
+      }).load(),
+    ).toEqual(walletData);
+  });
+
+  it("rejects an empty passphrase on the first save", async () => {
+    const inner = new MockStorage();
+    const adapter = new EncryptedStorageAdapter(inner, async () => "");
+
+    await expect(adapter.save(walletData)).rejects.toMatchObject({
+      code: "invalid_input",
+    });
+    expect(inner.d).toBeNull();
+  });
+
+  it("loads an existing v2 record written before passphrase verification", async () => {
+    const inner = new MockStorage();
+    await new EncryptedStorageAdapter(inner, async () => PASSPHRASE, {
+      prf: fakeAuthenticator("device-a"),
+    }).save(walletData);
+    const preVerificationRecord = structuredClone(inner.d);
+
+    const legacyStore = new MockStorage();
+    legacyStore.d = preVerificationRecord;
+    expect(
+      await new EncryptedStorageAdapter(
+        legacyStore,
+        async () => PASSPHRASE,
+      ).load(),
+    ).toEqual(walletData);
+  });
+
+  it("lets a passkey-unlocked record whose recovery wrap is empty rotate to a real passphrase", async () => {
+    const inner = new MockStorage();
+    const seal = new EncryptedStorageAdapter(inner, async () => "unused", {
+      prf: fakeAuthenticator("device-a"),
+    });
+    // Simulate a record the pre-fix save sealed with an empty recovery wrap.
+    (seal as any).verifiedPassphrase = "";
+    await seal.save(walletData);
+    expect(
+      await new EncryptedStorageAdapter(inner, async () => "", {
+        prf: unavailableAuthenticator,
+      }).load(),
+    ).toEqual(walletData);
+
+    const rotate = new EncryptedStorageAdapter(
+      inner,
+      async () => "rotated-passphrase-2026",
+      { prf: fakeAuthenticator("device-a") },
+    );
+    await rotate.save((await rotate.load())!);
+    expect(
+      await new EncryptedStorageAdapter(
+        inner,
+        async () => "rotated-passphrase-2026",
+        {
+          prf: unavailableAuthenticator,
+        },
+      ).load(),
+    ).toEqual(walletData);
+  });
+
+  it("changes the passphrase only after forgetUnlock", async () => {
+    const inner = new MockStorage();
+    let answer = PASSPHRASE;
+    const adapter = new EncryptedStorageAdapter(inner, async () => answer);
+    await adapter.save(walletData);
+    answer = "second-passphrase-2026";
+    await adapter.save(walletData); // reuses the proven passphrase
+    expect(
+      await new EncryptedStorageAdapter(inner, async () => PASSPHRASE).load(),
+    ).toEqual(walletData);
+
+    adapter.forgetUnlock();
+    await adapter.save(walletData);
+    expect(
+      await new EncryptedStorageAdapter(inner, async () => answer).load(),
+    ).toEqual(walletData);
+  });
+
   it("refuses a record whose only wrap is a passkey this device lacks", async () => {
     const inner = new MockStorage();
     const adapter = new EncryptedStorageAdapter(inner, async () => PASSPHRASE, {
@@ -248,10 +376,11 @@ describe("EncryptedStorageAdapter — passkey unlock", () => {
     // Simulate a record written by a build that dropped the passphrase wrap.
     delete inner.d._encrypted.wraps.passphrase;
 
-    const elsewhere = new EncryptedStorageAdapter(inner, async () => PASSPHRASE);
-    await expect(elsewhere.load()).rejects.toThrow(
-      "no passphrase fallback",
+    const elsewhere = new EncryptedStorageAdapter(
+      inner,
+      async () => PASSPHRASE,
     );
+    await expect(elsewhere.load()).rejects.toThrow("no passphrase fallback");
   });
 });
 
@@ -272,7 +401,12 @@ describe("EncryptedStorageAdapter — v1 records", () => {
       ["deriveKey"],
     );
     const key = await crypto.subtle.deriveKey(
-      { name: "PBKDF2", salt: salt as any, iterations: 600_000, hash: "SHA-256" },
+      {
+        name: "PBKDF2",
+        salt: salt as any,
+        iterations: 600_000,
+        hash: "SHA-256",
+      },
       base,
       { name: "AES-GCM", length: 256 },
       false,
@@ -317,6 +451,53 @@ describe("EncryptedStorageAdapter — v1 records", () => {
     expect(record(inner).v).toBe(2);
     expect(record(inner).wraps.prf).toBeDefined();
     expect(record(inner).wraps.passphrase).toBeDefined();
+  });
+
+  it("opens a record sealed under an empty passphrase and requires a real one to save", async () => {
+    // Records the pre-fix save could seal under "" must stay loadable.
+    const inner = new MockStorage();
+    await writeV1(inner, "");
+    const answers = ["", ""];
+    const stuck = new EncryptedStorageAdapter(
+      inner,
+      async () => answers.shift() ?? "",
+    );
+    const loaded = await stuck.load();
+    expect(loaded).toEqual(walletData);
+    await expect(stuck.save(loaded!)).rejects.toMatchObject({
+      code: "invalid_input",
+    });
+
+    const rotate = ["", "a-real-passphrase-2026"];
+    const fixed = new EncryptedStorageAdapter(
+      inner,
+      async () => rotate.shift() ?? "",
+    );
+    await fixed.save((await fixed.load())!);
+    const reopened = new EncryptedStorageAdapter(
+      inner,
+      async () => "a-real-passphrase-2026",
+    );
+    expect(await reopened.load()).toEqual(walletData);
+    const empty = new EncryptedStorageAdapter(inner, async () => "");
+    await expect(empty.load()).rejects.toMatchObject({
+      code: "decryption_failed",
+    });
+  });
+
+  it("overwrites without the old passphrase when nothing was loaded (re-import)", async () => {
+    const inner = new MockStorage();
+    await writeV1(inner, PASSPHRASE);
+    const reimport = new EncryptedStorageAdapter(
+      inner,
+      async () => "new-after-reimport",
+    );
+    await reimport.save(walletData);
+    const reopened = new EncryptedStorageAdapter(
+      inner,
+      async () => "new-after-reimport",
+    );
+    expect(await reopened.load()).toEqual(walletData);
   });
 
   it("still reports a wrong passphrase as such", async () => {

@@ -136,14 +136,23 @@ export interface PocketConfig {
    *
    * When provided, the storage backend is wrapped with EncryptedStorageAdapter
    * regardless of which backend (IndexedDB/localStorage) is active.
-   * The callback is invoked once at wallet creation to derive the encryption key.
+   * The callback may be invoked while loading or saving encrypted wallet data.
+   * Once a passphrase has opened or sealed the record, later saves in the same
+   * session reuse it without asking again; to change it, call
+   * `destroySession()` (or the adapter's `forgetUnlock()`) and save with the
+   * new one. An empty passphrase is refused. Cancel by throwing rather than
+   * returning an empty passphrase.
    *
    * Without this, data is stored as base64 plaintext (default).
    *
    * Example:
    * ```ts
    * const wallet = new PocketWallet({
-   *   encryptionPassphrase: async () => prompt("Enter passphrase:") ?? "",
+   *   encryptionPassphrase: async () => {
+   *     const passphrase = prompt("Enter passphrase:");
+   *     if (passphrase === null) throw new Error("Passphrase entry cancelled");
+   *     return passphrase;
+   *   },
    * });
    * ```
    */
@@ -606,7 +615,7 @@ export class PocketWallet {
    *      c. localStorage → last resort, set _storageDegraded = true
    *
    * AES-GCM encryption is applied when config.encryptionPassphrase is provided.
-   * The passphrase callback is called once at wallet creation.
+   * The passphrase callback may be called while encrypted data is loaded or saved.
    */
   private resolveStorage(config: PocketConfig): StorageAdapter {
     if (config.storage) return config.storage;
@@ -1171,6 +1180,8 @@ export class PocketWallet {
     }
     this.data = null;
     this.dropSessionMgr();
+    // The encrypted adapter caches the passphrase that opens the stored record.
+    (this._storage as { forgetUnlock?: () => void }).forgetUnlock?.();
     // The isolated worker holds its own copy of the EVM key.
     void this.clearSignerKey();
   }

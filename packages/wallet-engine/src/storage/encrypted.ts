@@ -62,6 +62,8 @@ async function deriveKey(
   salt: Uint8Array,
   iterations: number,
 ): Promise<CryptoKey> {
+  // No empty check here: records sealed under "" before 0.11.1 must still
+  // open. save() refuses an empty passphrase before it derives a new wrap.
   const key = await crypto.subtle.importKey(
     "raw",
     textEncode(passphrase) as any,
@@ -162,6 +164,10 @@ export class EncryptedStorageAdapter implements StorageAdapter {
   private prfKeyCache: { salt: string; key: CryptoKey } | null = null;
   private prfAvailability: PrfAvailability = "none";
   private sealedWith: UnlockMethod[] | null = null;
+  /** Non-empty passphrase proven in this session to open the stored record. */
+  private verifiedPassphrase: string | null = null;
+  /** The stored record was opened through PRF, so no passphrase was proven. */
+  private openedViaPrf = false;
 
   constructor(
     inner: StorageAdapter,
@@ -262,6 +268,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
         key,
         hex2buf(enc.ciphertext) as any,
       );
+      this.rememberVerified(passphrase);
       this.sealedWith = ["passphrase"];
       return JSON.parse(textDecode(new Uint8Array(decrypted))) as WalletData;
     } catch {
@@ -305,7 +312,9 @@ export class EncryptedStorageAdapter implements StorageAdapter {
               hex2buf(prfWrap.key) as any,
             ),
           );
-          return await this.decryptData(dataKey, iv, ciphertext);
+          const data = await this.decryptData(dataKey, iv, ciphertext);
+          this.openedViaPrf = true;
+          return data;
         } catch {
           // A stored PRF wrap that will not open means this authenticator is
           // not the one that sealed it. Drop the cache so a later save does
@@ -336,6 +345,7 @@ export class EncryptedStorageAdapter implements StorageAdapter {
           hex2buf(passWrap.key) as any,
         ),
       );
+      this.rememberVerified(passphrase);
       return await this.decryptData(dataKey, iv, ciphertext);
     } catch {
       throw new WalletError(
@@ -370,7 +380,85 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     return this.prfSalt;
   }
 
+  private rememberVerified(passphrase: string): void {
+    this.openedViaPrf = false;
+    // An empty passphrase opens a legacy record but is never reused: the next
+    // save asks for a real one.
+    this.verifiedPassphrase = passphrase.length > 0 ? passphrase : null;
+  }
+
+  /**
+   * The passphrase the next save seals the recovery wrap with.
+   *
+   * Reuses the passphrase proven at load. Otherwise asks for one and refuses
+   * an empty answer. Only when this session opened the record through PRF
+   * (so the recovery passphrase was never proven) must the new answer open
+   * the stored passphrase wrap first: replacing it with an unchecked value
+   * would make a typo permanent. A fresh save without a load (first save,
+   * or re-import after a forgotten passphrase) keeps overwriting as before.
+   */
+  private async passphraseForSave(): Promise<string> {
+    if (this.verifiedPassphrase !== null) return this.verifiedPassphrase;
+
+    const passphrase = await this.getPassphrase();
+    if (passphrase.length === 0) {
+      throw new WalletError(
+        "invalid_input",
+        "Encryption passphrase must not be empty",
+      );
+    }
+    if (this.openedViaPrf) {
+      const opens = await this.opensStoredPassphraseWrap(passphrase);
+      // A wrap sealed under "" (a pre-0.11.1 record) protects nothing, so
+      // replacing it with a real passphrase needs no proof.
+      if (!opens && !(await this.opensStoredPassphraseWrap(""))) {
+        throw new WalletError(
+          "decryption_failed",
+          "Invalid passphrase or corrupted data",
+        );
+      }
+    }
+    // Remembered only after the write succeeds (see save()).
+    return passphrase;
+  }
+
+  /**
+   * Forget the passphrase and passkey key cached for this session. Call it to
+   * lock, or before changing the passphrase: after a successful load or save,
+   * saves reuse the proven passphrase and do not ask the callback again. The
+   * next save after this asks for a (non-empty) passphrase and seals with it.
+   */
+  forgetUnlock(): void {
+    this.verifiedPassphrase = null;
+    this.openedViaPrf = false;
+    this.prfKeyCache = null;
+  }
+
+  private async opensStoredPassphraseWrap(
+    passphrase: string,
+  ): Promise<boolean> {
+    const stored = (await this.inner.load()) as any;
+    const passWrap = stored?._encrypted?.wraps?.passphrase;
+    if (!passWrap) return false;
+    try {
+      const key = await deriveKey(
+        passphrase,
+        hex2buf(passWrap.salt),
+        passWrap.iterations ?? KEY_ITERATIONS,
+      );
+      await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: hex2buf(passWrap.iv) as any },
+        key,
+        hex2buf(passWrap.key) as any,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async save(data: WalletData): Promise<void> {
+    const passphrase = await this.passphraseForSave();
     const dataKeyBytes = crypto.getRandomValues(
       new Uint8Array(DATA_KEY_LENGTH),
     );
@@ -391,7 +479,6 @@ export class EncryptedStorageAdapter implements StorageAdapter {
     const wraps: Partial<Record<UnlockMethod, WrapEntry>> = {};
 
     // Always written. This is the route back when the authenticator is gone.
-    const passphrase = await this.getPassphrase();
     const passSalt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
     const passIv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const passKek = await deriveKey(passphrase, passSalt, KEY_ITERATIONS);
@@ -438,13 +525,16 @@ export class EncryptedStorageAdapter implements StorageAdapter {
       ciphertext: buf2hex(ciphertext),
       wraps,
     };
-    return this.inner.save({ _encrypted: record } as any);
+    await this.inner.save({ _encrypted: record } as any);
+    this.verifiedPassphrase = passphrase;
   }
 
   async clear(): Promise<void> {
     this.prfKeyCache = null;
     this.prfSalt = null;
     this.sealedWith = null;
+    this.verifiedPassphrase = null;
+    this.openedViaPrf = false;
     return this.inner.clear();
   }
 }
