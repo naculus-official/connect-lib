@@ -59,7 +59,7 @@ export async function revokeAllFor(keys: SessionKeyManager, recipient: string) {
       { evm: keys },
       entry,
     );
-    // true only for Solana delegates: the owner must still sign a revocation.
+    // true for Solana delegates and EIP-7702 delegations: the owner must act on chain.
     if (onChainRevocationRequired) console.warn(entry.keyId);
   }
 }

@@ -142,8 +142,10 @@ session keys and MPP sessions. `listAuthorizations` reads the managers you pass
 (`evm`, `solana`, `mppVoucher`) into one view; legacy unrestricted-recipient
 EVM keys and scopes outside the model are flagged, not hidden.
 `revokeListedAuthorization` routes to the owning manager and reports
-`onChainRevocationRequired: true` for Solana delegates, which still need an
-owner-signed on-chain revocation; it never signs or broadcasts.
+`onChainRevocationRequired: true` for Solana delegates and EIP-7702
+delegations. Solana still needs an owner-signed revocation transaction;
+EIP-7702 needs the owner to call `DelegationManager.disableDelegation` or let
+the delegation expire. The helper never signs or broadcasts.
 
 ```ts
   for (const entry of await listAuthorizations({ evm: keys })) {
@@ -153,7 +155,7 @@ owner-signed on-chain revocation; it never signs or broadcasts.
       { evm: keys },
       entry,
     );
-    // true only for Solana delegates: the owner must still sign a revocation.
+    // true for Solana delegates and EIP-7702 delegations: the owner must act on chain.
     if (onChainRevocationRequired) console.warn(entry.keyId);
   }
 ```

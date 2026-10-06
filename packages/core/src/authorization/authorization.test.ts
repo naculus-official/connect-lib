@@ -1,4 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { base58 } from "@scure/base";
 import { describe, expect, it, vi } from "vitest";
 import { SOLANA_MAINNET } from "../constants";
@@ -7,6 +9,7 @@ import {
   ChannelVoucherKeyManager,
 } from "../session-keys/channel-voucher-keys";
 import { SessionKeyManager } from "../session-keys/SessionKeyManager";
+import { delegationSigningDigest } from "../session-keys/delegation-framework";
 import {
   type SolanaSessionKeyInfo,
   SolanaSessionKeyManager,
@@ -16,6 +19,7 @@ import {
   sessionKeyAddress,
 } from "../session-keys/typed-data";
 import type {
+  SessionKeyInfo,
   SessionKeyScope,
   SessionKeyTransaction,
 } from "../session-keys/types";
@@ -46,6 +50,19 @@ const PROGRAM = "CHNLxDScvchfR2c9YJtDi2tt4LRtkvDVdnFf7bgXDEH";
 const NOW = 2_000_000_000;
 const MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 const BLOCKHASH = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N";
+const EIP7702_OWNER_KEY = new Uint8Array(32).fill(0x42);
+const EIP7702_OWNER = sessionKeyAddress(
+  `0x${bytesToHex(secp256k1.getPublicKey(EIP7702_OWNER_KEY))}`,
+);
+
+function signEip7702Digest(digest: `0x${string}`): `0x${string}` {
+  const signature = secp256k1.sign(
+    hexToBytes(digest.slice(2)),
+    EIP7702_OWNER_KEY,
+    { prehash: false, format: "recovered" },
+  );
+  return `0x${bytesToHex(signature.subarray(1))}${((signature[0] as number) + 27).toString(16)}`;
+}
 
 function solanaRpc(): SolanaPaymentRpc {
   const mint = new Uint8Array(82);
@@ -874,6 +891,73 @@ describe("authorization listing", () => {
     ]);
   });
 
+  it("reports that a revoked EIP-7702 delegation still needs on-chain revocation", async () => {
+    const evm = new SessionKeyManager(
+      {
+        encryptionKey: "test-only",
+        pbkdf2Iterations: 1,
+        unsafeAllowWeakKdf: true,
+      },
+      new MemoryStorageAdapter(),
+    );
+    const info = await evm.createSessionKey(
+      {
+        mode: "eip7702",
+        expiry: Math.floor(Date.now() / 1000) + 3_600,
+        allowedContracts: [TOKEN],
+        allowedMethods: ["0xa9059cbb"],
+        tokenAllowances: { [TOKEN]: 1_000n },
+        allowedRecipients: [EVM_PAYEE],
+        allowedChainIds: [11_155_111],
+      },
+      EIP7702_OWNER,
+    );
+    const delegation = await evm.prepareDelegation(info.id, 11_155_111, 1n);
+    await evm.attachDelegation(
+      info.id,
+      delegation,
+      signEip7702Digest(delegationSigningDigest(delegation)),
+    );
+    const entry = (await listAuthorizations({ evm }))[0]!;
+    expect(entry.enforcer).toBe("evm-session");
+    if (entry.enforcer !== "evm-session") return;
+    expect(entry.raw.scope.mode).toBe("eip7702");
+
+    await expect(revokeListedAuthorization({ evm }, entry)).resolves.toEqual({
+      onChainRevocationRequired: true,
+    });
+    expect(
+      (await evm.listSessions()).find(({ id }) => id === info.id),
+    ).toMatchObject({
+      status: "revoked",
+    });
+  });
+
+  it("reports no on-chain revocation for an offchain EVM key", async () => {
+    const evm = new SessionKeyManager(
+      {
+        encryptionKey: "test-only",
+        pbkdf2Iterations: 1,
+        unsafeAllowWeakKdf: true,
+      },
+      new MemoryStorageAdapter(),
+    );
+    await evm.createSessionKey({
+      mode: "offchain",
+      expiry: Math.floor(Date.now() / 1000) + 3_600,
+      allowedChainIds: [1],
+      allowedContracts: [TOKEN],
+      allowedMethods: ["0xa9059cbb"],
+      tokenAllowances: { [TOKEN]: 1_000n },
+      allowedRecipients: [EVM_PAYEE],
+    });
+    const entry = (await listAuthorizations({ evm }))[0]!;
+
+    await expect(revokeListedAuthorization({ evm }, entry)).resolves.toEqual({
+      onChainRevocationRequired: false,
+    });
+  });
+
   it.each([
     ["evm-session", "revokeSession", false],
     ["solana-session", "revoke", true],
@@ -891,7 +975,10 @@ describe("authorization listing", () => {
           revoke: voucherRevoke,
         } as unknown as ChannelVoucherKeyManager,
       };
-      const raw = { id: "key" } as SolanaSessionKeyInfo | ChannelVoucherKeyInfo;
+      const raw =
+        enforcer === "evm-session"
+          ? ({ id: "key", scope: { mode: "offchain" } } as SessionKeyInfo)
+          : ({ id: "key" } as SolanaSessionKeyInfo | ChannelVoucherKeyInfo);
       const entry = {
         enforcer,
         keyId: "key",

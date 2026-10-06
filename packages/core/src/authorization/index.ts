@@ -996,10 +996,11 @@ export async function listAuthorizations(
 }
 
 /**
- * Revoke the owning manager's local record. Solana delegate authority remains
- * live on chain until the app calls `prepareRevocation`, obtains the owner's
- * signature, and broadcasts that signed transaction; this helper never signs
- * or broadcasts.
+ * Revoke the owning manager's local record. Solana delegate authority and
+ * EIP-7702 delegations remain live on chain. Solana requires the app's signed
+ * `prepareRevocation` transaction; the EIP-7702 owner must call
+ * `DelegationManager.disableDelegation` or let the delegation expire. This
+ * helper never signs or broadcasts.
  */
 export async function revokeListedAuthorization(
   managers: AuthorizationManagers,
@@ -1008,7 +1009,9 @@ export async function revokeListedAuthorization(
   if (entry.enforcer === "evm-session") {
     if (!managers.evm) throw new Error("EVM session-key manager is required");
     await managers.evm.revokeSession(entry.keyId);
-    return { onChainRevocationRequired: false };
+    return {
+      onChainRevocationRequired: entry.raw.scope.mode === "eip7702",
+    };
   }
   if (entry.enforcer === "solana-session") {
     if (!managers.solana)
