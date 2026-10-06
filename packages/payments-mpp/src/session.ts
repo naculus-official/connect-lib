@@ -47,6 +47,11 @@ export interface MppSessionRpc extends SolanaPaymentRpc {
 export interface MppSessionPolicy {
   /** Exact server/payee the app permits. */
   recipient: string;
+  /**
+   * SPL mint the app pays with. The challenge must name exactly this mint;
+   * every other limit here is in base units of it.
+   */
+  mint: string;
   /** Exact price per metered unit, in token base units. */
   amount: bigint;
   /** Initial token deposit. */
@@ -389,7 +394,9 @@ export function createMppSessionFetch(
     policy.maxCumulative > policy.deposit ||
     policy.maxDelta <= 0n ||
     policy.maxDelta > policy.maxCumulative ||
-    !Number.isSafeInteger(policy.expiresAt)
+    !Number.isSafeInteger(policy.expiresAt) ||
+    typeof policy.mint !== "string" ||
+    !isValidAddress(policy.mint, "solana")
   ) {
     fail("invalid_input", "The session policy limits are invalid.");
   }
@@ -534,6 +541,14 @@ export function createMppSessionFetch(
       fail("invalid_challenge", "The Solana session challenge has expired.");
     }
     const session = readSessionRequest(challenge);
+    // Before any RPC, key or signature: the policy limits are base units of
+    // the policy mint, so a challenge for another token is out of policy.
+    if (session.currency !== policy.mint) {
+      fail(
+        "invalid_challenge",
+        "The challenged mint is not the app policy mint.",
+      );
+    }
 
     await assertSolanaCluster(rpc, session.cluster);
     const trusted = await assertTrustedChannelProgram(

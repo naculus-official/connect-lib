@@ -137,6 +137,8 @@ export interface EvmCompileOptions extends CompileOptions {
 
 export interface CompiledMppSessionPolicy {
   recipient: string;
+  /** SPL mint of the grant asset; MPP session fetch refuses other mints. */
+  mint: string;
   amount: bigint;
   deposit: bigint;
   maxCumulative: bigint;
@@ -772,6 +774,7 @@ export function compileMppSession(
       },
       client: {
         recipient,
+        mint,
         amount: context.pricePerUnit,
         deposit: context.deposit,
         maxCumulative: grant.maxTotal,

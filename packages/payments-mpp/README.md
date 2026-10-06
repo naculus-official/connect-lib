@@ -89,9 +89,11 @@ the HTTP request later fails. Do not retry a failed request with the same
 voucher request is in flight remain pending for the next voucher.
 
 Pass a `ChannelVoucherKeyManager`, the connected owner wallet, and an RPC that
-implements `isBlockhashValid`. The policy pins the one payee and per-unit
-price, deposit, cumulative/delta limits, expiry, and minimum forced-close grace
-period (one hour by default). Before the wallet signs, the client checks the
+implements `isBlockhashValid`. The policy pins the one payee, the token
+(`mint`; every amount is in its base units), per-unit price, deposit,
+cumulative/delta limits, expiry, and minimum forced-close grace period (one
+hour by default). A challenge naming any other mint is refused before any key
+is created or anything is signed. Before the wallet signs, the client checks the
 RPC cluster, the reviewed channel-program address/deployment, mint and
 Token-2022 extensions, challenge policy, and server blockhash. Operator-signed
 vouchers, resume, top-up, and distribution co-recipients are refused.
@@ -103,6 +105,7 @@ const pay = createMppSessionFetch({
   keyManager: voucherKeys,
   policy: {
     recipient: merchant,
+    mint: USDC_MINT, // the token every amount below is denominated in
     amount: 10n,
     deposit: 1_000_000n,
     maxCumulative: 1_000_000n,

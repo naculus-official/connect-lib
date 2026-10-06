@@ -668,6 +668,8 @@ describe("authorization listing", () => {
     const mppCompiled = compileMppSession(mppValue, SOLANA_MAINNET, context());
     expect(mppCompiled.ok).toBe(true);
     if (!mppCompiled.ok) return;
+    // The client policy pins the grant's mint, the same one the voucher key seals.
+    expect(mppCompiled.scope.client.mint).toBe(mppCompiled.scope.voucher.mint);
     const mppVoucher = new ChannelVoucherKeyManager(
       {
         encryptionKey: "listing-test",

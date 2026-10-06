@@ -169,6 +169,7 @@ function receipt(reference: string, accepted = "0") {
 function policy() {
   return {
     recipient: PAYEE,
+    mint: MINT,
     amount: 10n,
     deposit: 1_000n,
     maxCumulative: 800n,
@@ -640,6 +641,53 @@ describe("createMppSessionFetch", () => {
       expect(signer.seen).toHaveLength(0);
     },
   );
+
+  it("refuses a challenge for a different mint before creating a key or signing", async () => {
+    // A valid mint with the same decimals that the payee names instead of
+    // the app's token: the policy limits are base units of the policy mint.
+    const OTHER_MINT = "So11111111111111111111111111111111111111112";
+    const base = rpc();
+    const otherMint = new Uint8Array(82);
+    otherMint[44] = 6;
+    otherMint[45] = 1;
+    const solanaRpc = rpc({
+      getAccountInfo: async (address) =>
+        address === OTHER_MINT
+          ? { owner: SOLANA_PROGRAMS.token, data: otherMint }
+          : base.getAccountInfo(address),
+    });
+    const signer = wallet();
+    const keyManager = manager();
+    const create = vi.spyOn(keyManager, "create");
+    const fetch = async () =>
+      new Response(null, {
+        status: 402,
+        headers: {
+          "WWW-Authenticate": challenge(request({ currency: OTHER_MINT })),
+        },
+      });
+    const pay = createMppSessionFetch({
+      rpc: solanaRpc,
+      signer,
+      keyManager,
+      policy: policy(),
+      fetch: fetch as typeof globalThis.fetch,
+    });
+    await expect(pay(URL_)).rejects.toThrow(/not the app policy mint/);
+    expect(create).not.toHaveBeenCalled();
+    expect(signer.seen).toHaveLength(0);
+  });
+
+  it("refuses a policy without a valid Solana mint", () => {
+    expect(() =>
+      createMppSessionFetch({
+        rpc: rpc(),
+        signer: wallet(),
+        keyManager: manager(),
+        policy: { ...policy(), mint: "not-a-mint" },
+      }),
+    ).toThrow(/limits are invalid|mint/);
+  });
 
   it("applies the Token-2022 mint-extension screen before wallet signing", async () => {
     const base = rpc();
