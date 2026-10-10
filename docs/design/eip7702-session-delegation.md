@@ -1,6 +1,6 @@
 # Session keys through an EIP-7702 delegated account
 
-Status: design **approved by the user 2026-09-25**, STATE.md thread 17
+Status: design **approved by the user 2026-09-25**,
 (option (b) of the 2026-09-23 decision in `eip7702-execution.md`).
 
 **Decisions (user, 2026-09-25):** the session key pays the redemption gas

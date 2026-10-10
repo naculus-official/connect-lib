@@ -1,6 +1,6 @@
 # CAIP-25 session lifecycle as a core abstraction
 
-Status: design, step 1 of STATE.md thread 13. No code change.
+Status: design, step 1. No code change.
 Date: 2026-09-21.
 
 ## Why

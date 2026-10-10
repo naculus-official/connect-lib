@@ -1,6 +1,6 @@
 # Mobile: what "native/mobile 2/10" actually means, and the first package
 
-Status: design, step 1 of STATE.md thread 4 (promoted from "watch" to a
+Status: design, step 1 (promoted from "watch" to a
 work item on 2026-09-22). No code change.
 
 ## Where Naculus stands
