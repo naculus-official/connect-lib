@@ -1,6 +1,6 @@
 # Paying x402 with an external wallet
 
-Status: **approved 2026-10-04** — decision 1 accepted; decision 2 (a): refuse smart-contract wallet signatures for now with a clear error; decision 3 accepted. Prototype validated with five real wallets on Sepolia (`.ai/reviews/2026-10-04-real-wallet-matrix.md`). Binding rules
+Status: **approved 2026-10-04** — decision 1 accepted; decision 2 (a): refuse smart-contract wallet signatures for now with a clear error; decision 3 accepted. Prototype validated with five real wallets on Sepolia. Binding rules
 from [authorization-boundary.md](./authorization-boundary.md) and
 [authorization-model.md](./authorization-model.md) apply: signing bytes are
 built by audited code, never by the caller; failures are fail-closed.
@@ -92,7 +92,7 @@ facilitator must support it too; most only do ECDSA today.
 
 - Unit (mock provider): chain switch before signing; refusal when the chain
   does not change; refusal when the recovered address differs; 4001 mapping.
-- Real wallets (`.ai/tools/real-wallets`): MetaMask, Rabby, OKX, Coinbase pay a
+- Real wallets: MetaMask, Rabby, OKX, Coinbase pay a
   local x402 server on Base Sepolia with Circle test USDC; the server's
   settlement is checked with `verifyEip3009Settlement`. Needs the test account
   funded with Base Sepolia ETH (gas for the facilitator only) and test USDC.

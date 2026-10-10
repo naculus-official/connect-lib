@@ -27,4 +27,4 @@ Result type: `{ status: "verified", block/slot } | { status: "pending" } | { sta
 2. Confirmation depth is caller-configurable; defaults **EVM 1 block, Solana `confirmed`**.
 
 ## Test plan
-EVM: real Base Sepolia or a recorded receipt fixture from Base mainnet for a known USDC transferWithAuthorization (read-only). Solana: the Surfpool fork harness (.ai/tools/wp3-interop) — charge and session close produce real transactions to verify; negative cases: swapped recipient, wrong amount, another payer's tx, failed tx.
+EVM: real Base Sepolia or a recorded receipt fixture from Base mainnet for a known USDC transferWithAuthorization (read-only). Solana: a local Surfpool fork harness — charge and session close produce real transactions to verify; negative cases: swapped recipient, wrong amount, another payer's tx, failed tx.

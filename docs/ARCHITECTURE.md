@@ -240,7 +240,7 @@ XRPL has no native `signMessage` RPC. Current approach:
 3. User signs via Xaman deeplink
 4. Result is a signed tx blob, not a bare signature
 
-Tracking XLS-0063 proposal status (recorded in `AGENTS.md`).
+XLS-0063 remains a proposal rather than a supported transaction format.
 
 ---
 

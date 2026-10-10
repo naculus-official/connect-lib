@@ -58,8 +58,8 @@ is the next design step, not part of this document.
 2. **Recipients are addresses.** A merchant name or ID is resolved to
    addresses by the product's directory before authorization; the signing
    check compares addresses.
-3. **Chain IDs are CAIP-2**, assets are identified per chain (contract
-   address or mint). See the architectural invariants in `AGENTS.md`.
+3. **Chain IDs are CAIP-2**, and assets are identified per chain by contract
+   address or mint; account and chain selection must remain explicit.
 4. **Fail closed.** Unknown fields, unknown chains, unknown programs and
    unverifiable signatures are refusals, not warnings.
 5. **No hidden broadcast.** Naculus signs; the app decides where a signed
