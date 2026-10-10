@@ -178,6 +178,40 @@ function policy() {
   };
 }
 
+function closeFixture() {
+  const closes: {
+    payload: Record<string, unknown>;
+    resolve: (response: Response) => void;
+  }[] = [];
+  const keys = manager();
+  const fetch = async (input: RequestInfo | URL) => {
+    const req = input as Request;
+    if (!req.headers.has("Authorization")) {
+      return new Response(null, {
+        status: 402,
+        headers: { "WWW-Authenticate": challenge() },
+      });
+    }
+    const payload = credential(req).payload;
+    if (payload.action === "close") {
+      return new Promise<Response>((resolve) => {
+        closes.push({ payload, resolve });
+      });
+    }
+    return new Response(null, {
+      headers: { "Payment-Receipt": receipt(payload.channelId as string) },
+    });
+  };
+  const pay = createMppSessionFetch({
+    rpc: rpc(),
+    signer: wallet(),
+    keyManager: keys,
+    policy: policy(),
+    fetch: fetch as typeof globalThis.fetch,
+  });
+  return { pay, keys, closes };
+}
+
 describe("createMppSessionFetch", () => {
   it("opens, meters vouchers, closes, and matches the WP1 voucher vector layout", async () => {
     const actions: Record<string, unknown>[] = [];
@@ -261,6 +295,157 @@ describe("createMppSessionFetch", () => {
       voucher: second,
     });
     expect(pay.channels).toHaveLength(0);
+  });
+
+  it.each(["original", "replacement"] as const)(
+    "binds delayed concurrent close to its original channel with a %s receipt",
+    async (receiptChannel) => {
+      const { pay, keys, closes } = closeFixture();
+      const revoke = vi.spyOn(keys, "revoke");
+      const original = (await pay(URL_)).channel;
+      expect(original).not.toBeNull();
+      const originalId = original?.channelId as string;
+      await pay(URL_, { units: 2n });
+
+      const first = pay.close();
+      const delayed = pay.close();
+      expect(closes).toHaveLength(2);
+      expect(closes.map(({ payload }) => payload.channelId)).toEqual([
+        originalId,
+        originalId,
+      ]);
+      closes[0]?.resolve(
+        new Response(null, {
+          headers: { "Payment-Receipt": receipt(originalId) },
+        }),
+      );
+      await first;
+      const replacement = (await pay(URL_)).channel;
+      expect(replacement).not.toBeNull();
+      const replacementId = replacement?.channelId as string;
+      expect(replacementId).not.toBe(originalId);
+      await pay(URL_, { units: 3n });
+      const before = await keys.list();
+      const originalKey = before.find(
+        ({ channel }) => channel?.channelId === originalId,
+      );
+      const replacementKey = before.find(
+        ({ channel }) => channel?.channelId === replacementId,
+      );
+      expect(originalKey?.status).toBe("revoked");
+      expect(replacementKey?.status).toBe("active");
+
+      closes[1]?.resolve(
+        new Response(null, {
+          headers: {
+            "Payment-Receipt": receipt(
+              receiptChannel === "original" ? originalId : replacementId,
+            ),
+          },
+        }),
+      );
+      if (receiptChannel === "original") {
+        await expect(delayed).resolves.toMatchObject({
+          channel: { channelId: originalId },
+          receipt: { reference: originalId },
+          settlementBinding: {
+            channelId: originalId,
+            expectedSettled: "20",
+          },
+        });
+        expect(revoke.mock.calls.map(([id]) => id)).toEqual([
+          originalKey?.id,
+          originalKey?.id,
+        ]);
+      } else {
+        await expect(delayed).rejects.toThrow(/matching Solana session receipt/);
+        expect(revoke.mock.calls.map(([id]) => id)).toEqual([originalKey?.id]);
+      }
+      expect(pay.channels).toEqual([replacement]);
+      expect(
+        (await keys.list()).find(({ id }) => id === replacementKey?.id)?.status,
+      ).toBe("active");
+      await expect(pay.forceClose()).rejects.toThrow(
+        /app-supplied sendTransaction/,
+      );
+      await expect(pay(URL_, { units: 1n })).resolves.toMatchObject({
+        channel: { channelId: replacementId },
+      });
+    },
+  );
+
+  it("does not clear a replacement while original-key revocation is pending", async () => {
+    const { pay, keys, closes } = closeFixture();
+    const original = (await pay(URL_)).channel;
+    const originalId = original?.channelId as string;
+    await pay(URL_, { units: 2n });
+    const revokeOriginal = keys.revoke.bind(keys);
+    let releaseRevoke!: () => void;
+    const revokeBlocked = new Promise<void>((resolve) => {
+      releaseRevoke = resolve;
+    });
+    let revokeStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      revokeStarted = resolve;
+    });
+    const revoke = vi.spyOn(keys, "revoke");
+    revoke.mockImplementationOnce(async (id) => {
+      revokeStarted();
+      await revokeBlocked;
+      await revokeOriginal(id);
+    });
+    const delayed = pay.close();
+    closes[0]?.resolve(
+      new Response(null, {
+        headers: { "Payment-Receipt": receipt(originalId) },
+      }),
+    );
+    await started;
+    const firstFinished = pay.close();
+    closes[1]?.resolve(
+      new Response(null, {
+        headers: { "Payment-Receipt": receipt(originalId) },
+      }),
+    );
+    await firstFinished;
+    const replacement = (await pay(URL_)).channel;
+    const replacementId = replacement?.channelId as string;
+    expect(replacementId).not.toBe(originalId);
+    await pay(URL_, { units: 3n });
+    const replacementKey = (await keys.list()).find(
+      ({ channel }) => channel?.channelId === replacementId,
+    );
+    expect(replacementKey?.status).toBe("active");
+
+    releaseRevoke();
+    await expect(delayed).resolves.toMatchObject({
+      channel: { channelId: originalId },
+      settlementBinding: { channelId: originalId, expectedSettled: "20" },
+    });
+    expect(pay.channels).toEqual([replacement]);
+    expect(revoke).not.toHaveBeenCalledWith(replacementKey?.id);
+    expect(
+      (await keys.list()).find(({ id }) => id === replacementKey?.id)?.status,
+    ).toBe("active");
+  });
+
+  it("keeps the submitted final voucher in a delayed close settlement binding", async () => {
+    const { pay, closes } = closeFixture();
+    const channelId = (await pay(URL_)).channel?.channelId as string;
+    await pay(URL_, { units: 2n });
+    const closing = pay.close();
+    expect(closes[0]?.payload.voucher).toMatchObject({
+      voucher: { cumulativeAmount: "20" },
+    });
+    await pay(URL_, { units: 3n });
+    closes[0]?.resolve(
+      new Response(null, {
+        headers: { "Payment-Receipt": receipt(channelId, "20") },
+      }),
+    );
+    await expect(closing).resolves.toMatchObject({
+      settlementBinding: { channelId, expectedSettled: "20" },
+    });
   });
 
   it("never signs beyond the meter or the local voucher limit", async () => {

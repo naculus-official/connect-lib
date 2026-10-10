@@ -436,6 +436,7 @@ export function createMppSessionFetch(
     request: Request,
     challenge: MppChallenge,
     payload: Record<string, unknown>,
+    channel: MppOpenChannel,
   ): Promise<MppSessionFetchResult> {
     const credential = encodeCredential({
       challenge: challenge.params,
@@ -452,8 +453,7 @@ export function createMppSessionFetch(
         "The server rejected the session credential.",
       );
     }
-    const channel = active?.channel ?? null;
-    const receipt = channel ? receiptFor(response, channel.channelId) : null;
+    const receipt = receiptFor(response, channel.channelId);
     return { response, receipt, channel };
   }
 
@@ -496,11 +496,16 @@ export function createMppSessionFetch(
       const voucher = signedVoucher(signed, active.keyAddress);
       active.lastVoucher = voucher;
       active.endpoint = request.clone();
-      const result = await paidRequest(request, active.challenge, {
-        action: "voucher",
-        channelId: active.channel.channelId,
-        voucher,
-      });
+      const result = await paidRequest(
+        request,
+        active.challenge,
+        {
+          action: "voucher",
+          channelId: active.channel.channelId,
+          voucher,
+        },
+        active.channel,
+      );
       return result;
     }
 
@@ -748,35 +753,41 @@ export function createMppSessionFetch(
     channels: { get: () => channels.map((channel) => ({ ...channel })) },
     close: {
       value: async () => {
-        if (!active) fail("invalid_input", "There is no open channel.");
-        if (!active.keyId)
+        const snapshot = active;
+        if (!snapshot) fail("invalid_input", "There is no open channel.");
+        const keyId = snapshot.keyId;
+        const finalVoucher = snapshot.lastVoucher;
+        if (!keyId)
           fail(
             "invalid_input",
             "The channel open was not acknowledged; use forceClose for recovery.",
           );
-        if (!active.lastVoucher)
+        if (!finalVoucher)
           fail("invalid_input", "A final voucher is required before close.");
         const result = await paidRequest(
-          active.endpoint.clone(),
-          active.challenge,
+          snapshot.endpoint.clone(),
+          snapshot.challenge,
           {
             action: "close",
-            channelId: active.channel.channelId,
-            voucher: active.lastVoucher,
+            channelId: snapshot.channel.channelId,
+            voucher: finalVoucher,
           },
+          snapshot.channel,
         );
-        const voucher = active.lastVoucher.voucher as {
+        const voucher = finalVoucher.voucher as {
           cumulativeAmount: string;
         };
         const settlementBinding: MppSessionSettlementBinding = {
-          cluster: active.channel.cluster,
-          channelId: active.channel.channelId,
-          channelProgram: active.channel.channelProgram,
+          cluster: snapshot.channel.cluster,
+          channelId: snapshot.channel.channelId,
+          channelProgram: snapshot.channel.channelProgram,
           expectedSettled: voucher.cumulativeAmount,
         };
-        await keyManager.revoke(active.keyId);
-        channels.splice(0, channels.length);
-        active = undefined;
+        await keyManager.revoke(keyId);
+        // A delayed close owns only its original channel, never a replacement.
+        const index = channels.indexOf(snapshot.channel);
+        if (index >= 0) channels.splice(index, 1);
+        if (active === snapshot) active = undefined;
         return { ...result, settlementBinding };
       },
     },
