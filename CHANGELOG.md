@@ -7,12 +7,18 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.12.0 — 2026-10-11
+
+Security-audit release: wallet storage, chain checks and MPP channel identity are hardened. One breaking change for MPP sessions (see Changed). Packages other than `@naculus/payments-mpp`, `@naculus/connect-core` and `@naculus/wallet-engine` (and the `@naculus/connect` umbrella that re-exports them) are version bump only.
+
 ### Changed
 
 - **MPP session policy pins the token (breaking)** (`@naculus/payments-mpp`, `@naculus/connect-core`) — `MppSessionPolicy` requires `mint`, and `createMppSessionFetch` refuses a session challenge for any other mint before creating a voucher key or asking the wallet to sign. Previously a payee could name a different token and the policy's base-unit limits (deposit, price, cumulative) applied to it. `compileMppSession` now includes the grant's mint in the client policy (`CompiledMppSessionPolicy.mint`). Add `mint` to hand-written policies.
 
 ### Fixed
 
+- **A delayed MPP close only affects its own channel** (`@naculus/payments-mpp`) — a cooperative `close()` or a `forceClose()` that resolved after a replacement channel had been opened revoked or forgot the replacement: `close()` revoked the current key and bound the receipt to the current channel, and both cleared every channel. Each close now acts only on the channel it started with — its key, its receipt, its final voucher — and leaves a replacement channel and its key in place.
+- **EIP-712 type parsing runs in linear time** (`@naculus/wallet-engine`) — stripping array dimensions from a dapp-supplied field type used a backtracking regular expression, so a long run of `[]` groups could stall the signing worker. Type strings and signing hashes are unchanged.
 - **Encrypted wallet storage no longer re-seals under an unverified passphrase** (`@naculus/wallet-engine`) — `EncryptedStorageAdapter.save` asked for the passphrase on every write and replaced the recovery wrap with whatever came back, including an empty string, and after a passkey (PRF) unlock a mistyped passphrase silently replaced the recovery passphrase. It now reuses the passphrase proven in this session (by a load or an earlier save) without asking again, and after a passkey unlock accepts a new passphrase only if it opens the stored recovery wrap. An empty passphrase is refused on save, so a callback that returns `""` now gets `invalid_input`; records sealed under `""` by the old code still load and are re-sealed under the next non-empty passphrase. To change the passphrase, call `destroySession()` (or `EncryptedStorageAdapter.forgetUnlock()`) and save with the new one; `destroySession()` now also forgets the cached passphrase. Stored records are otherwise unchanged. The docs no longer suggest `prompt(...) ?? ""`.
 - **ERC-20 send helpers refuse a different chain** (`@naculus/wallet-engine`) — `PocketWallet.sendERC20Transfer` / `sendERC20Approve` temporarily switched the wallet's chain, which bypassed their own chain check and signed for the requested chain while reading nonce, gas and decimals from (and broadcasting to) the configured chain's RPC. They now refuse a chain other than the configured one with `chain_mismatch` before any RPC call and no longer change wallet state.
 - **Revoking an EIP-7702 session key reports that on-chain revocation is needed** (`@naculus/connect-core`) — `revokeListedAuthorization` returned `onChainRevocationRequired: false` for EIP-7702 keys although the owner-signed delegation stays redeemable on chain until it expires; it now returns `true` for them (the owner must disable the delegation on chain or let it expire). Off-chain EVM keys are unchanged.
