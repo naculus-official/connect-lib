@@ -829,8 +829,10 @@ export function createMppSessionFetch(
           }),
         );
         if (snapshot.keyId) await keyManager.revoke(snapshot.keyId);
-        channels.splice(0, channels.length);
-        active = undefined;
+        // A delayed force close owns only its original channel, never a replacement.
+        const index = channels.indexOf(snapshot.channel);
+        if (index >= 0) channels.splice(index, 1);
+        if (active === snapshot) active = undefined;
         return {
           requestCloseTxHash,
           settlementBinding,

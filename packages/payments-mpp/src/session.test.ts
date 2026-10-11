@@ -448,6 +448,95 @@ describe("createMppSessionFetch", () => {
     });
   });
 
+  it("binds delayed force close cleanup to its original channel", async () => {
+    const closes: ((response: Response) => void)[] = [];
+    const keys = manager();
+    const base = rpc();
+    let delayBlockhash = false;
+    let releaseBlockhash!: () => void;
+    const blockedBlockhash = new Promise<void>((resolve) => {
+      releaseBlockhash = resolve;
+    });
+    let blockhashRequested!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      blockhashRequested = resolve;
+    });
+    const pay = createMppSessionFetch({
+      rpc: rpc({
+        getLatestBlockhash: async () => {
+          if (delayBlockhash) {
+            blockhashRequested();
+            await blockedBlockhash;
+          }
+          return BLOCKHASH;
+        },
+        getAccountInfo: base.getAccountInfo,
+      }),
+      signer: wallet(),
+      keyManager: keys,
+      policy: policy(),
+      fetch: (async (input: RequestInfo | URL) => {
+        const req = input as Request;
+        if (!req.headers.has("Authorization")) {
+          return new Response(null, {
+            status: 402,
+            headers: { "WWW-Authenticate": challenge() },
+          });
+        }
+        const payload = credential(req).payload;
+        if (payload.action === "close") {
+          return new Promise<Response>((resolve) => closes.push(resolve));
+        }
+        return new Response(null, {
+          headers: {
+            "Payment-Receipt": receipt(payload.channelId as string),
+          },
+        });
+      }) as typeof globalThis.fetch,
+      sendTransaction: async () => "force-close-tx",
+    });
+    const original = (await pay(URL_)).channel;
+    const originalId = original?.channelId as string;
+    await pay(URL_, { units: 2n });
+    const originalKey = (await keys.list()).find(
+      ({ channel }) => channel?.channelId === originalId,
+    );
+
+    delayBlockhash = true;
+    const forced = pay.forceClose();
+    await requestStarted;
+    const closing = pay.close();
+    closes[0]?.(
+      new Response(null, {
+        headers: { "Payment-Receipt": receipt(originalId) },
+      }),
+    );
+    await closing;
+    delayBlockhash = false;
+    const replacement = (await pay(URL_)).channel;
+    const replacementId = replacement?.channelId as string;
+    const replacementKey = (await keys.list()).find(
+      ({ channel }) => channel?.channelId === replacementId,
+    );
+    releaseBlockhash();
+
+    await expect(forced).resolves.toMatchObject({
+      requestCloseTxHash: "force-close-tx",
+      settlementBinding: { channelId: originalId, afterForcedClose: true },
+    });
+    expect(pay.channels).toEqual([replacement]);
+    const storedKeys = await keys.list();
+    expect(storedKeys.find(({ id }) => id === originalKey?.id)?.status).toBe(
+      "revoked",
+    );
+    expect(storedKeys.find(({ id }) => id === replacementKey?.id)?.status).toBe(
+      "active",
+    );
+    await expect(pay(URL_, { units: 1n })).resolves.toMatchObject({
+      channel: { channelId: replacementId },
+    });
+  });
+
   it("never signs beyond the meter or the local voucher limit", async () => {
     let channelId = "";
     const fetch = async (input: RequestInfo | URL) => {
