@@ -13,7 +13,7 @@ Patch release with dependency updates. No SDK source or public API changes.
 
 ### Changed
 
-- **Updated viem minimum** (`@naculus/connector-reown`, `@naculus/connector-wagmi`, `@naculus/siwx`) — raise the dependency range from `^2.56.5` to `^2.57.3`.
+- **Updated viem minimum** (`@naculus/connector-reown`, `@naculus/connector-wagmi`, `@naculus/siwx`) — raise the dependency range from `^2.56.5` to `^2.57.4`.
 - **Updated umbrella package pins** (`@naculus/connect`) — packed workspace dependencies now point to the coordinated 0.12.2 release.
 - **Development tooling** — update API Extractor to 7.59.4 and Testing Library DOM to 10.4.2. Override `source-map-js` to `^1.2.2`, removing the vulnerable 1.2.1 resolution. The transitive `sprintf-js` dependency still has no upstream fix; its vulnerable precision formatter is not reachable through the current API Extractor usage reviewed for this release.
 
