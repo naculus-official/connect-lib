@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.12.1 — 2026-10-11
+
+Patch release. Packages other than `@naculus/connector-evm-injected` (and the `@naculus/connect` umbrella that re-exports it) are version bump only.
+
+### Fixed
+
+- **Injected wallets sharing an account no longer receive each other's requests** (`@naculus/connector-evm-injected`) — with two EIP-6963 wallets connected that expose the same account (for example the same seed in two extensions), `signMessage`, `sendTransaction`, `switchChain`, `sendCalls` and the other session operations were routed to whichever wallet was found first by account, not the wallet the session belongs to, and disconnecting one could remove the other's listeners and session. Operations now resolve the provider by the session's wallet ID and fail closed with the existing `WalletError` when that wallet has no active session; `disconnect()` removes only the session's own wallet.
+
 ## 0.12.0 — 2026-10-11
 
 Security-audit release: wallet storage, chain checks and MPP channel identity are hardened. One breaking change for MPP sessions (see Changed). Packages other than `@naculus/payments-mpp`, `@naculus/connect-core` and `@naculus/wallet-engine` (and the `@naculus/connect` umbrella that re-exports them) are version bump only.
