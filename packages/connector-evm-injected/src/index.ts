@@ -790,8 +790,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
   }
 
   private handleDisconnect(session: UniversalWalletSession): void {
-    const accounts = session.namespaces.eip155?.accounts ?? [];
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (eip6963Session) {
       this.removeEventListeners(eip6963Session.wallet);
@@ -811,28 +810,25 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     }
   }
 
-  /**
-   * Find the active EIP-6963 session that owns any of the given accounts.
-   */
-  private findActiveSession(accounts: string[]): EIP6963Session | undefined {
-    return Array.from(this.activeSessions.values()).find((s) =>
-      s.accounts.some((acc) => accounts.includes(acc)),
-    );
+  private findActiveSession(
+    session: UniversalWalletSession,
+  ): EIP6963Session | undefined {
+    if (!session.walletId) return undefined;
+    const activeSession = this.activeSessions.get(session.walletId);
+    if (!activeSession) return undefined;
+
+    const accounts = session.namespaces.eip155?.accounts ?? [];
+    return activeSession.accounts.some((account) => accounts.includes(account))
+      ? activeSession
+      : undefined;
   }
 
   async disconnect(session: UniversalWalletSession): Promise<void> {
-    const accounts = session.namespaces.eip155?.accounts ?? [];
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (eip6963Session) {
       this.removeEventListeners(eip6963Session.wallet);
       this.activeSessions.delete(eip6963Session.wallet.id);
-    }
-
-    if (session.id?.startsWith("eip6963-")) {
-      const walletId = session.id.replace("eip6963-", "");
-      this.activeSessions.delete(walletId);
-      this.storedEventHandlers.delete(walletId);
     }
   }
 
@@ -876,7 +872,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     assertSessionTransactionFrom({ from: requestedAccount }, accounts);
     const targetAccount = requireEvmAddress(requestedAccount, "address");
 
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -945,7 +941,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -1007,7 +1003,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -1049,7 +1045,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -1183,7 +1179,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
       );
     }
 
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -1260,7 +1256,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
   ): Promise<Record<string, WalletCapabilities>> {
     const accounts = session.namespaces.eip155?.accounts ?? [];
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
 
     if (!eip6963Session) {
       throw new WalletError(
@@ -1308,8 +1304,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
     bundleHash: string,
   ): Promise<void> {
-    const accounts = session.namespaces.eip155?.accounts ?? [];
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
     if (!eip6963Session?.wallet.provider?.request) {
       throw new WalletError(
         "wallet_unavailable",
@@ -1337,8 +1332,7 @@ class EIP6963ConnectorImpl implements UniversalConnector {
     session: UniversalWalletSession,
     bundleHash: string,
   ): Promise<import("@naculus/connect-core").CallsStatus> {
-    const accounts = session.namespaces.eip155?.accounts ?? [];
-    const eip6963Session = this.findActiveSession(accounts);
+    const eip6963Session = this.findActiveSession(session);
     if (!eip6963Session?.wallet.provider?.request) {
       throw new WalletError(
         "session_expired",
