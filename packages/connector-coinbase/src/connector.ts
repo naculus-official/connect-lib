@@ -901,14 +901,21 @@ export class CoinbaseConnector implements UniversalConnector {
           throw new WalletError(
             "chain_unsupported",
             `Coinbase session is no longer on chain ${resolvedChainId}.`,
+            { sentTransactionHashes: [...txHashes] },
           );
         }
+        const currentAccount = accountForChain(
+          session.namespaces.eip155.accounts,
+          resolvedChainId,
+        );
         if (
-          !accountForChain(session.namespaces.eip155.accounts, resolvedChainId)
+          !currentAccount ||
+          currentAccount.toLowerCase() !== fromAccount.toLowerCase()
         ) {
           throw new WalletError(
             "session_expired",
             CONNECTOR_ERROR_MESSAGES.NO_ACCOUNT_TX,
+            { sentTransactionHashes: [...txHashes] },
           );
         }
         const hash = (await provider.request({

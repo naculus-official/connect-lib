@@ -18,6 +18,7 @@ class InMemoryProvider {
   >();
   private rejectSendCalls?: (reason: unknown) => void;
   changeChainOnFirstFallback = false;
+  changeAccountOnFirstFallback = false;
 
   async request(request: Request): Promise<unknown> {
     this.requests.push(request);
@@ -29,6 +30,12 @@ class InMemoryProvider {
       });
     }
     if (request.method === "eth_sendTransaction") {
+      if (this.changeAccountOnFirstFallback) {
+        this.changeAccountOnFirstFallback = false;
+        this.emit("accountsChanged", [
+          "0x1234567890123456789012345678901234567890",
+        ]);
+      }
       if (this.changeChainOnFirstFallback) {
         this.changeChainOnFirstFallback = false;
         this.emit("chainChanged", "0x2105");
@@ -110,8 +117,23 @@ describe("Coinbase sendCalls fallback chain binding", () => {
     provider.changeChainOnFirstFallback = true;
     provider.rejectPendingSendCalls();
 
-    await expect(result).rejects.toMatchObject({ code: "chain_unsupported" });
+    await expect(result).rejects.toMatchObject({
+      code: "chain_unsupported",
+      details: { sentTransactionHashes: [`0x${"ab".repeat(32)}`] },
+    });
     expect(session.namespaces.eip155.chains).toEqual(["eip155:8453"]);
+    expect(fallbackRequests(provider)).toHaveLength(1);
+  });
+
+  it("stops before the second fallback request when the account changes", async () => {
+    const { provider, result } = await setupFallback();
+    provider.changeAccountOnFirstFallback = true;
+    provider.rejectPendingSendCalls();
+
+    await expect(result).rejects.toMatchObject({
+      code: "session_expired",
+      details: { sentTransactionHashes: [`0x${"ab".repeat(32)}`] },
+    });
     expect(fallbackRequests(provider)).toHaveLength(1);
   });
 });
