@@ -7,6 +7,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.12.3 — 2026-10-12
+
+Patch release. Packages other than `@naculus/connector-coinbase` (and the `@naculus/connect` umbrella that re-exports it) are version bump only.
+
+### Fixed
+
+- **Coinbase transactions are bound to the session chain** (`@naculus/connector-coinbase`) — when `wallet_sendCalls` was rejected as unsupported, the sequential `eth_sendTransaction` fallback sent no `chainId` and never re-checked the chain, so a chain switch in the wallet while the batch prompt was open sent the remaining calls on the new chain. The fallback now fails closed with the existing `WalletError` (`chain_unsupported`, or `session_expired` when the account is gone) if the session chain changes before any request, and every fallback request carries the selected `chainId`. The error's `details.sentTransactionHashes` lists calls already broadcast before the stop, so callers do not resend them. `sendTransaction` and `signTransaction` now also fill an omitted `chainId` with the session chain (a mismatching explicit `chainId` is still rejected), so a signed transaction is always bound to the connected chain.
+
 ## 0.12.2 — 2026-10-11
 
 Patch release with dependency updates. No SDK source or public API changes.
