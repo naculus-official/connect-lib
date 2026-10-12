@@ -436,6 +436,7 @@ describe("CoinbaseConnector", () => {
             to: "0x000000000000000000000000000000000000abcd",
             value: "0x100",
             data: "0x",
+            chainId: "0x1",
           },
         ],
       });

@@ -21,10 +21,7 @@ import {
   WalletError,
 } from "@naculus/connect-core";
 import { CoinbaseProviderAdapter } from "./provider";
-import type {
-  CoinbaseConnectionMode,
-  CoinbaseConnectorConfig,
-} from "./types";
+import type { CoinbaseConnectionMode, CoinbaseConnectorConfig } from "./types";
 
 function requireEvmAddress(value: unknown, field: string): string {
   if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value)) {
@@ -119,7 +116,7 @@ function normalizeEvmTransaction(
     if (normalized[field] !== undefined)
       normalized[field] = normalizeQuantity(normalized[field], field);
   }
-  if (expectedChainId && normalized.chainId !== undefined) {
+  if (expectedChainId) {
     if (!/^eip155:[1-9][0-9]*$/.test(expectedChainId)) {
       throw new WalletError(
         "chain_unsupported",
@@ -130,12 +127,13 @@ function normalizeEvmTransaction(
       expectedChainId.slice("eip155:".length),
       "chainId",
     );
-    if (normalized.chainId !== expected) {
+    if (normalized.chainId !== undefined && normalized.chainId !== expected) {
       throw new WalletError(
         "invalid_input",
         "Transaction chainId does not match the connected Coinbase chain.",
       );
     }
+    normalized.chainId = expected;
   }
   if (
     normalized.maxFeePerGas !== undefined &&
@@ -896,6 +894,23 @@ export class CoinbaseConnector implements UniversalConnector {
       // Fallback: send each call individually
       const txHashes: string[] = [];
       for (const call of calls) {
+        if (
+          this.getDefaultChainId(session) !== resolvedChainId ||
+          !session.namespaces.eip155?.chains.includes(resolvedChainId)
+        ) {
+          throw new WalletError(
+            "chain_unsupported",
+            `Coinbase session is no longer on chain ${resolvedChainId}.`,
+          );
+        }
+        if (
+          !accountForChain(session.namespaces.eip155.accounts, resolvedChainId)
+        ) {
+          throw new WalletError(
+            "session_expired",
+            CONNECTOR_ERROR_MESSAGES.NO_ACCOUNT_TX,
+          );
+        }
         const hash = (await provider.request({
           method: "eth_sendTransaction",
           params: [
@@ -903,6 +918,8 @@ export class CoinbaseConnector implements UniversalConnector {
               from: requireEvmAddress(fromAccount, "from"),
               ...normalizeEvmTransaction(
                 call as unknown as Record<string, unknown>,
+                undefined,
+                resolvedChainId,
               ),
             },
           ],

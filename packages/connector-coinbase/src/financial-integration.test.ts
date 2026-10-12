@@ -160,6 +160,26 @@ describe("Coinbase Financial: sendTransaction value passthrough", () => {
     });
     expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
   });
+
+  it("binds an omitted chainId to the session chain", async () => {
+    mockProvider.request.mockResolvedValueOnce("0x" + "ab".repeat(32));
+    await connector.sendTransaction(session, {
+      transaction: { to: RECIPIENT, value: "0x1", data: "0x" },
+    });
+    expect(mockProvider.request).toHaveBeenCalledWith({
+      method: "eth_sendTransaction",
+      params: [expect.objectContaining({ chainId: "0x1" })],
+    });
+  });
+
+  it("rejects a mismatching chainId before requesting the provider", async () => {
+    await expect(
+      connector.sendTransaction(session, {
+        transaction: { to: RECIPIENT, chainId: "0x2105", data: "0x" },
+      }),
+    ).rejects.toThrow("does not match");
+    expect(mockProvider.request).not.toHaveBeenCalled();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -207,6 +227,26 @@ describe("Coinbase Financial: signTransaction value passthrough", () => {
       method: "eth_signTransaction",
       params: [expect.objectContaining({ value: "0x0" })],
     });
+  });
+
+  it("binds an omitted chainId to the session chain", async () => {
+    mockProvider.request.mockResolvedValueOnce("0xsigned-tx-blob");
+    await connector.signTransaction(session, {
+      transaction: { to: RECIPIENT, value: "0x1", data: "0x" },
+    });
+    expect(mockProvider.request).toHaveBeenCalledWith({
+      method: "eth_signTransaction",
+      params: [expect.objectContaining({ chainId: "0x1" })],
+    });
+  });
+
+  it("rejects a mismatching chainId before requesting the provider", async () => {
+    await expect(
+      connector.signTransaction(session, {
+        transaction: { to: RECIPIENT, chainId: "8453", data: "0x" },
+      }),
+    ).rejects.toThrow("does not match");
+    expect(mockProvider.request).not.toHaveBeenCalled();
   });
 });
 
@@ -276,7 +316,15 @@ describe("Coinbase Financial: sendCalls batch values", () => {
     expect(mockProvider.request).toHaveBeenCalledTimes(3);
     expect(mockProvider.request.mock.calls[1][0]).toEqual({
       method: "eth_sendTransaction",
-      params: [{ from: ACCOUNT, to: RECIPIENT, value: "0x1", data: "0x" }],
+      params: [
+        {
+          from: ACCOUNT,
+          to: RECIPIENT,
+          value: "0x1",
+          data: "0x",
+          chainId: "0x1",
+        },
+      ],
     });
   });
 
