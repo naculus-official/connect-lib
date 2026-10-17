@@ -174,6 +174,11 @@ function checkTransaction(
       "The transfer amount is not the requirement's amount.",
     );
   }
+  // A transfer out of payTo's own token account credits payTo nothing, even
+  // when a delegate signs it. Both are canonical base58 account keys.
+  if (source === destination) {
+    return bad("The transfer's source is its destination.");
+  }
   if (authority === feePayer || source === feePayer) {
     return bad("The fee payer is the transfer's authority or source.");
   }
