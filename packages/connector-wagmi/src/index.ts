@@ -16,12 +16,14 @@ export type { WalletConnectConfig };
 
 function extractEvmAccounts(
   session: UniversalWalletSession,
+  chainId: number,
 ): readonly `0x${string}`[] {
   const accounts = session.namespaces.eip155?.accounts ?? [];
   return accounts.flatMap((account) => {
-    const [namespace, , address] = account.split(":");
+    const [namespace, chainReference, address] = account.split(":");
     if (
       namespace !== "eip155" ||
+      chainReference !== String(chainId) ||
       !address ||
       !/^0x[a-fA-F0-9]{40}$/.test(address)
     )
@@ -177,7 +179,16 @@ export function createNaculusConnector(
         activeConnector = connector;
         currentChainId = parsedChainId;
 
-        const accounts = extractEvmAccounts(session);
+        const accounts = extractEvmAccounts(session, currentChainId);
+        if (accounts.length === 0) {
+          currentSession = undefined;
+          activeConnector = undefined;
+          currentChainId = undefined;
+          throw new WalletError(
+            "session_expired",
+            "No account is available for the selected chain.",
+          );
+        }
 
         emitter.emit("connect", { accounts, chainId: currentChainId });
 
@@ -205,7 +216,13 @@ export function createNaculusConnector(
 
       async getAccounts(): Promise<readonly `0x${string}`[]> {
         if (!currentSession) return [];
-        const accounts = extractEvmAccounts(currentSession);
+        if (currentChainId === undefined) {
+          throw new WalletError(
+            "session_expired",
+            "No active WalletConnect session.",
+          );
+        }
+        const accounts = extractEvmAccounts(currentSession, currentChainId);
         return accounts;
       },
 
@@ -269,11 +286,9 @@ export function createNaculusConnector(
         }
 
         const namespace = currentSession?.namespaces.eip155;
-        if (namespace) {
-          const chainReference = namespace.chains[0]?.split(":")[1];
-          if (!chainReference) return;
+        if (namespace && currentChainId !== undefined) {
           namespace.accounts = accounts.map(
-            (account) => `eip155:${chainReference}:${account}`,
+            (account) => `eip155:${currentChainId}:${account}`,
           );
         }
         emitter.emit("change", { accounts: accounts as `0x${string}`[] });
