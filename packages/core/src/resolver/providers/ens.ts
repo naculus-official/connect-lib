@@ -287,6 +287,11 @@ export class ENSProvider implements ResolverProvider {
       const name = decodeString(result);
       if (!name) return null;
 
+      // 3. Forward-verify: anyone can set a reverse record claiming any
+      // name, so the name is primary only if it resolves back to this address.
+      const forward = await this.resolveName(name);
+      if (!forward || forward.address.toLowerCase() !== cleanAddr) return null;
+
       return {
         name,
         chainType: "eip155",

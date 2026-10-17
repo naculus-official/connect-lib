@@ -178,8 +178,23 @@ describe("ENSProvider", () => {
         result: `0x${offsetHex}${lengthHex}${nameHex}${"0".repeat(42)}`, // padded to 32 bytes
       });
 
+      // Third call: forward resolver for vitalik.eth
+      mockFetch({
+        jsonrpc: "2.0",
+        id: 1,
+        result: `0x000000000000000000000000${resolverAddr.slice(2)}`,
+      });
+
+      // Fourth call: resolver.addr() pointing back to the queried address
+      mockFetch({
+        jsonrpc: "2.0",
+        id: 1,
+        result: `0x${"0".repeat(24)}${address.slice(2)}`,
+      });
+
       const result = await provider.lookupAddress(address);
 
+      expect(fetch).toHaveBeenCalledTimes(4);
       expect(result).not.toBeNull();
       expect(result!.name).toBe("vitalik.eth");
       expect(result!.chainType).toBe("eip155");
