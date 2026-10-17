@@ -350,6 +350,7 @@
   SessionKeyManager
   type SessionKeyManagerConfig
   type SessionKeyPair
+  type SessionKeyRail
   type SessionKeyScope
   type SessionKeyStatus
   SessionKeyStorage
