@@ -102,6 +102,7 @@ describe("TxMonitor - State Transitions", () => {
 
     // Set up receipt from the start — the immediate poll will find it
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64", // 100
       blockHash: "0x" + "g".repeat(64),
       status: "0x1",
@@ -135,6 +136,7 @@ describe("TxMonitor - State Transitions", () => {
 
     // Tx in block 99, current block 101 → 2 confirmations
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x63", // 99
       blockHash: "0x" + "i".repeat(64),
       status: "0x1",
@@ -163,6 +165,7 @@ describe("TxMonitor - State Transitions", () => {
     monitor.on("failed", onFailed);
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "m".repeat(64),
       status: "0x0",
@@ -192,6 +195,7 @@ describe("TxMonitor - State Transitions", () => {
 
     // Set up receipt to be found immediately
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "q".repeat(64),
       status: "0x1",
@@ -218,6 +222,7 @@ describe("TxMonitor - State Transitions", () => {
     monitor.on("statusChange", onStatusChange);
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "u".repeat(64),
       status: "0x1",
@@ -306,6 +311,7 @@ describe("TxMonitor - Reorg Handling", () => {
 
     // First poll: receipt with block hash "0x1...64"
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "1".repeat(64),
       status: "0x1",
@@ -328,6 +334,7 @@ describe("TxMonitor - Reorg Handling", () => {
 
     // Second poll: different block hash = reorg
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "2".repeat(64), // different block hash!
       status: "0x1",
@@ -364,6 +371,7 @@ describe("TxMonitor - Event Management", () => {
     monitor.off("statusChange", fn);
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "e".repeat(64),
       status: "0x1",
@@ -439,14 +447,16 @@ describe("TxMonitor - Event Management", () => {
   });
 
   it("stopWatchingByChain removes all watchers on that chain", async () => {
-    const receipt = {
+    const receipt = (transactionHash: string) => ({
+      transactionHash,
       blockNumber: "0x64",
       blockHash: "0x" + "r".repeat(64),
       status: "0x1",
-    };
-    mockProvider.setReceipt("0x" + "r".repeat(64), receipt);
-    mockProvider.setReceipt("0x" + "s".repeat(64), receipt);
-    mockProvider.setReceipt("0x" + "t".repeat(64), receipt);
+    });
+    for (const h of ["r", "s", "t"]) {
+      const txHash = "0x" + h.repeat(64);
+      mockProvider.setReceipt(txHash, receipt(txHash));
+    }
     mockProvider.setBlockNumber(100); // 0 confs → mined (needs 2 to confirm)
 
     await monitor.watchTx("0x" + "r".repeat(64), 1, {
@@ -531,6 +541,7 @@ describe("TxMonitor - Event Management", () => {
   it("refreshTx with explicit chainId triggers poll", async () => {
     const hash = "0x" + "jj".repeat(32);
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "kk".repeat(32),
       status: "0x1",
@@ -578,6 +589,7 @@ describe("TxMonitor - Event Management", () => {
   it("refreshTx resolves chainId from active watcher", async () => {
     const hash = "0x" + "qq".repeat(32);
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "rr".repeat(32),
       status: "0x1",
@@ -627,6 +639,7 @@ describe("TxMonitor - Event Management", () => {
 
     const hash = "0x" + "uu".repeat(32);
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "yy".repeat(32),
       status: "0x1",
@@ -704,6 +717,7 @@ describe("TxMonitor - Lifecycle & Error Handling", () => {
 
     // First poll succeeds (mined with 2 confirmations needed → stays alive)
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "uu".repeat(32),
       status: "0x1",

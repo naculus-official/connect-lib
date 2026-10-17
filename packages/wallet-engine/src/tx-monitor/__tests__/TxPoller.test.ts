@@ -77,6 +77,7 @@ describe("TxPoller", () => {
     const onError = vi.fn();
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "b".repeat(64),
       status: "0x1",
@@ -102,6 +103,7 @@ describe("TxPoller", () => {
     const onError = vi.fn();
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x63", // 99
       blockHash: "0x" + "d".repeat(64),
       status: "0x1",
@@ -140,6 +142,7 @@ describe("TxPoller", () => {
     const onError = vi.fn();
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "f".repeat(64),
       status: "0x0",
@@ -178,6 +181,7 @@ describe("TxPoller", () => {
     const onError = vi.fn();
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "i".repeat(64),
       status: "0x1",
@@ -201,6 +205,7 @@ describe("TxPoller", () => {
     const onError = vi.fn();
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "k".repeat(64),
       status: "0x1",
@@ -244,6 +249,7 @@ describe("TxPoller", () => {
     const onError = vi.fn();
 
     mockProvider.setReceipt(hash, {
+      transactionHash: hash,
       blockNumber: "0x64",
       blockHash: "0x" + "o".repeat(64),
       status: "0x1",

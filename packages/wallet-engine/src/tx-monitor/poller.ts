@@ -56,6 +56,25 @@ async function getReceipt(provider: ProviderLike, hash: string): Promise<any> {
 }
 
 /**
+ * Whether a receipt returned for `hash` actually names that transaction.
+ *
+ * The JSON-RPC request parameter is otherwise the only link between a watch
+ * and the receipt it receives, so a faulty provider returning
+ * another transaction's receipt would confirm (or fail) the watched one with
+ * foreign block data. A receipt is accepted only when its `transactionHash` is
+ * a string equal to `hash` (hex compared case-insensitively); a missing, null
+ * or non-string field, or a different hash, is rejected. Equality is not proof
+ * of inclusion: a provider that fabricates a matching receipt is outside what
+ * this check can detect.
+ */
+function receiptMatchesHash(receipt: any, hash: string): boolean {
+  const txHash: unknown = receipt?.transactionHash;
+  return (
+    typeof txHash === "string" && txHash.toLowerCase() === hash.toLowerCase()
+  );
+}
+
+/**
  * Fetch the current block number.
  */
 async function getBlockNumber(provider: ProviderLike): Promise<number> {
@@ -274,8 +293,12 @@ export class TxPoller {
       const provider = this.getProvider(entry.chainId);
       const receipt = await getReceipt(provider, entry.hash);
 
-      if (receipt) {
+      if (receipt && receiptMatchesHash(receipt, entry.hash)) {
         await this.handleReceipt(entry, receipt, provider);
+      } else if (receipt) {
+        // Receipt for some other transaction: treat as "no receipt for this
+        // hash yet", but never conclude the watched tx was dropped from it.
+        await this.handleNoReceipt(entry, provider, { checkDropped: false });
       } else {
         await this.handleNoReceipt(entry, provider);
       }
@@ -376,6 +399,7 @@ export class TxPoller {
   private async handleNoReceipt(
     entry: PollEntry,
     provider: ProviderLike,
+    opts: { checkDropped: boolean } = { checkDropped: true },
   ): Promise<void> {
     // Check timeout for pending
     if (Date.now() - entry.createdAt > MAX_PENDING_TIMEOUT_MS) {
@@ -390,22 +414,24 @@ export class TxPoller {
     }
 
     // Check if transaction was dropped or replaced
-    try {
-      const txData = await getTxByHash(provider, entry.hash);
-      if (!txData) {
-        // Transaction not found — check if nonce was consumed (replaced)
-        // We need the from address. Try to get info from status entry
-        entry.callbacks.onStatus({
-          hash: entry.hash,
-          status: "failed",
-          error: "Transaction dropped from mempool",
-          updatedAt: Date.now(),
-        });
-        this.removePoll(`${entry.chainId}:${entry.hash}`);
-        return;
+    if (opts.checkDropped) {
+      try {
+        const txData = await getTxByHash(provider, entry.hash);
+        if (!txData) {
+          // Transaction not found — check if nonce was consumed (replaced)
+          // We need the from address. Try to get info from status entry
+          entry.callbacks.onStatus({
+            hash: entry.hash,
+            status: "failed",
+            error: "Transaction dropped from mempool",
+            updatedAt: Date.now(),
+          });
+          this.removePoll(`${entry.chainId}:${entry.hash}`);
+          return;
+        }
+      } catch {
+        // Ignore errors checking replacement — just report pending
       }
-    } catch {
-      // Ignore errors checking replacement — just report pending
     }
 
     // Still pending
