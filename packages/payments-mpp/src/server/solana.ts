@@ -3,6 +3,7 @@ import {
   verifySolanaSignature,
   type ParsedSolanaTransaction,
   parseSolanaTransaction,
+  readMint,
   SOLANA_PROGRAMS,
   solanaTransactionId,
 } from "@naculus/connect-core";
@@ -50,6 +51,16 @@ export interface MppSolanaSettleRpc {
    * true only when it did and executed without error.
    */
   confirmTransaction(signature: string): Promise<boolean>;
+  /**
+   * `getAccountInfo` of an address; null when it does not exist. Required
+   * for Token-2022 charges: settlement reads the mint and refuses one whose
+   * extensions change what the recipient receives (a transfer fee, a hook,
+   * non-transferable, pausable), since the transaction's TransferChecked
+   * names only the gross amount.
+   */
+  getAccountInfo?(
+    address: string,
+  ): Promise<{ owner: string; data: Uint8Array } | null>;
 }
 
 export interface MppSolanaSettleDeps {
@@ -342,6 +353,9 @@ export async function settleSolanaTransaction(
       "settleCredential needs solana.rpc for solana charges.",
     );
   }
+  if (request.tokenProgram !== SOLANA_PROGRAMS.token) {
+    await assertUsableMint(request, deps.rpc);
+  }
   let wire = verified.transaction;
   const before = parseSolanaTransaction(wire);
   if (request.feePayerKey) {
@@ -385,4 +399,45 @@ export async function settleSolanaTransaction(
     problem("verification-failed", "The transaction did not confirm.");
   }
   return signature;
+}
+
+/**
+ * Refuse a Token-2022 mint whose extensions would credit the recipient less
+ * than `amount` (or make the transfer behave otherwise), before anything is
+ * signed or sent. A transfer fee is withheld from the recipient's account,
+ * so a TransferChecked of `amount` that simulates and confirms can still pay
+ * less than the challenge asked for.
+ */
+async function assertUsableMint(
+  request: SolanaChargeRequest,
+  rpc: MppSolanaSettleRpc,
+): Promise<void> {
+  if (!rpc.getAccountInfo) {
+    throw new TypeError(
+      "settleCredential needs solana.rpc.getAccountInfo for Token-2022 charges.",
+    );
+  }
+  const account = await rpc.getAccountInfo(request.currency);
+  if (!account) {
+    problem("verification-failed", "The mint does not exist.");
+  }
+  let mint: { tokenProgram: string; decimals: number };
+  try {
+    // Refuses TransferFeeConfig, TransferHook, NonTransferable, pausable.
+    mint = readMint(account.owner, account.data);
+  } catch (cause) {
+    problem(
+      "verification-failed",
+      cause instanceof Error ? cause.message : "The mint is not usable.",
+    );
+  }
+  if (
+    mint.tokenProgram !== request.tokenProgram ||
+    mint.decimals !== request.decimals
+  ) {
+    problem(
+      "verification-failed",
+      "The mint does not match the challenge's token program or decimals.",
+    );
+  }
 }
