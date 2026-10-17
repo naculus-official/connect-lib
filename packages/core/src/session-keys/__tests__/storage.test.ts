@@ -1,4 +1,7 @@
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { describe, it, expect } from "vitest";
+import { SessionKeyManager } from "../SessionKeyManager";
 import {
   encryptPrivateKey,
   decryptPrivateKey,
@@ -125,12 +128,14 @@ describe("encryptPrivateKey / decryptPrivateKey", () => {
 
   it("should handle different key sizes", () => {
     const shortKey = "0xdeadbeef" as `0x${string}`;
+    // A 4-byte value has no secp256k1 public key, so the caller must supply
+    // the public field (as the Solana and voucher managers do).
     const encrypted = encryptPrivateKey(
       shortKey,
       password,
       undefined,
       TEST_ITERATIONS,
-      undefined,
+      "0xc0ffee",
       WEAK_KDF,
     );
     const decrypted = decryptPrivateKey(encrypted, password, TEST_ITERATIONS);
@@ -335,5 +340,110 @@ describe("kdfIterations persisted per record", () => {
     const { kdfIterations: _omit, ...legacy } = sealed;
     expect(decryptPrivateKey(legacy, "pw", 1_000)).toBe(pk);
     expect(() => decryptPrivateKey(legacy, "pw", 2_000)).toThrow();
+  });
+});
+
+// Fingerprint: core/session-keys/encryptPrivateKey/default-publicKey-plaintext-secret
+describe("encryptPrivateKey never returns the private key as the public key", () => {
+  const password = "public-validation-password";
+  const privateKey =
+    "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" as const;
+  const derivedPublicKey = `0x${bytesToHex(
+    secp256k1.getPublicKey(hexToBytes(privateKey.slice(2))),
+  )}` as const;
+
+  it("does not return the private key in the public field by default", () => {
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
+
+    expect(encrypted.publicKey).not.toBe(privateKey);
+  });
+
+  it("does not serialize the private key without decryption", () => {
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
+
+    expect(JSON.stringify(encrypted)).not.toContain(privateKey.slice(2));
+  });
+
+  it("derives the secp256k1 public key when none is supplied, and still decrypts", () => {
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      undefined,
+      WEAK_KDF,
+    );
+
+    expect(encrypted.publicKey).toBe(derivedPublicKey);
+    expect(decryptPrivateKey(encrypted, password)).toBe(privateKey);
+  });
+
+  it("fails closed instead of echoing a value that has no public key", () => {
+    for (const bad of [`0x${"00".repeat(32)}`, "0xdeadbeef"] as const) {
+      expect(() =>
+        encryptPrivateKey(
+          bad as `0x${string}`,
+          password,
+          undefined,
+          TEST_ITERATIONS,
+          undefined,
+          WEAK_KDF,
+        ),
+      ).toThrow(/cannot derive a public key/);
+    }
+  });
+
+  it("keeps a supplied public key unchanged", () => {
+    const encrypted = encryptPrivateKey(
+      privateKey,
+      password,
+      undefined,
+      TEST_ITERATIONS,
+      derivedPublicKey,
+      WEAK_KDF,
+    );
+
+    expect(encrypted.publicKey).toBe(derivedPublicKey);
+    expect(JSON.stringify(encrypted)).not.toContain(privateKey.slice(2));
+  });
+
+  it("uses a derived public key in built-in manager storage", async () => {
+    const adapter = new MemoryStorageAdapter();
+    const manager = new SessionKeyManager(
+      {
+        encryptionKey: password,
+        pbkdf2Iterations: TEST_ITERATIONS,
+        unsafeAllowWeakKdf: true,
+        requireAllowedContracts: false,
+      },
+      adapter,
+    );
+    const info = await manager.createSessionKey(
+      { mode: "offchain" },
+      "0x742D35CC6634C0532925a3B844Bc9E7595F2bD18",
+    );
+    const stored = await new SessionKeyStorage(adapter).get(info.id);
+    if (!stored) throw new Error("Expected the manager to persist its key");
+    const decryptedPrivateKey = decryptPrivateKey(stored.keyPair, password);
+
+    expect(stored.keyPair.publicKey).toBe(info.publicKey);
+    expect(stored.keyPair.publicKey).not.toBe(decryptedPrivateKey);
+    expect(JSON.stringify(stored.keyPair)).not.toContain(
+      decryptedPrivateKey.slice(2),
+    );
   });
 });

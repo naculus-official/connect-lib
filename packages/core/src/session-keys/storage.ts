@@ -16,6 +16,7 @@
  */
 
 import { gcm } from "@noble/ciphers/aes.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { hmac } from "@noble/hashes/hmac.js";
 import { pbkdf2 } from "@noble/hashes/pbkdf2.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -146,6 +147,23 @@ function legacyCtrHmacDecrypt(
 
 // ─── API ───────────────────────────────────────────────────────────────
 
+function derivePublicKeyHex(privateKeyBytes: Uint8Array): `0x${string}` {
+  let publicKeyBytes: Uint8Array;
+  try {
+    publicKeyBytes = secp256k1.getPublicKey(privateKeyBytes);
+  } catch {
+    throw new Error(
+      "encryptPrivateKey: cannot derive a public key from the private key",
+    );
+  }
+  if (publicKeyBytes.length !== 33 && publicKeyBytes.length !== 65) {
+    throw new Error(
+      "encryptPrivateKey: derived public key has an invalid length",
+    );
+  }
+  return `0x${bytesToHex(publicKeyBytes)}`;
+}
+
 /**
  * Encrypt a private key hex string for secure storage.
  *
@@ -169,8 +187,10 @@ export function encryptPrivateKey(
   const iv = randomBytes(IV_LENGTH);
   const key = deriveEncryptionKey(password, actualSalt, iterations);
 
-  const resultPublicKey =
-    publicKeyHex ?? (`0x${bytesToHex(pkBytes)}` as `0x${string}`);
+  // Never fall back to the private key: the public field is stored and
+  // serialized in plaintext. Derive the secp256k1 public key the same way
+  // SessionKeyManager does, and fail closed if that does not yield one.
+  const resultPublicKey = publicKeyHex ?? derivePublicKeyHex(pkBytes);
   const aad = hexToBytes(resultPublicKey.slice(2));
   const combined = gcm(key, iv, aad).encrypt(pkBytes);
 
