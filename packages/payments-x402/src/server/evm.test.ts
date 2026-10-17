@@ -660,6 +660,7 @@ describe("round trip with createX402Fetch", () => {
         allowedChainIds: [84532],
         tokenAllowances: { [USDC]: 1_000_000n },
         allowedRecipients: [PAYEE],
+        rails: ["x402-exact"],
       },
       owner,
     );

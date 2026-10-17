@@ -59,6 +59,7 @@ async function sessionSigner(
       tokenAllowances: Object.fromEntries(tokens.map((t) => [t, 1_000_000n])),
       allowedRecipients: [PAYEE],
       allowedChainIds: [84532],
+      rails: ["mpp-charge"],
     },
     OWNER,
   );

@@ -218,6 +218,7 @@ async function paySessionKey(scope: {
       allowedContracts: [USDC],
       allowedChainIds: [84532],
       tokenAllowances: { [USDC]: 1_000_000n },
+      rails: ["x402-exact"],
       ...scope,
     },
     SIGNER,

@@ -46,7 +46,9 @@ export interface MppTypedDataSigner {
 /**
  * A signer backed by a SessionKeyManager. Payee, amount, token and chain are
  * enforced there, not here: give the key `allowedRecipients`,
- * `tokenAllowances` and `allowedChainIds` that describe what it may pay.
+ * `tokenAllowances` and `allowedChainIds` that describe what it may pay, and
+ * `rails: ["mpp-charge"]` — a scope that names no EIP-3009 rail cannot sign
+ * the payment.
  */
 export async function sessionKeyMppSigner(
   manager: SessionKeyManager,

@@ -57,6 +57,9 @@ The semantics are exactly those of MetaMask Delegation Framework v1.3.0's
   remain.
 - `period` cannot be combined with the `mpp-session` rail (MPP vouchers are
   cumulative per channel); `validateAuthorization` refuses it.
+- `rails` is enforced when the session key signs. The grant above names only
+  `"transfer"`, so its key cannot sign an EIP-3009 `TransferWithAuthorization`
+  (an x402 `exact` or MPP `charge` payment); name `"x402-exact"` for that.
 
 ### Previewing a payment
 

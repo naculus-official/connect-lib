@@ -253,6 +253,11 @@ export function caveatsFromScope(
   if (Object.keys(scope.tokenMaxPerTx ?? {}).length > 0) {
     refuse("tokenMaxPerTx has no on-chain caveat yet");
   }
+  // A redemption is a token transfer; a scope that does not name that rail
+  // has nothing the delegation may carry.
+  if (scope.rails !== undefined && !scope.rails.includes("transfer")) {
+    refuse("rails does not include transfer");
+  }
 
   const tokens = Object.entries(scope.tokenAllowances ?? {});
   if (tokens.length > 1) refuse("more than one token allowance");

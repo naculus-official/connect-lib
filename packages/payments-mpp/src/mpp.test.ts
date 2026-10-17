@@ -333,6 +333,7 @@ const scope: Partial<SessionKeyScope> = {
   tokenAllowances: { [USDC]: 25_000n },
   allowedRecipients: [PAYEE],
   allowedChainIds: [84532],
+  rails: ["mpp-charge"],
 };
 
 async function sessionSigner(over: Partial<SessionKeyScope> = {}) {

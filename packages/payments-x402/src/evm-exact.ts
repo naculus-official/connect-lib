@@ -34,7 +34,9 @@ export interface X402TypedDataSigner {
 /**
  * A signer backed by a SessionKeyManager. Payee, amount, token and chain are
  * enforced there, not here: give the key `allowedRecipients`,
- * `tokenAllowances` and `allowedChainIds` that describe what it may pay.
+ * `tokenAllowances` and `allowedChainIds` that describe what it may pay, and
+ * `rails: ["x402-exact"]` — a scope that names no EIP-3009 rail cannot sign
+ * the payment.
  */
 export async function sessionKeyX402Signer(
   manager: SessionKeyManager,

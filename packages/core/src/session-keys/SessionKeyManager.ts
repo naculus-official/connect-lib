@@ -50,12 +50,21 @@ import type {
   SessionKeyBundle,
   SessionKeyInfo,
   SessionKeyManagerConfig,
+  SessionKeyRail,
   SessionKeyScope,
   SessionKeyTransaction,
   SignedAuthorization,
   StoredSessionKey,
 } from "./types";
 import { DEFAULT_SESSION_KEY_CONFIG } from "./types";
+
+const SESSION_KEY_RAILS: readonly SessionKeyRail[] = [
+  "transfer",
+  "x402-exact",
+  "mpp-charge",
+];
+/** Rails whose payment is an EIP-3009 TransferWithAuthorization signature. */
+const EIP3009_RAILS: readonly SessionKeyRail[] = ["x402-exact", "mpp-charge"];
 
 type OffchainAuthorizationVerifier = (input: {
   message: string;
@@ -580,6 +589,14 @@ export class SessionKeyManager {
         "This session key limits recipients; a raw digest cannot be bound to a recipient. Use signTypedDataWithSessionKey.",
       );
     }
+    // A raw digest could be any rail's payload, so a rail-limited key cannot
+    // sign one.
+    if (stored.scope.rails !== undefined) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "This session key limits rails; a raw digest cannot be bound to a rail. Use signTypedDataWithSessionKey.",
+      );
+    }
   }
 
   /** Typed-data-specific refusals, then the transaction the scope check sees. */
@@ -590,6 +607,15 @@ export class SessionKeyManager {
     const structural = validateTypedDataRequest(request);
     if (structural) {
       throw createSessionKeyError("session_key_scope_exceeded", structural);
+    }
+    // Default-deny: a scope that names no EIP-3009 rail (including one with
+    // no `rails` at all) never signs a TransferWithAuthorization, so a
+    // transfer-only grant cannot become an x402/MPP charge signature.
+    if (!stored.scope.rails?.some((rail) => EIP3009_RAILS.includes(rail))) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        "TransferWithAuthorization needs an x402-exact or mpp-charge rail in the session scope",
+      );
     }
     // The amount must count against something. Without a tokenAllowances
     // entry for this token the equivalent transfer has no budget, and the
@@ -954,6 +980,15 @@ export class SessionKeyManager {
           throw createSessionKeyError("session_key_not_found", sessionId);
         }
         this.validateSessionStatus(stored);
+        if (
+          stored.scope.rails !== undefined &&
+          !stored.scope.rails.includes("transfer")
+        ) {
+          throw createSessionKeyError(
+            "session_key_scope_exceeded",
+            "A delegation redemption needs the transfer rail in the session scope",
+          );
+        }
         const { chainId, data } = this.redemptionFor(stored, execution);
         if (
           outerTx.chainId !== chainId ||
@@ -1175,6 +1210,7 @@ export class SessionKeyManager {
       allowedChainIds: scope?.allowedChainIds ?? undefined,
       allowedRecipients: scope?.allowedRecipients ?? undefined,
       nativeTransfer: scope?.nativeTransfer ?? undefined,
+      rails: scope?.rails ? [...scope.rails] : undefined,
       mode: scope?.mode ?? "offchain",
     };
   }
@@ -1218,6 +1254,18 @@ export class SessionKeyManager {
           `${name} cannot be negative`,
         );
       }
+    }
+    if (
+      scope.rails !== undefined &&
+      (!Array.isArray(scope.rails) ||
+        scope.rails.length === 0 ||
+        new Set(scope.rails).size !== scope.rails.length ||
+        !scope.rails.every((rail) => SESSION_KEY_RAILS.includes(rail)))
+    ) {
+      throw createSessionKeyError(
+        "session_key_invalid_input",
+        `rails must list distinct values from ${SESSION_KEY_RAILS.join(", ")}`,
+      );
     }
     if (
       scope.allowedChainIds?.some(

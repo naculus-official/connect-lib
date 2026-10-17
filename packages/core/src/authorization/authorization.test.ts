@@ -384,6 +384,7 @@ describe("compilers", () => {
         allowedChainIds: [1],
         allowedRecipients: [EVM_PAYEE],
         nativeTransfer: "empty-calldata-to-recipients",
+        rails: ["transfer"],
         mode: "offchain",
       },
     });
@@ -857,7 +858,8 @@ describe("authorization listing", () => {
         recipients: [EVM_PAYEE],
         maxPerPayment: 1_000n,
         maxTotal: 1_000n,
-        rails: ["transfer", "x402-exact"],
+        // A scope without `rails` signs no EIP-3009 typed data.
+        rails: ["transfer"],
       });
     }
   });

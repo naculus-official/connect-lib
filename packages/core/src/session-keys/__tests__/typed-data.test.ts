@@ -27,7 +27,11 @@ async function authorizedKey(
   m: SessionKeyManager,
   scope: Parameters<SessionKeyManager["createSessionKey"]>[0],
 ) {
-  const info = await m.createSessionKey(scope, SIGNER);
+  // EIP-3009 needs a named rail; tests that omit it override with undefined.
+  const info = await m.createSessionKey(
+    { rails: ["x402-exact"], ...scope },
+    SIGNER,
+  );
   await m.setAuthorization(info.id, {
     signerAddress: SIGNER,
     type: "offchain",
@@ -273,7 +277,10 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
 
   it("still signs raw digests when recipients are not limited", async () => {
     const m = manager();
-    const info = await authorizedKey(m, { allowedContracts: [PAYEE] });
+    const info = await authorizedKey(m, {
+      allowedContracts: [PAYEE],
+      rails: undefined,
+    });
     await expect(
       m.signWithSessionKey(info.id, `0x${"ab".repeat(32)}`, {
         to: PAYEE,

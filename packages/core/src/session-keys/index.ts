@@ -40,6 +40,7 @@ export type {
   SessionKeyInfo,
   SessionKeyManagerConfig,
   SessionKeyPair,
+  SessionKeyRail,
   SessionKeyScope,
   SessionKeyTransaction,
   SessionKeyStatus,

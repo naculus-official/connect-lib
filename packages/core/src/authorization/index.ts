@@ -568,6 +568,13 @@ export function compileEvmSessionScope(
   const nativeGrant = selected.find(
     (grant) => parseAsset(grant.asset)?.kind === "native",
   );
+  // The scope names one rail set, checked when the key signs: EIP-3009
+  // (x402-exact) only if it is named, so a transfer-only grant cannot sign
+  // one. Token grants with different rail sets cannot share it.
+  const rails = [...(tokenGrants[0] ?? nativeGrant ?? selected[0]).rails];
+  if (tokenGrants.some((grant) => !sameStrings(grant.rails, rails))) {
+    return { ok: false, reason: "token grant rail sets differ" };
+  }
   if (mode === "eip7702") {
     if (!DELEGATION_FRAMEWORK_CHAIN_IDS.includes(chainId)) {
       return {
@@ -626,6 +633,7 @@ export function compileEvmSessionScope(
     ...(nativeGrant
       ? { nativeTransfer: "empty-calldata-to-recipients" as const }
       : {}),
+    rails: rails as SessionKeyScope["rails"],
     mode,
     ...(maxCount === undefined ? {} : { maxTxCount: maxCount }),
   };
@@ -842,7 +850,7 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
           ...(scope.maxTxCount === undefined
             ? {}
             : { maxCount: scope.maxTxCount }),
-          rails: ["transfer", "x402-exact"],
+          rails: scope.rails ? [...scope.rails] : ["transfer"],
         });
         if (raw.usage) {
           spent[asset] =

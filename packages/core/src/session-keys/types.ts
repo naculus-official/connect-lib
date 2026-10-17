@@ -70,9 +70,29 @@ export interface SessionKeyScope {
   /** Chain IDs this key is valid for (empty = any chain) */
   allowedChainIds?: number[];
 
+  /**
+   * Payment rails this key may sign for, checked when it signs:
+   *
+   * - EIP-3009 `TransferWithAuthorization` (`signTypedDataWithSessionKey`)
+   *   needs `x402-exact` or `mpp-charge`; both sign the same typed data.
+   * - A delegation redemption (`signDelegationRedemption`) needs `transfer`.
+   * - Raw-digest signing (`signWithSessionKey`,
+   *   `signWithVerifiedOffchainAuthorization`) is refused while this is set:
+   *   a digest cannot be tied to a rail.
+   *
+   * Omitted (a scope written before this field existed, or one built by
+   * hand): the key signs no EIP-3009 typed data — the scope does not name a
+   * rail that allows it. Transactions and delegation redemptions are checked
+   * as before. `compileEvmSessionScope` always sets it from the grant.
+   */
+  rails?: SessionKeyRail[];
+
   /** Session type: off-chain agreement, EIP-7702 delegation, or AA module */
   mode: "offchain" | "eip7702" | "aa_module";
 }
+
+/** Rails an EVM session key scope can name (see `SessionKeyScope.rails`). */
+export type SessionKeyRail = "transfer" | "x402-exact" | "mpp-charge";
 
 export interface SessionKeyPeriod {
   amount: bigint;
