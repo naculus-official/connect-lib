@@ -6,7 +6,9 @@
  * - Zero dependency on viem/ethers for ABI encoding
  * - Uses @noble/hashes/keccak_256 (already in monorepo) for selector computation
  * - All methods are static (composition over inheritance)
- * - Transaction builder methods return raw TransactionRequest objects
+ * - Transaction builder methods return raw TransactionRequest objects that
+ *   carry the token's chainId (a numeric EIP-155 id, not hex), so a wallet
+ *   on another chain refuses to sign
  *
  * @see SRS-007
  */
@@ -362,6 +364,7 @@ export class ERC20TokenHelper {
     from: `0x${string}`;
     data: `0x${string}`;
     value: "0x0";
+    chainId: number;
   }> {
     assertTokenConfig(params.token);
     assertTokenAddress(params.from, "sender");
@@ -375,6 +378,7 @@ export class ERC20TokenHelper {
       from: params.from,
       data,
       value: "0x0",
+      chainId: params.token.chainId,
     };
   }
 
@@ -389,6 +393,7 @@ export class ERC20TokenHelper {
     from: `0x${string}`;
     data: `0x${string}`;
     value: "0x0";
+    chainId: number;
   }> {
     assertTokenConfig(params.token);
     assertTokenAddress(params.owner, "owner");
@@ -402,6 +407,7 @@ export class ERC20TokenHelper {
       from: params.owner,
       data,
       value: "0x0",
+      chainId: params.token.chainId,
     };
   }
 
@@ -417,6 +423,7 @@ export class ERC20TokenHelper {
     from: `0x${string}`;
     data: `0x${string}`;
     value: "0x0";
+    chainId: number;
   }> {
     assertTokenConfig(params.token);
     assertTokenAddress(params.from, "sender");
@@ -430,6 +437,7 @@ export class ERC20TokenHelper {
       from: params.from,
       data,
       value: "0x0",
+      chainId: params.token.chainId,
     };
   }
 
