@@ -7,6 +7,43 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.13.0 — 2026-10-18
+
+Minor release with one breaking change to session key scopes. All packages move to 0.13.0 together. Packages not named below, other than the `@naculus/connect` umbrella that re-exports `@naculus/connect-core`, `@naculus/siwx` and `@naculus/wallet-engine`, are version bump only.
+
+### Breaking
+
+- **Session key scopes enforce payment rails** (`@naculus/connect-core`) — `SessionKeyScope` gains `rails` (`"transfer" | "x402-exact" | "mpp-charge"`, exported as `SessionKeyRail`), and `compileEvmSessionScope` sets it from the grant, so a transfer-only grant can no longer sign an EIP-3009 `TransferWithAuthorization`. A scope without `rails` signs no EIP-3009 typed data. Callers must include the rails a grant needs: a grant used for x402 exact payments must include `"x402-exact"`, and one used for MPP charges must include `"mpp-charge"`; a hand-built `SessionKeyScope` used with `sessionKeyX402Signer` must add `rails: ["x402-exact"]`, and one used with `sessionKeyMppSigner` must add `rails: ["mpp-charge"]`. A delegation redemption needs `"transfer"` in it. A scope that sets `rails` also refuses raw-digest signing (`signWithSessionKey`, `signWithVerifiedOffchainAuthorization`), and `getSessionBundle`, like `signWithSessionKey`, refuses to hand out the raw key when `rails` is set, since that key could sign a raw digest. Scopes stored before this release have no `rails` and must be re-created to sign x402 or MPP charges.
+
+### Changed
+
+- **ERC-20 builders bind requests to the token chain** (`@naculus/connect-core`) — `buildTransferTx`, `buildApproveTx` and `buildTransferFromTx` now include the token's `chainId` in the returned request, so a wallet configured for another chain rejects it with `chain_mismatch` instead of signing it for its own chain. The returned `chainId` is a number (EIP-155 chain id), matching wallet-engine's `TransactionRequest`. Migration: if you pass builder output to an injected or Coinbase connector's `sendTransaction`, or to a raw EIP-1193 provider, convert it first (`chainId: "0x" + chainId.toString(16)`) or remove the field; the connectors compare chain ids as hex strings.
+
+### Fixed
+
+- **`encryptPrivateKey` no longer stores the private key in the public field** (`@naculus/connect-core`) — when `publicKeyHex` is omitted, it now derives the secp256k1 public key from the private key and throws on invalid input instead of returning the private key. Callers that pass `publicKeyHex` are unchanged.
+- **ENS primary names are forward-verified** (`@naculus/connect-core`) — `lookupAddress` returns the reverse name with `isPrimary: true` only when that name's forward `addr` resolves back to the queried address. A reverse record naming another account's ENS name, or a name whose forward resolution fails, now yields `null` (and is not cached by `NameResolver`) instead of being reported as the account's primary name. A reverse lookup now makes two extra RPC calls.
+- **UserOperation gas is checked against the paymaster maximum as a total** (`@naculus/connect-core`) — `SmartAccountManager.sendUserOperation` sums the final UserOperation's `callGasLimit`, `verificationGasLimit`, `preVerificationGas` and, for v0.7, `paymasterVerificationGasLimit` and `paymasterPostOpGasLimit` before signing; a sum above `paymaster.policy.maxGasPerUserOp`, or a maximum that is not a non-negative bigint, throws `aa_invalid_input` and nothing is signed or submitted. Known limit: `verificationGasLimit` is counted once; the v0.6 EntryPoint's 3x multiplier for paymaster postOp is not applied. Without a configured maximum, behaviour is unchanged.
+- **Wagmi account projection is scoped to the selected chain** (`@naculus/connector-wagmi`) — account projection is limited to the selected EIP-155 chain and fails closed when that chain has no account.
+- **MPP Solana settlement refuses Token-2022 mints that change the credited amount** (`@naculus/payments-mpp`) — `settleCredential` reads the mint of a Token-2022 charge before signing, simulating or sending, and refuses with `verification-failed` a mint whose extensions change what the recipient receives (TransferFeeConfig, TransferHook, NonTransferable, ConfidentialTransferFee, PausableConfig), a missing mint, or one whose token program or decimals differ from the challenge. A fee-bearing transfer of the advertised amount previously settled with a `success` receipt while crediting the recipient less. `MppSolanaSettleRpc` gains an optional `getAccountInfo`; it is required for Token-2022 charges, which fail without it. SPL Token charges are unchanged.
+- **x402 Solana verification rejects self-transfers** (`@naculus/payments-x402`) — `verifyPayment` rejects an exact payment whose TransferChecked source token account is its destination (payTo's associated token account) with `invalid_exact_svm_payload_transaction`. Such a transfer, signed by a delegate of payTo's account, credits payTo nothing but could previously verify and settle with `success: true`. `settlePayment` only settles results `verifyPayment` accepted, so it no longer reports success for this payment.
+- **SIWx discards overtaken async operations** (`@naculus/siwx`) — `SiwxSessionManager` discards an async `signIn`, `refresh` or `restore` that a later `signOut` or `signIn` overtook while it was still waiting on the signer or storage: it no longer writes storage, sets the in-memory session, fires `onSessionChange`, or schedules expiry. `signIn` and `refresh` then reject with "SIWx operation superseded by a newer signIn or signOut; result discarded"; `restore` leaves the newer state unchanged and returns the current session. If the lifecycle changes while a write is already in flight, the manager removes that write afterwards, but only if storage still holds exactly that session. Calls that nothing overtakes behave as before.
+- **Transactions are bound to the account that started them** (`@naculus/wallet-engine`) — `sendTransaction` binds the signing account when it starts. If the active account, namespace or signer key changes while the transaction is being prepared (for example `importPrivateKey` during the nonce or fee lookup), it throws `WalletError("tx_failed")` and broadcasts nothing, instead of signing and sending from the new account.
+- **Transaction monitor receipts are bound to the watched hash** (`@naculus/wallet-engine`) — the monitor accepts a receipt only when its `transactionHash` is a string equal to the watched hash (hex compared case-insensitively). A receipt whose `transactionHash` is missing, null, not a string, or names a different transaction no longer confirms or fails the watched transaction, attaches the other transaction's block or gas fields, or marks it as dropped; the monitor reports it as `pending` and keeps polling until the existing pending timeout.
+
+### Version bump only
+
+- `@naculus/connector-coinbase`
+- `@naculus/connector-embedded`
+- `@naculus/connector-evm-injected`
+- `@naculus/connector-passkeys`
+- `@naculus/connector-reown`
+- `@naculus/connector-safe`
+- `@naculus/connector-solana`
+- `@naculus/connector-solana-kit`
+- `@naculus/connector-walletconnect`
+- `@naculus/connector-xrpl`
+
 ## 0.12.3 — 2026-10-12
 
 Patch release. Packages other than `@naculus/connector-coinbase` (and the `@naculus/connect` umbrella that re-exports it) are version bump only.
