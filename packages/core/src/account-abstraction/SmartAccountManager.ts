@@ -107,6 +107,44 @@ function validateCalls(calls: Call[]): void {
   }
 }
 
+// Gas-limit fields whose sum is bounded by PaymasterConfig.policy.maxGasPerUserOp.
+// Fee-per-gas fields are prices, not gas, and are not part of the total. The
+// v0.6 EntryPoint's 3x verificationGasLimit multiplier for postOp is not
+// applied: verificationGasLimit is counted once.
+const POLICY_GAS_FIELDS = [
+  "callGasLimit",
+  "verificationGasLimit",
+  "preVerificationGas",
+  "paymasterVerificationGasLimit",
+  "paymasterPostOpGasLimit",
+] as const;
+
+/** Refuse, before signing, a total gas limit above the configured policy maximum. */
+function assertGasWithinPolicy(
+  userOp: UserOperation,
+  version: "0.6" | "0.7",
+  maxGasPerUserOp: bigint,
+): void {
+  if (typeof maxGasPerUserOp !== "bigint" || maxGasPerUserOp < 0n) {
+    throw new AccountAbstractionError(
+      "aa_invalid_input",
+      "paymaster.policy.maxGasPerUserOp must be a non-negative bigint.",
+    );
+  }
+  const serialized = serializeUserOperationForRpc(userOp, version);
+  let totalGas = 0n;
+  for (const field of POLICY_GAS_FIELDS) {
+    const value = serialized[field];
+    if (value !== undefined) totalGas += BigInt(value);
+  }
+  if (totalGas > maxGasPerUserOp) {
+    throw new AccountAbstractionError(
+      "aa_invalid_input",
+      `UserOperation total gas ${totalGas} exceeds paymaster.policy.maxGasPerUserOp ${maxGasPerUserOp}.`,
+    );
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -774,6 +812,11 @@ export class SmartAccountManager {
         gasEstimate.paymasterVerificationGasLimit,
       );
       userOp = { ...userOp, paymasterAndData: paymasterData.paymasterAndData };
+    }
+
+    const maxGasPerUserOp = paymasterConfig?.policy?.maxGasPerUserOp;
+    if (maxGasPerUserOp !== undefined) {
+      assertGasWithinPolicy(userOp, version, maxGasPerUserOp);
     }
 
     if (!this.config.signer) {

@@ -151,7 +151,12 @@ export interface PaymasterConfig {
     allowedDapps?: string[];
     /** ERC-20 token address for token paymaster */
     token?: Address;
-    /** Maximum gas per UserOperation */
+    /**
+     * Maximum total gas per UserOperation: the sum of callGasLimit,
+     * verificationGasLimit, preVerificationGas and, for v0.7,
+     * paymasterVerificationGasLimit and paymasterPostOpGasLimit, with
+     * verificationGasLimit counted once (no v0.6 EntryPoint 3x multiplier).
+     */
     maxGasPerUserOp?: bigint;
   };
 }
