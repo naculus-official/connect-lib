@@ -163,6 +163,13 @@ export class SiwxSessionManager {
   private sessionChangeCallbacks = new Set<SessionChangeCallback>();
   private expiryCallbacks = new Set<SessionExpiryCallback>();
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Lifecycle generation. signOut and every signIn increment it; an async
+   * signIn, refresh or restore captures it before awaiting and discards its
+   * result if it changed, so an obsolete completion never republishes or
+   * persists an identity after a newer lifecycle decision.
+   */
+  private generation = 0;
 
   constructor(options: SiwxSessionManagerOptions) {
     this.storage = options.storage;
@@ -217,6 +224,9 @@ export class SiwxSessionManager {
       blockchain: params.blockchain,
     });
 
+    // A new sign-in supersedes every pending signIn/refresh/restore.
+    const generation = ++this.generation;
+
     // Sign the message via the provided signer
     const signature = await this.signMessage({
       message: raw,
@@ -255,7 +265,7 @@ export class SiwxSessionManager {
     };
 
     // Persist and update internal state
-    await this.storage.set(session);
+    await this.persistIfCurrent(session, generation);
     this.session = session;
     this.notifySessionChange(session);
     this.scheduleExpiryCheck(session);
@@ -265,8 +275,10 @@ export class SiwxSessionManager {
 
   /**
    * Sign out: clear the session from storage and memory, fire callbacks.
+   * Any signIn, refresh or restore still pending is discarded.
    */
   async signOut(): Promise<void> {
+    this.generation++;
     this.clearExpiryTimer();
     this.session = null;
     await this.storage.remove();
@@ -319,6 +331,8 @@ export class SiwxSessionManager {
       blockchain: current.message.blockchain,
     });
 
+    const generation = this.generation;
+
     // Re-sign
     const signature = await this.signMessage({
       message: raw,
@@ -341,7 +355,7 @@ export class SiwxSessionManager {
       refreshedAt: nowISO(),
     };
 
-    await this.storage.set(refreshed);
+    await this.persistIfCurrent(refreshed, generation);
     this.session = refreshed;
     this.notifySessionChange(refreshed);
     this.scheduleExpiryCheck(refreshed);
@@ -371,19 +385,32 @@ export class SiwxSessionManager {
    * Fires session-change callbacks if the restored state differs.
    */
   async restore(): Promise<SiwxSession | null> {
+    const generation = this.generation;
     const stored = await this.storage.get();
+    // A signIn or signOut ran while reading: the read is obsolete, so leave
+    // the newer state (memory, storage, events) untouched.
+    if (generation !== this.generation) return this.getSession();
     if (stored && checkSessionExpired(stored)) {
+      // Clearing is a lifecycle decision: supersede any pending refresh.
+      const cleared = ++this.generation;
       await this.storage.remove();
+      if (cleared !== this.generation) return this.getSession();
       this.clearExpiryTimer();
       this.session = null;
       this.notifySessionChange(null);
       return null;
     }
     if (stored) {
+      // Storage may hold another identity (e.g. another tab signed in):
+      // supersede any pending refresh so it cannot overwrite it.
+      this.generation++;
       this.session = stored;
       this.notifySessionChange(stored);
       this.scheduleExpiryCheck(stored);
     } else {
+      // Storage is empty (e.g. another tab signed out): supersede any
+      // pending refresh so it cannot write the old identity back.
+      this.generation++;
       const hadSession = this.session !== null;
       this.session = null;
       if (hadSession) {
@@ -440,6 +467,31 @@ export class SiwxSessionManager {
   // -----------------------------------------------------------------------
   // Internal helpers
   // -----------------------------------------------------------------------
+
+  /**
+   * Persist a session produced by an operation that started at `generation`.
+   * Throws without writing if a signIn or signOut has run since. If the
+   * lifecycle changes while the write is in flight, the write is undone when
+   * storage still holds exactly this session (a newer write is left alone)
+   * and the operation throws, so its caller never publishes it.
+   */
+  private async persistIfCurrent(
+    session: SiwxSession,
+    generation: number,
+  ): Promise<void> {
+    if (generation !== this.generation) throw supersededError();
+    await this.storage.set(session);
+    if (generation === this.generation) return;
+    const stored = await this.storage.get();
+    if (
+      stored &&
+      stored.id === session.id &&
+      stored.signature === session.signature
+    ) {
+      await this.storage.remove();
+    }
+    throw supersededError();
+  }
 
   private notifySessionChange(session: SiwxSession | null): void {
     for (const cb of this.sessionChangeCallbacks) {
@@ -507,6 +559,12 @@ function getDefaultDomain(): string {
 function getDefaultUri(): string {
   if (typeof window !== "undefined") return window.location.origin;
   return "http://localhost";
+}
+
+function supersededError(): Error {
+  return new Error(
+    "SIWx operation superseded by a newer signIn or signOut; result discarded",
+  );
 }
 
 function generateSessionId(): string {
