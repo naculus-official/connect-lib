@@ -1547,10 +1547,34 @@ export class PocketWallet {
 
     const configuredChainId = this.assertConfiguredChain(tx);
 
+    // Bound once, before the first await: nonce, gas, simulation and fees
+    // all wait on the network, and an import or namespace switch meanwhile
+    // must not make another account sign or pay for a request admitted for
+    // this one. The isolated signer ignores the key argument, so a re-key of
+    // the worker is caught by the epoch; the account by its address. Checked
+    // before signing and again before broadcast — on a change nothing is sent.
+    const account = this.activeAccount();
+    const signer = this.activeSigner();
+    const from = account.address;
+    const namespace = this.data.activeNamespace;
+    const epoch = this.signerEpoch;
+    const assertSameAccount = () => {
+      if (
+        this.signerEpoch !== epoch ||
+        this.data?.activeNamespace !== namespace ||
+        this.activeAccount().address !== from
+      ) {
+        throw new WalletError(
+          "tx_failed",
+          "The wallet account changed while the transaction was being prepared; nothing was sent.",
+        );
+      }
+    };
+
     // Get nonce if not provided
     if (!tx.nonce) {
       const nonceHex = (await this.rpcCall("eth_getTransactionCount", [
-        this.activeAccount().address,
+        from,
         "pending",
       ])) as string;
       tx.nonce = nonceHex;
@@ -1560,7 +1584,7 @@ export class PocketWallet {
     if (!tx.gas) {
       const estimated = (await this.rpcCall("eth_estimateGas", [
         {
-          from: this.activeAccount().address,
+          from,
           to: tx.to,
           value: tx.value ?? "0x0",
           data: tx.data ?? "0x",
@@ -1573,7 +1597,7 @@ export class PocketWallet {
     if (this._simManager?.autoSimulate) {
       const simResult = await this._simManager.simulateTransaction(
         { to: tx.to, data: tx.data, value: tx.value, gas: tx.gas },
-        this.activeAccount().address as `0x${string}`,
+        from as `0x${string}`,
         {
           chainId: sim.parseChainIdNumber(this.cfg.chainId),
           rpcUrl: this.cfg.rpcUrl,
@@ -1614,13 +1638,15 @@ export class PocketWallet {
     // Set chain ID
     builtTx.chainId = configuredChainId;
 
-    // Sign the transaction
-    const { signature } = await this.activeSigner().signTransaction(
+    // Sign the transaction with the account bound above
+    assertSameAccount();
+    const { signature } = await signer.signTransaction(
       builtTx,
-      this.activeAccount().privateKey as `0x${string}`,
+      account.privateKey as `0x${string}`,
     );
 
     // Broadcast
+    assertSameAccount();
     const txHash = (await this.rpcCall("eth_sendRawTransaction", [
       signature,
     ])) as string;
@@ -1634,7 +1660,7 @@ export class PocketWallet {
       this._txMonitor
         .watchTx(txHash, parsedChainId, {
           initialEntry: {
-            from: this.activeAccount().address,
+            from,
             to: tx.to,
             value: tx.value ?? "0x0",
             data: tx.data,
@@ -1650,7 +1676,7 @@ export class PocketWallet {
 
     return {
       hash: txHash,
-      from: this.activeAccount().address,
+      from,
       to: tx.to,
       value: tx.value ?? "0x0",
       data: tx.data ?? "0x",
