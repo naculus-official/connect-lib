@@ -966,6 +966,13 @@ export class PocketWallet {
   async importPrivateKey(pkHex: string): Promise<WalletData> {
     const { detectPrivateKey } = await import("./derivation/key-formats");
     const detected = detectPrivateKey(pkHex);
+    const storedWallet = await this._storage.load();
+    if (storedWallet?.mnemonic) {
+      throw new WalletError(
+        "invalid_key",
+        "Cannot import a raw private key while a mnemonic wallet is stored.",
+      );
+    }
 
     if (detected.namespace === "solana") {
       const { bytesToHex } = await import("@noble/hashes/utils.js");

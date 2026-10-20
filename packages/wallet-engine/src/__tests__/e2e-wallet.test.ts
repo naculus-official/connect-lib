@@ -225,6 +225,26 @@ describe("E2E: Wallet Persistence", () => {
     expect(await storage.load()).toBeNull();
   });
 
+  it("should reject raw-key import when a mnemonic wallet is stored", async () => {
+    const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
+    await w.importMnemonic(TEST_MNEMONIC);
+    const storedBefore = await storage.load();
+
+    await expect(
+      w.importPrivateKey(`0x${"ab".repeat(32)}`),
+    ).rejects.toBeInstanceOf(WalletError);
+    expect(await storage.load()).toEqual(storedBefore);
+  });
+
+  it("should import a raw key when no wallet is stored", async () => {
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
+
+    await expect(
+      w.importPrivateKey(`0x${"ab".repeat(32)}`),
+    ).resolves.toMatchObject({ mnemonic: "" });
+    expect(await storage.load()).toBeNull();
+  });
+
   it("should ignore legacy account keys and re-derive them from the mnemonic", async () => {
     const source = new PocketWallet({
       storage: new MockStorage(),
