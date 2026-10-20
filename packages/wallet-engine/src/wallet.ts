@@ -115,20 +115,32 @@ export interface PocketConfig {
    */
   solanaRpcUrl?: string;
   /**
-   * Storage backend selection.
+   * Storage backend selection. Storage must be encrypted unless
+   * `allowInsecureStorage: true` is set explicitly.
    *
-   * - undefined (default): auto-picks IndexedDB. Falls back to localStorage
-   *   only when IndexedDB is unavailable, with a warning flag set.
-   * - "indexedDb": force IndexedDB (throws if unavailable)
-   * - "localStorage": force localStorage (⚠️ insecure — only for dev/testing)
+   * - undefined (default): auto-picks IndexedDB. Without `encryptionPassphrase`
+   *   and without `allowInsecureStorage: true` the constructor throws. If
+   *   IndexedDB is unavailable, falls back to localStorage only when
+   *   `encryptionPassphrase` is set (encrypted, degraded: tier 3) or when
+   *   `allowInsecureStorage: true` is set (plaintext, degraded: tier 4).
+   *   Otherwise it throws.
+   * - "indexedDb": force IndexedDB. Throws if IndexedDB is unavailable (no
+   *   fallback). Plaintext needs `allowInsecureStorage: true`, as above.
+   * - "localStorage": force localStorage. Plaintext needs
+   *   `allowInsecureStorage: true` (⚠️ insecure, dev/testing only).
    *
    * Dev override: set this to "localStorage" to test localStorage behavior
    * without the IndexedDB dependency.
    */
   storageType?: StorageType;
   /**
-   * Allow unencrypted localStorage fallback. Disabled in browser contexts by
-   * default; only enable this for controlled development/test environments.
+   * Allow plaintext (unencrypted) storage: IndexedDB without
+   * `encryptionPassphrase`, or the localStorage fallback. Only enable this for
+   * controlled development/test environments.
+   *
+   * Defaults to `true` when there is no `window` global (Node, and web
+   * workers) and to `false` otherwise, so a browser wallet must set
+   * `encryptionPassphrase` or pass `allowInsecureStorage: true` explicitly.
    */
   allowInsecureStorage?: boolean;
   /**
@@ -143,7 +155,8 @@ export interface PocketConfig {
    * new one. An empty passphrase is refused. Cancel by throwing rather than
    * returning an empty passphrase.
    *
-   * Without this, data is stored as base64 plaintext (default).
+   * Without this, data is stored as base64 plaintext, which requires
+   * `allowInsecureStorage: true` (see above).
    *
    * Example:
    * ```ts
@@ -608,11 +621,15 @@ export class PocketWallet {
    *
    * Priority chain:
    *   1. Custom adapter (config.storage) → use directly
-   *   2. Explicit storageType → force specific backend
+   *   2. Explicit storageType → force specific backend (no fallback)
    *   3. Auto-detect:
-   *      a. IndexedDB (available) → default, origin-scoped but not encrypted
-   *      b. localStorage + encrypted (if passphrase provided) → XSS-resistant
-   *      c. localStorage → last resort, set _storageDegraded = true
+   *      a. IndexedDB (available) → default; requires encryptionPassphrase or
+   *         allowInsecureStorage: true, otherwise throws
+   *      b. IndexedDB unavailable + encryptionPassphrase → encrypted
+   *         localStorage, _storageDegraded = true (tier 3)
+   *      c. IndexedDB unavailable + allowInsecureStorage: true → plaintext
+   *         localStorage, _storageDegraded = true (tier 4)
+   *      d. IndexedDB unavailable, neither → throws
    *
    * AES-GCM encryption is applied when config.encryptionPassphrase is provided.
    * The passphrase callback may be called while encrypted data is loaded or saved.
@@ -626,11 +643,20 @@ export class PocketWallet {
       config.allowInsecureStorage ?? typeof window === "undefined";
 
     if (explicitType === "indexedDb") {
-      return this.wrapWithEncryption(
-        new IndexedDbStorageAdapter(this.cfg.storageKey),
-        passphrase,
-        true,
-      );
+      const idbAdapter = new IndexedDbStorageAdapter(this.cfg.storageKey);
+      if (!idbAdapter.isAvailable()) {
+        throw new WalletError(
+          "storage_unavailable",
+          "IndexedDB is unavailable. The indexedDb storageType does not fall back; choose another storageType or run where IndexedDB exists.",
+        );
+      }
+      if (!passphrase && !allowInsecureStorage) {
+        throw new WalletError(
+          "storage_unavailable",
+          "Unencrypted IndexedDB storage is disabled. Provide encryptionPassphrase or explicitly set allowInsecureStorage: true.",
+        );
+      }
+      return this.wrapWithEncryption(idbAdapter, passphrase, true);
     }
 
     if (explicitType === "localStorage") {
@@ -651,6 +677,12 @@ export class PocketWallet {
     // Auto-detect chain: IndexedDB → localStorage (encrypted if configured)
     const idbAdapter = new IndexedDbStorageAdapter(this.cfg.storageKey);
     if (idbAdapter.isAvailable()) {
+      if (!passphrase && !allowInsecureStorage) {
+        throw new WalletError(
+          "storage_unavailable",
+          "Unencrypted IndexedDB storage is disabled. Provide encryptionPassphrase or explicitly set allowInsecureStorage: true.",
+        );
+      }
       return this.wrapWithEncryption(idbAdapter, passphrase, true);
     }
 
@@ -663,8 +695,12 @@ export class PocketWallet {
     }
     this._storageDegraded = true;
     const lsAdapter = new LocalStorageAdapter(this.cfg.storageKey);
-    // Wrap with encryption if passphrase provided (mitigates XSS risk)
+    // Encrypted fallback is the only fallback allowed without an explicit
+    // insecure opt-in. The degraded flag stays set so the tier reads as 3.
     if (passphrase) {
+      console.warn(
+        "[PocketWallet] IndexedDB is unavailable: the wallet is stored in encrypted localStorage, a degraded backend (storage security tier 3). See getStorageSecurityReport().",
+      );
       return new EncryptedStorageAdapter(lsAdapter, passphrase, {
         prf: this.cfg.prfUnlock,
       });

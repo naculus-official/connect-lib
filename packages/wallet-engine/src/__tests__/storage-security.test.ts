@@ -137,14 +137,16 @@ describe("B — IndexedDbStorageAdapter: save → load → clear", () => {
     expect(result === null || result !== null).toBe(true);
   });
 
-  it("clear does not throw when IndexedDB is not available", async () => {
+  it("clear throws when IndexedDB is not available (no silent no-op)", async () => {
     const adapter = new IndexedDbStorageAdapter("test-idb-clear");
-    await expect(adapter.clear()).resolves.not.toThrow();
+    await expect(adapter.clear()).rejects.toThrow("IndexedDB is unavailable");
   });
 
-  it("save does not throw when IndexedDB is not available", async () => {
+  it("save throws when IndexedDB is not available (no silent no-op)", async () => {
     const adapter = new IndexedDbStorageAdapter("test-idb-save");
-    await expect(adapter.save(walletData)).resolves.not.toThrow();
+    await expect(adapter.save(walletData)).rejects.toThrow(
+      "IndexedDB is unavailable",
+    );
   });
 
   it("constructor accepts optional key parameter", () => {

@@ -36,6 +36,19 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
     return typeof indexedDB !== "undefined";
   }
 
+  /**
+   * Writes and deletes must not be dropped silently: a caller that thinks the
+   * wallet was saved or wiped would otherwise be wrong without any signal.
+   */
+  private assertAvailable(): void {
+    if (!this.isAvailable()) {
+      throw new WalletError(
+        "storage_unavailable",
+        "IndexedDB is unavailable; the wallet was not written or cleared.",
+      );
+    }
+  }
+
   async load(): Promise<WalletData | null> {
     if (!this.isAvailable()) return null;
     const db = await openDB();
@@ -55,7 +68,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
   }
 
   async save(data: WalletData): Promise<void> {
-    if (!this.isAvailable()) return;
+    this.assertAvailable();
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
@@ -73,7 +86,7 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
   }
 
   async clear(): Promise<void> {
-    if (!this.isAvailable()) return;
+    this.assertAvailable();
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");

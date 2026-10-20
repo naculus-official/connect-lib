@@ -23,6 +23,148 @@ describe("StorageAdapter.type property", () => {
   });
 });
 
+/**
+ * Runs `fn` with a browser-like global environment: a `window` global, and an
+ * `indexedDB` global only when `idb` is true. Both are restored afterwards.
+ */
+function inBrowserEnv(idb: boolean, fn: () => void): void {
+  const g = globalThis as any;
+  const prevWindow = g.window;
+  const prevIdb = Object.getOwnPropertyDescriptor(globalThis, "indexedDB");
+  g.window = {};
+  if (idb) g.indexedDB = {};
+  else delete g.indexedDB;
+  try {
+    fn();
+  } finally {
+    if (prevWindow === undefined) delete g.window;
+    else g.window = prevWindow;
+    if (prevIdb) Object.defineProperty(globalThis, "indexedDB", prevIdb);
+    else delete g.indexedDB;
+  }
+}
+
+const passphrase = async () => "correct horse battery staple";
+
+describe("PocketWallet — encrypted-by-default storage", () => {
+  it("browser default without passphrase throws when IndexedDB is unavailable", () => {
+    inBrowserEnv(false, () => {
+      expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
+        "IndexedDB is unavailable and unencrypted localStorage fallback is disabled",
+      );
+    });
+  });
+
+  it("browser default without passphrase throws when IndexedDB is available", () => {
+    inBrowserEnv(true, () => {
+      expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
+        "Unencrypted IndexedDB storage is disabled",
+      );
+    });
+  });
+
+  it("browser default with passphrase on IndexedDB is tier 1", () => {
+    inBrowserEnv(true, () => {
+      const w = new PocketWallet({
+        storageKey: "t",
+        encryptionPassphrase: passphrase,
+      });
+      expect(w.getStorageSecurityLevel()).toBe(1);
+      expect(w.isStorageDegraded()).toBe(false);
+    });
+  });
+
+  it("explicit storageType 'indexedDb' without passphrase throws in a browser", () => {
+    inBrowserEnv(true, () => {
+      expect(
+        () => new PocketWallet({ storageType: "indexedDb", storageKey: "t" }),
+      ).toThrow("Unencrypted IndexedDB storage is disabled");
+    });
+  });
+
+  it("allowInsecureStorage: true permits plaintext IndexedDB", () => {
+    inBrowserEnv(true, () => {
+      const w = new PocketWallet({
+        storageKey: "t",
+        allowInsecureStorage: true,
+      });
+      expect(w.getStorageSecurityLevel()).toBe(2);
+      expect(w.isStorageDegraded()).toBe(false);
+    });
+  });
+
+  it("allowInsecureStorage: true permits plaintext localStorage fallback (tier 4, degraded)", () => {
+    inBrowserEnv(false, () => {
+      const w = new PocketWallet({
+        storageKey: "t",
+        allowInsecureStorage: true,
+      });
+      expect(w.getStorageSecurityLevel()).toBe(4);
+      expect(w.isStorageDegraded()).toBe(true);
+    });
+  });
+
+  it("IndexedDB unavailable without passphrase throws", () => {
+    inBrowserEnv(false, () => {
+      expect(
+        () =>
+          new PocketWallet({
+            storageKey: "t",
+            allowInsecureStorage: false,
+          }),
+      ).toThrow("IndexedDB is unavailable");
+    });
+  });
+
+  it("IndexedDB unavailable with passphrase uses encrypted fallback and marks degraded", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      inBrowserEnv(false, () => {
+        const w = new PocketWallet({
+          storageKey: "t",
+          encryptionPassphrase: passphrase,
+        });
+        expect(w.getStorageType()).toBe("encrypted");
+        expect(w.getStorageSecurityLevel()).toBe(3);
+        expect(w.isStorageDegraded()).toBe(true);
+        expect(w.isEncrypted()).toBe(true);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("IndexedDB is unavailable"),
+        );
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("Node default (no window) still permits plaintext, so Node tests keep working", () => {
+    const w = new PocketWallet({ storageKey: "t" });
+    expect([2, 4]).toContain(w.getStorageSecurityLevel());
+  });
+});
+
+describe("IndexedDbStorageAdapter — writes never drop silently", () => {
+  const data = {
+    mnemonic: "test test test test test test test test test test test junk",
+    accounts: [],
+    activeNamespace: "eip155",
+    createdAt: 0,
+    version: 2,
+  } as any;
+
+  it("save() throws when IndexedDB is unavailable", async () => {
+    const adapter = new IndexedDbStorageAdapter("t");
+    await expect(adapter.save(data)).rejects.toThrow(
+      "IndexedDB is unavailable",
+    );
+  });
+
+  it("clear() throws when IndexedDB is unavailable", async () => {
+    const adapter = new IndexedDbStorageAdapter("t");
+    await expect(adapter.clear()).rejects.toThrow("IndexedDB is unavailable");
+  });
+});
+
 describe("PocketWallet — storage security tier", () => {
   it("auto-detect in Node: IndexedDB unavailable → tier 4 (localStorage)", () => {
     const w = new PocketWallet({ storageKey: "t" });
@@ -72,11 +214,9 @@ describe("PocketWallet — storage security tier", () => {
   });
 
   it("storageType: 'indexedDb' throws in Node (IndexedDB unavailable)", () => {
-    try {
-      new PocketWallet({ storageType: "indexedDb", storageKey: "t" });
-    } catch (e: any) {
-      expect(e.message || "").toContain("IndexedDB");
-    }
+    expect(
+      () => new PocketWallet({ storageType: "indexedDb", storageKey: "t" }),
+    ).toThrow("IndexedDB is unavailable");
   });
 
   it("custom adapter takes precedence", () => {

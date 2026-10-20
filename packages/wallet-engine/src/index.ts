@@ -2,10 +2,14 @@
  * @naculus/wallet-engine — Embedded Wallet
  *
  * Self-custodial embedded wallet using BIP39 + HD key derivation.
- * Default storage: IndexedDB (async and origin-scoped, but not encrypted or
- * XSS-proof).
- * Falls back to localStorage (base64-encoded JSON) only when IndexedDB
- * is unavailable — with an explicit user warning.
+ * Default storage: IndexedDB (async and origin-scoped, but not XSS-proof),
+ * which must be encrypted: set `encryptionPassphrase`. Plaintext storage
+ * (IndexedDB or localStorage without a passphrase) requires
+ * `allowInsecureStorage: true`, which defaults to true only when there is no
+ * `window` global (Node) and to false in a browser.
+ * Falls back to localStorage only when IndexedDB is unavailable: encrypted
+ * when `encryptionPassphrase` is set (degraded, tier 3), plaintext only with
+ * `allowInsecureStorage: true` (degraded, tier 4). Otherwise it throws.
  * Supports EVM signing (personal_sign, eth_sendTransaction).
  *
  * Design goals:
