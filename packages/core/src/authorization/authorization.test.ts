@@ -189,6 +189,21 @@ describe("validateAuthorization", () => {
     expect(validateAuthorization(value)).toMatchObject({ ok: false });
   });
 
+  it.each(["missing", "empty", "unknown"] as const)(
+    "rejects a %s grant rails list with the grant structure error",
+    (kind) => {
+      const value = evmAuthorization() as unknown as {
+        grants: Array<Record<string, unknown>>;
+      };
+      if (kind === "missing") delete value.grants[0].rails;
+      else value.grants[0].rails = kind === "empty" ? [] : ["wire"];
+      expect(validateAuthorization(value)).toEqual({
+        ok: false,
+        reason: "invalid grant structure",
+      });
+    },
+  );
+
   it("requires a period start after zero, as the on-chain enforcer does", () => {
     expect(
       validateAuthorization(
@@ -769,6 +784,7 @@ describe("authorization listing", () => {
         maxValuePerTx: 20n,
         maxTotalValue: 50n,
         nativeTransfer: "empty-calldata-to-recipients" as const,
+        rails: ["transfer"],
         mode: "offchain" as const,
       },
     };
@@ -819,12 +835,22 @@ describe("authorization listing", () => {
         allowedContracts: [TOKEN],
         allowedMethods: ["0xa9059cbb", "0x095ea7b3"],
         tokenAllowances: { [TOKEN]: 1_000n },
+        rails: ["transfer"],
       },
       1,
     ],
     [
       "a contract permission without a token limit",
       { allowedContracts: [TOKEN], allowedMethods: ["0xa9059cbb"] },
+      0,
+    ],
+    [
+      "a token permission without rails",
+      {
+        allowedContracts: [TOKEN],
+        allowedMethods: ["0xa9059cbb"],
+        tokenAllowances: { [TOKEN]: 1_000n },
+      },
       0,
     ],
   ])("flags %s and returns only exact grants", async (_name, extra, count) => {
@@ -858,7 +884,6 @@ describe("authorization listing", () => {
         recipients: [EVM_PAYEE],
         maxPerPayment: 1_000n,
         maxTotal: 1_000n,
-        // A scope without `rails` signs no EIP-3009 typed data.
         rails: ["transfer"],
       });
     }

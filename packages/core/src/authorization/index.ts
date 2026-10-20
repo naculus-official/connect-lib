@@ -174,6 +174,19 @@ const RAILS = new Set<Rail>([
   "mpp-charge",
   "mpp-session",
 ]);
+
+function hasValidEvmScopeRails(value: unknown): value is Rail[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (rail): rail is Rail =>
+        rail === "transfer" || rail === "x402-exact" || rail === "mpp-charge",
+    ) &&
+    new Set(value).size === value.length
+  );
+}
+
 const U64_MAX = (1n << 64n) - 1n;
 const I64_MAX = (1n << 63n) - 1n;
 
@@ -842,6 +855,10 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
         }
         const exactPerPayment = perPayment ?? maxTotal;
         const asset = `eip155:${chainId}/erc20:${toChecksumAddress(token)}`;
+        if (!hasValidEvmScopeRails(scope.rails)) {
+          if (!flags.includes("not-expressible")) flags.push("not-expressible");
+          continue;
+        }
         grants.push({
           asset,
           recipients: recipients.map(toChecksumAddress),
@@ -850,7 +867,7 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
           ...(scope.maxTxCount === undefined
             ? {}
             : { maxCount: scope.maxTxCount }),
-          rails: scope.rails ? [...scope.rails] : ["transfer"],
+          rails: [...scope.rails],
         });
         if (raw.usage) {
           spent[asset] =
