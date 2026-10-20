@@ -61,7 +61,7 @@ connect-lib/                    ← pure library
 ├── packages/wallet-engine/
 └── packages/siwx/
 
-connect-react/                 ← frontend
+connect-appkit/                 ← frontend
 ├── packages/react/
 ├── packages/ui/
 ├── packages/connect/
@@ -255,7 +255,7 @@ Test strategy:
 - Each connector has unit tests (mock provider/session)
 - Core has ConnectorManager unit tests
 - walletconnect has integration tests
-- React/UI tests live in `connect-react/`
+- React/UI tests live in `connect-appkit/`
 
 ---
 
@@ -294,7 +294,7 @@ Some connectors (e.g., WalletConnect) need to modify namespaces after session cr
 ### StorageAdapter.type property
 
 Each StorageAdapter implementation reports its own type (`"indexedDb"`, `"localStorage"`, `"encrypted"`),
-letting connect-react determine whether to show security warnings.
+letting connect-appkit determine whether to show security warnings.
 
 ### Developer force-switch
 
@@ -365,7 +365,7 @@ isBurnAddress("0xdead...")              // true (starts with "dead")
 | `isZeroAddress(addr)` | `boolean` | True for `0x0000…0000` (all chains) |
 | `isBurnAddress(addr)` | `boolean` | True if hex starts with `dead`/`deaf`/`deed`/etc |
 
-No react-specific UI warnings yet — that belongs in `connect-react` when a consumer asks for it.
+No react-specific UI warnings yet — that belongs in `connect-appkit` when a consumer asks for it.
 
 ---
 

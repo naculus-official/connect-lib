@@ -106,7 +106,7 @@ XRP Ledger / Xaman connector (`XRPLConnectorImpl` / `xrplConnector` singleton):
 - Packages: core, walletconnect, evm-injected, xrpl, embedded, wallet-engine, siwx, connector-solana, connector-passkeys
 - Framework: Vitest (node environment)
 - Run: `pnpm test:run` or `pnpm test:coverage`
-- React/UI tests live in [connect-react](https://github.com/naculus-official/connect-react)
+- React/UI tests live in [connect-appkit](https://github.com/naculus-official/connect-appkit)
 
 ---
 
@@ -127,7 +127,7 @@ manager.register("eip6963", eip6963Connector);
 const session = await manager.connect("walletconnect");
 ```
 
-For React quick start, see [connect-react docs](https://github.com/naculus-official/connect-react).
+For React quick start, see [connect-appkit docs](https://github.com/naculus-official/connect-appkit).
 
 ---
 

@@ -4,12 +4,12 @@ Cross-chain Web3 connection SDK. Pure library, no frontend components.
 
 ## Positioning
 
-`connect-lib/` is a framework-agnostic library monorepo that only handles **connection logic**. Frontend components (React hooks, UI components) live in the separate [`connect-react/`](../connect-react/) project.
+`connect-lib/` is a framework-agnostic library monorepo that only handles **connection logic**. Frontend components (React hooks, UI components) live in the separate [`connect-appkit/`](../connect-appkit/) project.
 
 ```
 naculus/
 ├── connect-lib/       ← You are here: pure library
-└── connect-react/     ← Frontend components (React)
+└── connect-appkit/     ← Frontend components (React)
 ```
 
 ## Package map
@@ -51,8 +51,8 @@ pnpm add @naculus/connect
 # Or individual packages: pnpm add @naculus/connect-core @naculus/connector-walletconnect
 ```
 
-> **Use React?** Install `connect-react` instead — it wraps the library in hooks.
-> See [connect-react](../connect-react/).
+> **Use React?** Install `connect-appkit` instead — it wraps the library in hooks.
+> See [connect-appkit](../connect-appkit/).
 
 ```ts
 import { ConnectorManager } from "@naculus/connect-core";
@@ -172,7 +172,7 @@ connect-lib/
 ## FAQ
 
 **Q: Does connect-lib/ have UI components?**
-No. Frontend components are in `connect-react/`.
+No. Frontend components are in `connect-appkit/`.
 
 **Q: What's the difference between wallet-engine and connector-embedded?**
 `wallet-engine` is a pure crypto library (key generation, signing) — it doesn't know what `UniversalConnector` is. `connector-embedded` is the adapter layer that wraps wallet-engine into a connector.
