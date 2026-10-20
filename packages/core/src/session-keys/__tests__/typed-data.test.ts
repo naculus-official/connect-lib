@@ -27,7 +27,7 @@ async function authorizedKey(
   m: SessionKeyManager,
   scope: Parameters<SessionKeyManager["createSessionKey"]>[0],
 ) {
-  // EIP-3009 needs a named rail; tests that omit it override with undefined.
+  // EIP-3009 needs a named rail.
   const info = await m.createSessionKey(
     { rails: ["x402-exact"], ...scope },
     SIGNER,
@@ -275,18 +275,17 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
     ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
 
-  it("still signs raw digests when recipients are not limited", async () => {
+  it("rejects raw digests when EIP-3009 rails are allowed", async () => {
     const m = manager();
     const info = await authorizedKey(m, {
       allowedContracts: [PAYEE],
-      rails: undefined,
     });
     await expect(
       m.signWithSessionKey(info.id, `0x${"ab".repeat(32)}`, {
         to: PAYEE,
         value: "1",
       }),
-    ).resolves.toMatch(/^0x/);
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
 
   it("signs the digest it checked, recoverable to the session key", async () => {

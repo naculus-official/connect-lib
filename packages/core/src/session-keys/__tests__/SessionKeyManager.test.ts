@@ -47,6 +47,7 @@ function makeScope(overrides?: Partial<SessionKeyScope>): SessionKeyScope {
   return {
     expiry: Math.floor(Date.now() / 1000) + 3600,
     mode: "offchain",
+    rails: ["transfer"],
     maxTxCount: 10,
     maxTotalValue: BigInt("100000000000000000"), // 0.1 ETH
     allowedContracts: [
@@ -113,7 +114,10 @@ describe("SessionKeyManager", () => {
 
   describe("createSessionKey", () => {
     it("should create a session key with default scope", async () => {
-      const info = await manager.createSessionKey(undefined, signerAddress);
+      const info = await manager.createSessionKey(
+        { rails: ["transfer"] },
+        signerAddress,
+      );
       expect(info.id).toBeTruthy();
       expect(info.publicKey).toMatch(/^0x[a-f0-9]{66}$/i);
       expect(info.status).toBe("active");
@@ -138,8 +142,14 @@ describe("SessionKeyManager", () => {
     });
 
     it("should generate a unique public key each time", async () => {
-      const info1 = await manager.createSessionKey(undefined, signerAddress);
-      const info2 = await manager.createSessionKey(undefined, signerAddress);
+      const info1 = await manager.createSessionKey(
+        { rails: ["transfer"] },
+        signerAddress,
+      );
+      const info2 = await manager.createSessionKey(
+        { rails: ["transfer"] },
+        signerAddress,
+      );
       expect(info1.publicKey).not.toBe(info2.publicKey);
       expect(info1.id).not.toBe(info2.id);
     });
@@ -147,7 +157,10 @@ describe("SessionKeyManager", () => {
     it("should throw when requireAllowedContracts is enabled and no contracts provided", async () => {
       const strictManager = createManager({ requireAllowedContracts: true });
       await expect(
-        strictManager.createSessionKey({ mode: "offchain" }, signerAddress),
+        strictManager.createSessionKey(
+          { mode: "offchain", rails: ["transfer"] },
+          signerAddress,
+        ),
       ).rejects.toThrow();
     });
 
@@ -164,6 +177,16 @@ describe("SessionKeyManager", () => {
           signerAddress,
         ),
       ).rejects.toMatchObject({ code: "session_key_invalid_input" });
+    });
+
+    it("should reject a scope without payment rails", async () => {
+      await expect(
+        manager.createSessionKey({ mode: "offchain" }, signerAddress),
+      ).rejects.toMatchObject({
+        code: "session_key_invalid_input",
+        details:
+          "rails must list distinct values from transfer, x402-exact, mpp-charge",
+      });
     });
 
     it("should reject malformed token per-tx limits and native transfer modes", async () => {
@@ -226,7 +249,7 @@ describe("SessionKeyManager", () => {
       );
 
       const info = await legacyCompatibleManager.createSessionKey(
-        undefined,
+        { rails: ["transfer"] },
         signerAddress,
       );
       const stored = await new SessionKeyStorage(adapter).get(info.id);
@@ -257,9 +280,9 @@ describe("SessionKeyManager", () => {
     });
 
     it("should list all created session keys", async () => {
-      await manager.createSessionKey(undefined, signerAddress);
-      await manager.createSessionKey(undefined, signerAddress);
-      await manager.createSessionKey(undefined, signerAddress);
+      await manager.createSessionKey({ rails: ["transfer"] }, signerAddress);
+      await manager.createSessionKey({ rails: ["transfer"] }, signerAddress);
+      await manager.createSessionKey({ rails: ["transfer"] }, signerAddress);
 
       const sessions = await manager.listSessions();
       expect(sessions).toHaveLength(3);
@@ -269,7 +292,10 @@ describe("SessionKeyManager", () => {
     });
 
     it("should include revoked and expired keys", async () => {
-      const info = await manager.createSessionKey(undefined, signerAddress);
+      const info = await manager.createSessionKey(
+        { rails: ["transfer"] },
+        signerAddress,
+      );
       await manager.revokeSession(info.id);
 
       const sessions = await manager.listSessions();
@@ -282,7 +308,7 @@ describe("SessionKeyManager", () => {
       try {
         const expiredManager = createManager({ defaultExpiryMs: 60_000 });
         const info = await expiredManager.createSessionKey(
-          undefined,
+          { rails: ["transfer"] },
           signerAddress,
         );
         vi.advanceTimersByTime(120_000);
@@ -297,7 +323,10 @@ describe("SessionKeyManager", () => {
 
   describe("revokeSession", () => {
     it("should revoke an active session key", async () => {
-      const info = await manager.createSessionKey(undefined, signerAddress);
+      const info = await manager.createSessionKey(
+        { rails: ["transfer"] },
+        signerAddress,
+      );
       expect(info.status).toBe("active");
 
       await manager.revokeSession(info.id);
@@ -308,7 +337,10 @@ describe("SessionKeyManager", () => {
     });
 
     it("should throw when trying to use a revoked key", async () => {
-      const info = await manager.createSessionKey(undefined, signerAddress);
+      const info = await manager.createSessionKey(
+        { rails: ["transfer"] },
+        signerAddress,
+      );
       await manager.revokeSession(info.id);
 
       await expect(
@@ -334,6 +366,40 @@ describe("SessionKeyManager", () => {
   });
 
   describe("checkSessionScope", () => {
+    it.each(["missing", "unknown"] as const)(
+      "should reject a stored scope with %s rails",
+      async (railState) => {
+        const adapter = new MemoryStorageAdapter();
+        const scopedManager = createManagerWithAdapter(adapter);
+        const info = await scopedManager.createSessionKey(
+          makeScope(),
+          signerAddress,
+        );
+        const raw = await adapter.get<string>("session_keys");
+        const records = JSON.parse(
+          typeof raw === "string" ? raw : JSON.stringify(raw),
+        ) as Array<Record<string, unknown>>;
+        const record = records.find((item) => item.id === info.id)!;
+        const storedScope = record.scope as Record<string, unknown>;
+        if (railState === "missing") {
+          delete storedScope.rails;
+        } else {
+          storedScope.rails = ["unknown"];
+        }
+        await adapter.set("session_keys", JSON.stringify(records) as never);
+
+        const check = await scopedManager.checkSessionScope(info.id, testTx);
+        expect(check.valid).toBe(false);
+        expect(check.reason).toContain(
+          "rails must list distinct values from transfer, x402-exact, mpp-charge",
+        );
+        await expect(
+          scopedManager.signWithSessionKey(info.id, `0x${"ab".repeat(32)}`, testTx),
+        ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+        await scopedManager.clearAll();
+      },
+    );
+
     it("should allow transactions within scope", async () => {
       const info = await manager.createSessionKey(makeScope(), signerAddress);
       const result = await manager.checkSessionScope(info.id, testTx);
@@ -764,7 +830,7 @@ describe("SessionKeyManager", () => {
       try {
         const expiredManager = createManager({ defaultExpiryMs: 60_000 });
         const info = await expiredManager.createSessionKey(
-          undefined,
+          { rails: ["transfer"] },
           signerAddress,
         );
         vi.advanceTimersByTime(120_000);
@@ -788,7 +854,7 @@ describe("SessionKeyManager", () => {
       // now authorized only by a verified delegation (delegation-redemption
       // tests cover that path).
       const info = await manager.createSessionKey(
-        { mode: "eip7702" },
+        { mode: "eip7702", rails: ["transfer"] },
         signerAddress,
       );
       await expect(

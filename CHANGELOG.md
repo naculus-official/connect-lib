@@ -9,6 +9,7 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Breaking
 
+- **EVM session key scopes require payment rails** (`@naculus/connect-core`) — `SessionKeyScope.rails` is now required and must contain distinct supported rails (`"transfer"`, `"x402-exact"`, or `"mpp-charge"`). Creating or validating a scope without a rail or with an unknown rail fails closed. Existing callers must add the rails authorized for each session key.
 - **Browsers now require encryption by default for embedded wallet storage** (`@naculus/wallet-engine`, `@naculus/connector-embedded` and other packages that construct `PocketWallet`) — in a browser window, a Web Worker, or any non-Node runtime with IndexedDB, constructing a wallet with neither `encryptionPassphrase` nor `allowInsecureStorage` now throws `storage_unavailable`. Before, `allowInsecureStorage` defaulted to allowed whenever `window` was undefined, which wrongly treated Web Workers as Node; only a real Node process now defaults to allowing plaintext. Migration: set `encryptionPassphrase`, or set `allowInsecureStorage: true` to keep plaintext storage (discouraged: any script in the origin can read the keys).
 - **`IndexedDbStorageAdapter.load()` throws when IndexedDB is unavailable** (`@naculus/wallet-engine`) — it now rejects with `WalletError("storage_unavailable")`, like `save()` and `clear()`, instead of returning `null`, which looked like an empty wallet. IndexedDB being unavailable no longer silently drops writes or reads as "no wallet".
 

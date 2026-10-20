@@ -907,6 +907,7 @@ describe("authorization listing", () => {
     const info = await evm.createSessionKey(
       {
         mode: "eip7702",
+        rails: ["transfer"],
         expiry: Math.floor(Date.now() / 1000) + 3_600,
         allowedContracts: [TOKEN],
         allowedMethods: ["0xa9059cbb"],
@@ -948,6 +949,7 @@ describe("authorization listing", () => {
     );
     await evm.createSessionKey({
       mode: "offchain",
+      rails: ["transfer"],
       expiry: Math.floor(Date.now() / 1000) + 3_600,
       allowedChainIds: [1],
       allowedContracts: [TOKEN],

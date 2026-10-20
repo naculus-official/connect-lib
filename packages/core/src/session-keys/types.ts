@@ -77,15 +77,15 @@ export interface SessionKeyScope {
    *   needs `x402-exact` or `mpp-charge`; both sign the same typed data.
    * - A delegation redemption (`signDelegationRedemption`) needs `transfer`.
    * - Raw-digest signing (`signWithSessionKey`,
-   *   `signWithVerifiedOffchainAuthorization`) is refused while this is set:
-   *   a digest cannot be tied to a rail.
+   *   `signWithVerifiedOffchainAuthorization`) is refused when either
+   *   EIP-3009 rail is allowed: a digest cannot be tied to that rail.
+   *   Transfer-only scopes retain transaction-hash signing.
    *
-   * Omitted (a scope written before this field existed, or one built by
-   * hand): the key signs no EIP-3009 typed data — the scope does not name a
-   * rail that allows it. Transactions and delegation redemptions are checked
-   * as before. `compileEvmSessionScope` always sets it from the grant.
+   * Required for every EVM session key. Legacy or hand-built scopes without
+   * a valid rail are rejected when created or validated. `compileEvmSessionScope`
+   * sets it from the grant.
    */
-  rails?: SessionKeyRail[];
+  rails: SessionKeyRail[];
 
   /** Session type: off-chain agreement, EIP-7702 delegation, or AA module */
   mode: "offchain" | "eip7702" | "aa_module";

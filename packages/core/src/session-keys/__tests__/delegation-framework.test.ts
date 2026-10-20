@@ -26,6 +26,7 @@ const E = DELEGATION_FRAMEWORK.enforcers;
 
 const paymentScope: SessionKeyScope = {
   mode: "eip7702",
+  rails: ["transfer"],
   expiry: 1_790_000_000,
   allowedContracts: [USDC],
   allowedMethods: ["0xa9059cbb"],
@@ -331,6 +332,7 @@ describe("delegation framework: refusals", () => {
         delegate: KEY,
         scope: {
           mode: "eip7702",
+          rails: ["transfer"],
           expiry: 1_800_000_000,
           allowedContracts: [PAYEE, target as `0x${string}`],
           allowedMethods: ["0xe9ae5c53"],
@@ -349,6 +351,7 @@ describe("delegation framework: refusals", () => {
   it("applies a configured forbidden-selector list", () => {
     const scope: SessionKeyScope = {
       mode: "eip7702",
+      rails: ["transfer"],
       expiry: 1_800_000_000,
       allowedContracts: [PAYEE],
       allowedMethods: ["0xd505accf"],

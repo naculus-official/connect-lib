@@ -66,6 +66,15 @@ const SESSION_KEY_RAILS: readonly SessionKeyRail[] = [
 /** Rails whose payment is an EIP-3009 TransferWithAuthorization signature. */
 const EIP3009_RAILS: readonly SessionKeyRail[] = ["x402-exact", "mpp-charge"];
 
+function hasValidSessionKeyRails(value: unknown): value is SessionKeyRail[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    new Set(value).size === value.length &&
+    value.every((rail) => SESSION_KEY_RAILS.includes(rail))
+  );
+}
+
 type OffchainAuthorizationVerifier = (input: {
   message: string;
   signature: `0x${string}`;
@@ -572,6 +581,12 @@ export class SessionKeyManager {
    * (`signTypedDataWithSessionKey`) may sign.
    */
   private refuseRawDigestForRecipientScope(stored: StoredSessionKey): void {
+    if (!hasValidSessionKeyRails(stored.scope.rails)) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        `rails must list distinct values from ${SESSION_KEY_RAILS.join(", ")}`,
+      );
+    }
     // An eip7702 key signs only its delegation redemptions; a raw digest or
     // its exported key would let it sign anything its address can send.
     if (stored.scope.mode === "eip7702") {
@@ -589,9 +604,10 @@ export class SessionKeyManager {
         "This session key limits recipients; a raw digest cannot be bound to a recipient. Use signTypedDataWithSessionKey.",
       );
     }
-    // A raw digest could be any rail's payload, so a rail-limited key cannot
-    // sign one.
-    if (stored.scope.rails !== undefined) {
+    // A raw digest could be an EIP-3009 payload. Keep it unavailable when the
+    // scope permits either payment rail that uses TransferWithAuthorization;
+    // a transfer-only scope can still sign a transaction hash as before.
+    if (stored.scope.rails.some((rail) => EIP3009_RAILS.includes(rail))) {
       throw createSessionKeyError(
         "session_key_scope_exceeded",
         "This session key limits rails; a raw digest cannot be bound to a rail. Use signTypedDataWithSessionKey.",
@@ -1046,6 +1062,7 @@ export class SessionKeyManager {
   ): Promise<boolean> {
     const authorization = stored.authorization;
     if (
+      !hasValidSessionKeyRails(stored.scope.rails) ||
       authorization.type !== "offchain" ||
       authorization.message !== expectedMessage ||
       !/^0x[0-9a-fA-F]{130}$/.test(authorization.rawSignature ?? "") ||
@@ -1210,7 +1227,7 @@ export class SessionKeyManager {
       allowedChainIds: scope?.allowedChainIds ?? undefined,
       allowedRecipients: scope?.allowedRecipients ?? undefined,
       nativeTransfer: scope?.nativeTransfer ?? undefined,
-      rails: scope?.rails ? [...scope.rails] : undefined,
+      rails: scope?.rails ? [...scope.rails] : [],
       mode: scope?.mode ?? "offchain",
     };
   }
@@ -1255,13 +1272,7 @@ export class SessionKeyManager {
         );
       }
     }
-    if (
-      scope.rails !== undefined &&
-      (!Array.isArray(scope.rails) ||
-        scope.rails.length === 0 ||
-        new Set(scope.rails).size !== scope.rails.length ||
-        !scope.rails.every((rail) => SESSION_KEY_RAILS.includes(rail)))
-    ) {
+    if (!hasValidSessionKeyRails(scope.rails)) {
       throw createSessionKeyError(
         "session_key_invalid_input",
         `rails must list distinct values from ${SESSION_KEY_RAILS.join(", ")}`,
@@ -1423,6 +1434,13 @@ export class SessionKeyManager {
 
     if (stored.status === "expired") {
       throw createSessionKeyError("session_key_expired", stored.id);
+    }
+
+    if (!hasValidSessionKeyRails(stored.scope.rails)) {
+      throw createSessionKeyError(
+        "session_key_scope_exceeded",
+        `rails must list distinct values from ${SESSION_KEY_RAILS.join(", ")}`,
+      );
     }
 
     // Auto-expire if past expiry
