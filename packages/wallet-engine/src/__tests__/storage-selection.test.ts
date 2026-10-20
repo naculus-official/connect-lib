@@ -254,3 +254,49 @@ describe("PocketWallet — storage security tier", () => {
     expect(w.isSecureStorage()).toBe(false);
   });
 });
+
+describe("PocketWallet — Web Worker and Node defaults", () => {
+  function inWorkerEnv(fn: () => void): void {
+    const g = globalThis as any;
+    const prevWindow = g.window;
+    const prevImport = Object.getOwnPropertyDescriptor(g, "importScripts");
+    const prevIdb = Object.getOwnPropertyDescriptor(g, "indexedDB");
+    delete g.window;
+    g.importScripts = () => {};
+    g.indexedDB = {};
+    try {
+      fn();
+    } finally {
+      if (prevWindow !== undefined) g.window = prevWindow;
+      if (prevImport) Object.defineProperty(g, "importScripts", prevImport);
+      else delete g.importScripts;
+      if (prevIdb) Object.defineProperty(g, "indexedDB", prevIdb);
+      else delete g.indexedDB;
+    }
+  }
+
+  it("worker (importScripts defined, no window) rejects plaintext by default", () => {
+    inWorkerEnv(() => {
+      expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
+        "Unencrypted IndexedDB storage is disabled",
+      );
+    });
+  });
+
+  it("worker accepts plaintext only with allowInsecureStorage: true", () => {
+    inWorkerEnv(() => {
+      expect(
+        () => new PocketWallet({ storageKey: "t", allowInsecureStorage: true }),
+      ).not.toThrow();
+    });
+  });
+
+  it("real Node (no window, no importScripts) still defaults to plaintext allowed", () => {
+    const g = globalThis as any;
+    expect(g.window).toBeUndefined();
+    expect(g.importScripts).toBeUndefined();
+    expect(
+      () => new PocketWallet({ storageKey: "t", storageType: "localStorage" }),
+    ).not.toThrow();
+  });
+});

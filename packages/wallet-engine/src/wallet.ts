@@ -539,6 +539,20 @@ function refuseSetCodeTransaction(
 }
 
 /**
+ * True in a browser window, a Web Worker, or any non-Node runtime that exposes
+ * IndexedDB. Only a real Node process (no window/worker globals) is treated as
+ * a trusted server context where plaintext storage defaults to allowed.
+ */
+function isBrowserLikeContext(): boolean {
+  const g = globalThis as Record<string, unknown>;
+  if (typeof g.window !== "undefined") return true;
+  if (typeof g.importScripts === "function") return true;
+  const proc = g.process as { versions?: { node?: string } } | undefined;
+  const isNode = typeof proc?.versions?.node === "string";
+  return !isNode && typeof g.indexedDB !== "undefined";
+}
+
+/**
  * Pocket Wallet — the core wallet class.
  *
  * Usage:
@@ -640,7 +654,7 @@ export class PocketWallet {
     const explicitType = config.storageType;
     const passphrase = config.encryptionPassphrase;
     const allowInsecureStorage =
-      config.allowInsecureStorage ?? typeof window === "undefined";
+      config.allowInsecureStorage ?? !isBrowserLikeContext();
 
     if (explicitType === "indexedDb") {
       const idbAdapter = new IndexedDbStorageAdapter(this.cfg.storageKey);

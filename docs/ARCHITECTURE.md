@@ -309,8 +309,15 @@ const wallet = new PocketWallet({
 });
 
 // Force IndexedDB (throws if unavailable)
-const wallet = new PocketWallet({ storageType: "indexedDb" });
+const wallet = new PocketWallet({
+  storageType: "indexedDb",
+  encryptionPassphrase: async () => getUserPassphrase(),
+});
 ```
+
+Default: in a browser or Web Worker, a wallet without `encryptionPassphrase`
+throws unless `allowInsecureStorage: true` is set. Only a real Node process
+defaults to allowing plaintext.
 
 ### AES-256-GCM encryption layer
 

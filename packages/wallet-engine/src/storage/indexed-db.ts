@@ -37,20 +37,21 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
   }
 
   /**
-   * Writes and deletes must not be dropped silently: a caller that thinks the
-   * wallet was saved or wiped would otherwise be wrong without any signal.
+   * Reads, writes and deletes must not degrade silently: a null read looks like
+   * an empty wallet, and a dropped write or delete leaves the caller wrong
+   * without any signal.
    */
   private assertAvailable(): void {
     if (!this.isAvailable()) {
       throw new WalletError(
         "storage_unavailable",
-        "IndexedDB is unavailable; the wallet was not written or cleared.",
+        "IndexedDB is unavailable; the wallet was not read, written or cleared.",
       );
     }
   }
 
   async load(): Promise<WalletData | null> {
-    if (!this.isAvailable()) return null;
+    this.assertAvailable();
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");

@@ -129,12 +129,11 @@ describe("B — IndexedDbStorageAdapter: save → load → clear", () => {
     version: 2,
   };
 
-  it("load returns null when IndexedDB is not available (Node env)", async () => {
+  it("load throws when IndexedDB is not available (not an empty wallet)", async () => {
     const adapter = new IndexedDbStorageAdapter("test-idb-load");
-    const result = await adapter.load();
-    // Node.js: returns null since indexedDB is unavailable
-    // Browser: returns null if no data saved
-    expect(result === null || result !== null).toBe(true);
+    await expect(adapter.load()).rejects.toMatchObject({
+      code: "storage_unavailable",
+    });
   });
 
   it("clear throws when IndexedDB is not available (no silent no-op)", async () => {

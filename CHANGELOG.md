@@ -7,6 +7,11 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Breaking
+
+- **Browsers now require encryption by default for embedded wallet storage** (`@naculus/wallet-engine`, `@naculus/connector-embedded` and other packages that construct `PocketWallet`) — in a browser window, a Web Worker, or any non-Node runtime with IndexedDB, constructing a wallet with neither `encryptionPassphrase` nor `allowInsecureStorage` now throws `storage_unavailable`. Before, `allowInsecureStorage` defaulted to allowed whenever `window` was undefined, which wrongly treated Web Workers as Node; only a real Node process now defaults to allowing plaintext. Migration: set `encryptionPassphrase`, or set `allowInsecureStorage: true` to keep plaintext storage (discouraged: any script in the origin can read the keys).
+- **`IndexedDbStorageAdapter.load()` throws when IndexedDB is unavailable** (`@naculus/wallet-engine`) — it now rejects with `WalletError("storage_unavailable")`, like `save()` and `clear()`, instead of returning `null`, which looked like an empty wallet. IndexedDB being unavailable no longer silently drops writes or reads as "no wallet".
+
 ## 0.13.0 — 2026-10-18
 
 Minor release with one breaking change to session key scopes. All packages move to 0.13.0 together. Packages not named below, other than the `@naculus/connect` umbrella that re-exports `@naculus/connect-core`, `@naculus/siwx` and `@naculus/wallet-engine`, are version bump only.
