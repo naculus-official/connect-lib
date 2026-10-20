@@ -54,7 +54,7 @@ describe("PocketWallet — encrypted-by-default storage", () => {
   it("browser default without passphrase throws when IndexedDB is unavailable", () => {
     inBrowserEnv(false, () => {
       expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
-        "Provide encryptionPassphrase",
+        "A storage passphrase is required",
       );
     });
   });
@@ -62,7 +62,7 @@ describe("PocketWallet — encrypted-by-default storage", () => {
   it("browser default without passphrase throws when IndexedDB is available", () => {
     inBrowserEnv(true, () => {
       expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
-        "Unencrypted IndexedDB storage is disabled",
+        "A storage passphrase is required",
       );
     });
   });
@@ -82,18 +82,14 @@ describe("PocketWallet — encrypted-by-default storage", () => {
     inBrowserEnv(true, () => {
       expect(
         () => new PocketWallet({ storageType: "indexedDb", storageKey: "t" }),
-      ).toThrow("Unencrypted IndexedDB storage is disabled");
+      ).toThrow("A storage passphrase is required");
     });
   });
 
-  it("allowInsecureStorage: true permits plaintext IndexedDB", () => {
+  it("allowInsecureStorage has no effect", () => {
     inBrowserEnv(true, () => {
-      const w = new PocketWallet({
-        storageKey: "t",
-        allowInsecureStorage: true,
-      });
-      expect(w.getStorageSecurityLevel()).toBe(2);
-      expect(w.isStorageDegraded()).toBe(false);
+      expect(() => new PocketWallet({ storageKey: "t", allowInsecureStorage: true }))
+        .toThrow("A storage passphrase is required");
     });
   });
 
@@ -101,7 +97,7 @@ describe("PocketWallet — encrypted-by-default storage", () => {
     inBrowserEnv(false, () => {
       expect(
         () => new PocketWallet({ storageKey: "t", allowInsecureStorage: true }),
-      ).toThrow("Provide encryptionPassphrase");
+      ).toThrow("A storage passphrase is required");
     });
   });
 
@@ -113,7 +109,7 @@ describe("PocketWallet — encrypted-by-default storage", () => {
             storageKey: "t",
             allowInsecureStorage: false,
           }),
-      ).toThrow("IndexedDB is unavailable");
+      ).toThrow("A storage passphrase is required");
     });
   });
 
@@ -138,10 +134,10 @@ describe("PocketWallet — encrypted-by-default storage", () => {
     }
   });
 
-  it("Node default remains plaintext-allowed for available backends", () => {
+  it("Node requires a passphrase for available backends", () => {
     expect(
       () => new PocketWallet({ storageType: "localStorage", storageKey: "t" }),
-    ).not.toThrow();
+    ).toThrow("A storage passphrase is required");
   });
 });
 
@@ -168,22 +164,22 @@ describe("IndexedDbStorageAdapter — writes never drop silently", () => {
 });
 
 describe("PocketWallet — storage security tier", () => {
-  it("auto-detect in Node allows plaintext localStorage fallback", () => {
-    const w = new PocketWallet({ storageKey: "t" });
-    expect(w.getStorageType()).toBe("localStorage");
-    expect(w.getStorageSecurityLevel()).toBe(4);
-    expect(w.isStorageDegraded()).toBe(true);
+  it("auto-detect in Node requires a passphrase", () => {
+    expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
+      "A storage passphrase is required",
+    );
   });
 
-  it("storageType: 'localStorage' → tier 4", () => {
+  it("storageType: 'localStorage' requires encryption", () => {
     const w = new PocketWallet({
       storageType: "localStorage",
       storageKey: "t",
+      encryptionPassphrase: passphrase,
     });
-    expect(w.getStorageSecurityLevel()).toBe(4);
+    expect(w.getStorageSecurityLevel()).toBe(3);
   });
 
-  it("rejects unencrypted localStorage in a browser unless explicitly allowed", () => {
+  it("rejects localStorage without a passphrase even when explicitly allowed", () => {
     const previousWindow = (globalThis as any).window;
     (globalThis as any).window = {};
     try {
@@ -193,14 +189,12 @@ describe("PocketWallet — storage security tier", () => {
             storageType: "localStorage",
             storageKey: "browser-secure",
           }),
-      ).toThrow("Unencrypted localStorage is disabled");
-      expect(
-        new PocketWallet({
+      ).toThrow("A storage passphrase is required");
+      expect(() => new PocketWallet({
           storageType: "localStorage",
           storageKey: "browser-dev",
           allowInsecureStorage: true,
-        }).getStorageSecurityLevel(),
-      ).toBe(4);
+        })).toThrow("A storage passphrase is required");
     } finally {
       if (previousWindow === undefined) delete (globalThis as any).window;
       else (globalThis as any).window = previousWindow;
@@ -218,7 +212,7 @@ describe("PocketWallet — storage security tier", () => {
 
   it("storageType: 'indexedDb' throws in Node (IndexedDB unavailable)", () => {
     expect(
-      () => new PocketWallet({ storageType: "indexedDb", storageKey: "t" }),
+      () => new PocketWallet({ storageType: "indexedDb", storageKey: "t", encryptionPassphrase: passphrase }),
     ).toThrow("IndexedDB is unavailable");
   });
 
@@ -235,9 +229,9 @@ describe("PocketWallet — storage security tier", () => {
     expect(w.getStorageSecurityLevel() <= 2).toBe(true);
   });
 
-  it("encryptionPassphrase with IndexedDB (if available) → tier 1", () => {
+  it("encryptionPassphrase with IndexedDB → tier 1", (ctx) => {
     const idb = new IndexedDbStorageAdapter("t");
-    if (!idb.isAvailable()) return; // skip in Node
+    if (!idb.isAvailable()) ctx.skip();
     const w = new PocketWallet({
       storage: idb,
       storageKey: "t",
@@ -250,11 +244,12 @@ describe("PocketWallet — storage security tier", () => {
     const w = new PocketWallet({
       storageType: "localStorage",
       storageKey: "t",
+      encryptionPassphrase: passphrase,
     });
-    expect(w.getStorageType()).toBe("localStorage");
+    expect(w.getStorageType()).toBe("encrypted");
     expect(w.isStorageDegraded()).toBe(true);
-    expect(w.isEncrypted()).toBe(false);
-    expect(w.isSecureStorage()).toBe(false);
+    expect(w.isEncrypted()).toBe(true);
+    expect(w.isSecureStorage()).toBe(true);
   });
 });
 
@@ -289,7 +284,7 @@ describe("PocketWallet — Web Worker and Node defaults", () => {
   it("worker (importScripts defined, no window) rejects plaintext by default", () => {
     inWorkerEnv(() => {
       expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
-        "Unencrypted IndexedDB storage is disabled",
+        "A storage passphrase is required",
       );
     });
   });
@@ -299,16 +294,16 @@ describe("PocketWallet — Web Worker and Node defaults", () => {
       delete (globalThis as any).indexedDB;
       expect(
         () => new PocketWallet({ storageKey: "t", allowInsecureStorage: true }),
-      ).toThrow("Provide encryptionPassphrase");
+      ).toThrow("A storage passphrase is required");
     });
   });
 
-  it("real Node (no window, no importScripts) still defaults to plaintext allowed", () => {
+  it("real Node (no window, no importScripts) requires a passphrase", () => {
     const g = globalThis as any;
     expect(g.window).toBeUndefined();
     expect(g.importScripts).toBeUndefined();
     expect(
       () => new PocketWallet({ storageKey: "t", storageType: "localStorage" }),
-    ).not.toThrow();
+    ).toThrow("A storage passphrase is required");
   });
 });

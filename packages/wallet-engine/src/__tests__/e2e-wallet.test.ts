@@ -17,6 +17,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StorageAdapter } from "../storage/types";
+import { WalletError } from "../errors";
 import type { WalletData } from "../wallet";
 import { PocketWallet } from "../wallet";
 
@@ -24,6 +25,7 @@ import { PocketWallet } from "../wallet";
 
 const TEST_MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_PASSPHRASE = async () => "test-passphrase-only";
 
 const KNOWN_ADDRESS_FROM_TEST_MNEMONIC =
   "0x9858effd232b4033e47d90003d41ec34ecaeda94";
@@ -187,26 +189,97 @@ describe("E2E: Wallet Persistence", () => {
   });
 
   it("should save wallet when autoSave is enabled", async () => {
-    const w = new PocketWallet({ storage, autoSave: true });
+    const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     const data = await w.generate();
     const saved = await storage.load();
     expect(saved).not.toBeNull();
     expect(saved!.accounts[0].address).toBe(data.address);
   });
 
+  it("should persist account metadata without private keys", async () => {
+    const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
+    await w.importMnemonic(TEST_MNEMONIC);
+
+    const stored = await storage.load();
+    expect(stored).not.toBeNull();
+    expect(stored!.mnemonic).toBe(TEST_MNEMONIC);
+    expect(JSON.stringify(stored)).not.toContain("privateKey");
+    expect(stored!.accounts.map((account) => account.address)).toContain(
+      KNOWN_ADDRESS_FROM_TEST_MNEMONIC,
+    );
+  });
+
+  it("should refuse to persist a raw-key wallet without a mnemonic", async () => {
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
+    await w.importPrivateKey(`0x${"ab".repeat(32)}`);
+
+    await expect(w.save()).rejects.toBeInstanceOf(WalletError);
+    expect(await storage.load()).toBeNull();
+    await expect(w.load()).resolves.toBe(true);
+  });
+
+  it("should not auto-persist an imported raw private key", async () => {
+    const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
+    await w.importPrivateKey(`0x${"ab".repeat(32)}`);
+
+    expect(await storage.load()).toBeNull();
+  });
+
+  it("should ignore legacy account keys and re-derive them from the mnemonic", async () => {
+    const source = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
+    const expected = await source.importMnemonic(TEST_MNEMONIC);
+    const legacyRecord = {
+      ...expected,
+      accounts: expected.accounts.map((account) => ({
+        ...account,
+        privateKey: "legacy-private-key-must-be-ignored",
+      })),
+    };
+    await storage.save(legacyRecord);
+
+    const loaded = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
+    await expect(loaded.load()).resolves.toBe(true);
+    expect(loaded.accounts()).toEqual(expected.accounts);
+  });
+
+  it("should reject stored addresses that do not match the mnemonic", async () => {
+    const source = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+    });
+    const expected = await source.importMnemonic(TEST_MNEMONIC);
+    await storage.save({
+      ...expected,
+      accounts: expected.accounts.map((account, index) => ({
+        ...account,
+        address:
+          index === 0
+            ? "0x0000000000000000000000000000000000000000"
+            : account.address,
+        privateKey: "legacy-private-key-must-be-ignored",
+      })),
+    });
+
+    const loaded = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
+    await expect(loaded.load()).rejects.toBeInstanceOf(WalletError);
+  });
+
   it("should not save when autoSave is disabled", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
     const saved = await storage.load();
     expect(saved).toBeNull();
   });
 
   it("should load wallet from storage into a new instance", async () => {
-    const w1 = new PocketWallet({ storage, autoSave: true });
+    const w1 = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     await w1.generate();
     const address = w1.address;
 
-    const w2 = new PocketWallet({ storage, autoSave: false });
+    const w2 = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     const loaded = await w2.load();
     expect(loaded).toBe(true);
     expect(w2.address?.toLowerCase()).toBe(address?.toLowerCase());
@@ -219,7 +292,7 @@ describe("E2E: Wallet Persistence", () => {
   });
 
   it("should clear wallet from storage and memory", async () => {
-    const w = new PocketWallet({ storage, autoSave: true });
+    const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
     expect(w.hasWallet).toBe(true);
 
@@ -230,7 +303,7 @@ describe("E2E: Wallet Persistence", () => {
   });
 
   it("should securely wipe sensitive data", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
 
     await w.wipe();
@@ -241,7 +314,7 @@ describe("E2E: Wallet Persistence", () => {
   });
 
   it("should save wallet explicitly (manual save)", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
     expect(await storage.load()).toBeNull();
 
@@ -250,7 +323,7 @@ describe("E2E: Wallet Persistence", () => {
   });
 
   it("should overwrite previous wallet data on re-save", async () => {
-    const w = new PocketWallet({ storage, autoSave: true });
+    const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
     const addr1 = w.address;
     // Changing to a known wallet (replaces storage)
@@ -576,7 +649,7 @@ describe("E2E: Edge Cases", () => {
 
   it("should allow manual save after deferred wallet creation", async () => {
     const storage = new MockStorage();
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
     expect(await storage.load()).toBeNull();
 
@@ -595,7 +668,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
   });
 
   it("should zero-fill mnemonic on destroySession", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.importMnemonic(TEST_MNEMONIC);
     const dataBefore = w.getWalletData()!;
     expect(dataBefore.mnemonic).toBe(TEST_MNEMONIC);
@@ -607,7 +680,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
   });
 
   it("should zero-fill private key on destroySession", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
     const dataBefore = w.getWalletData()!;
     expect(dataBefore!.accounts[0].privateKey).toMatch(/^0x[0-9a-f]{64}$/);
@@ -617,7 +690,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
   });
 
   it("should make wallet unusable after destroySession", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.importMnemonic(TEST_MNEMONIC);
 
     expect(w.state.isConnected).toBe(true);
@@ -629,7 +702,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
   });
 
   it("should allow reload after destroySession when storage persists", async () => {
-    const w1 = new PocketWallet({ storage, autoSave: true });
+    const w1 = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     await w1.generate();
     const originalAddress = w1.address;
 
@@ -637,20 +710,20 @@ describe("E2E: Memory Isolation — destroySession", () => {
     w1.destroySession();
     expect(w1.hasWallet).toBe(false);
 
-    const w2 = new PocketWallet({ storage, autoSave: false });
+    const w2 = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     const loaded = await w2.load();
     expect(loaded).toBe(true);
     expect(w2.address?.toLowerCase()).toBe(originalAddress?.toLowerCase());
   });
 
   it("should be callable on uninitialized wallet without throwing", () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     expect(() => w.destroySession()).not.toThrow();
     expect(w.hasWallet).toBe(false);
   });
 
   it("should be callable multiple times safely", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.importMnemonic(TEST_MNEMONIC);
 
     expect(() => {
@@ -663,7 +736,7 @@ describe("E2E: Memory Isolation — destroySession", () => {
   });
 
   it("should zero-fill address string on destroySession", async () => {
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.importMnemonic(TEST_MNEMONIC);
 
     // Internal check: after destroySession, the original data object should have zeroed fields
@@ -806,6 +879,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
     const w2 = new PocketWallet({
       storage,
       autoSave: false,
+      encryptionPassphrase: TEST_PASSPHRASE,
       isolation: "secure",
     });
     const loaded = await w2.load();
@@ -854,7 +928,7 @@ describe("E2E: Full Wallet Lifecycle", () => {
 
   it("should complete the full lifecycle: create → save → load → sign → (mocked) broadcast", async () => {
     // Step 1: Create wallet
-    const w1 = new PocketWallet({ storage, autoSave: true });
+    const w1 = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     const created = await w1.generate();
     expect(created.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
 
@@ -866,6 +940,7 @@ describe("E2E: Full Wallet Lifecycle", () => {
     const w2 = new PocketWallet({
       storage,
       autoSave: false,
+      encryptionPassphrase: TEST_PASSPHRASE,
       rpcUrl: "https://eth.llamarpc.com",
     });
     const loaded = await w2.load();
@@ -938,8 +1013,8 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
 
   it("should read latest block number from Sepolia", {
     timeout: 15_000,
-  }, async () => {
-    if (!rpcUrl) return; // skip
+  }, async (ctx) => {
+    if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
       rpcUrl,
@@ -956,8 +1031,8 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     expect(num).toBeGreaterThan(1000000); // Sepolia has millions of blocks
   });
 
-  it("should get gas price from Sepolia", { timeout: 15_000 }, async () => {
-    if (!rpcUrl) return;
+  it("should get gas price from Sepolia", { timeout: 15_000 }, async (ctx) => {
+    if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
       rpcUrl,
@@ -974,8 +1049,8 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
 
   it("should read balance of a Sepolia test address", {
     timeout: 15_000,
-  }, async () => {
-    if (!rpcUrl) return;
+  }, async (ctx) => {
+    if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
       rpcUrl,
@@ -994,8 +1069,8 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
 
   it("should get transaction count for a Sepolia test address", {
     timeout: 15_000,
-  }, async () => {
-    if (!rpcUrl) return;
+  }, async (ctx) => {
+    if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
       rpcUrl,

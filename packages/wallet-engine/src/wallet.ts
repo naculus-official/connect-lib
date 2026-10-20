@@ -115,33 +115,21 @@ export interface PocketConfig {
    */
   solanaRpcUrl?: string;
   /**
-   * Storage backend selection. Storage must be encrypted unless
-   * `allowInsecureStorage: true` is set explicitly.
+   * Storage backend selection. Every built-in wallet storage backend requires
+   * `encryptionPassphrase`; wallet records are never stored in plaintext.
    *
-   * - undefined (default): auto-picks IndexedDB. In browsers and Web Workers,
-   *   encryptionPassphrase is required unless `allowInsecureStorage: true` is
-   *   explicitly set. If IndexedDB is unavailable, only encrypted localStorage
-   *   is allowed; without a passphrase the constructor throws, even when
-   *   `allowInsecureStorage: true` is set. In a real Node runtime, plaintext is
-   *   allowed by default, including the localStorage fallback.
-   * - "indexedDb": force IndexedDB. Throws if IndexedDB is unavailable (no
-   *   fallback). Plaintext needs `allowInsecureStorage: true`, as above.
-   * - "localStorage": force localStorage. Plaintext needs
-   *   `allowInsecureStorage: true` (⚠️ insecure, dev/testing only).
+   * - undefined (default): auto-picks IndexedDB. If unavailable, uses
+   *   encrypted localStorage. Both require `encryptionPassphrase`.
+   * - "indexedDb": force IndexedDB. Throws if IndexedDB is unavailable.
+   * - "localStorage": force encrypted localStorage.
    *
    * Dev override: set this to "localStorage" to test localStorage behavior
    * without the IndexedDB dependency.
    */
   storageType?: StorageType;
   /**
-   * Allow plaintext (unencrypted) storage: IndexedDB without
-   * `encryptionPassphrase`, or the localStorage fallback. Only enable this for
-   * controlled development/test environments.
-   *
-   * Defaults to `true` only in a real Node runtime (no window, worker, or
-   * browser globals), and to `false` in browsers and Web Workers. Explicitly
-   * setting this to true allows plaintext in an available backend; it never
-   * enables plaintext localStorage fallback when IndexedDB is unavailable.
+   * @deprecated Has no effect. Built-in wallet storage always requires
+   * `encryptionPassphrase` and never writes a plaintext wallet record.
    */
   allowInsecureStorage?: boolean;
   /**
@@ -156,8 +144,9 @@ export interface PocketConfig {
    * new one. An empty passphrase is refused. Cancel by throwing rather than
    * returning an empty passphrase.
    *
-   * Without this, data is stored as base64 plaintext, which requires
-   * `allowInsecureStorage: true` (see above).
+   * This is required for every built-in wallet storage backend in every
+   * runtime. Without it, construction throws `WalletError` with code
+   * `storage_unavailable`.
    *
    * Example:
    * ```ts
@@ -428,6 +417,15 @@ const DEFAULTS: Required<
   chainId: "eip155:1",
 };
 
+type StorableWalletData = Omit<
+  WalletData,
+  "accounts" | "address" | "privateKey"
+> & {
+  accounts: Array<
+    Pick<WalletAccount, "namespace" | "address" | "derivationPath">
+  >;
+};
+
 /**
  * Every account a seed produces.
  *
@@ -439,26 +437,36 @@ const DEFAULTS: Required<
 /**
  * A record safe to hand to storage.
  *
- * `{ ...data }` is shallow, so the copy shares the `accounts` array. A secure
- * wipe overwrites each account's key in place, which through a shared
- * reference reaches whatever the storage adapter kept — measured: after
- * `destroySession()` the persisted key had been replaced with the wipe
- * pattern, so the next `load()` found a wallet it could not open. The accounts
- * are copied one level deeper so the two can never be the same objects.
- *
- * The derived `address` and `privateKey` views are left out deliberately: they
- * are a view over `accounts`, and persisting a snapshot of them would create a
- * second copy that can disagree with the list it came from.
+ * Account addresses and derivation paths are retained for integrity checking
+ * and metadata, but private keys are recreated from the mnemonic on load.
+ * Wallets imported from raw private keys have no recoverable mnemonic and
+ * therefore cannot be persisted under this contract.
  */
-function toStorableRecord(data: WalletData): WalletData {
+function toStorableRecord(data: WalletData): StorableWalletData {
+  if (!data.mnemonic) {
+    throw new WalletError(
+      "invalid_key",
+      "A mnemonic is required to persist this wallet.",
+    );
+  }
+
   return {
     mnemonic: data.mnemonic,
-    accounts: data.accounts.map((account) => ({ ...account })),
+    accounts: data.accounts.map(({ namespace, address, derivationPath }) => ({
+      namespace,
+      address,
+      ...(derivationPath ? { derivationPath } : {}),
+    })),
     activeNamespace: data.activeNamespace,
     createdAt: data.createdAt,
     ...(data.chainId ? { chainId: data.chainId } : {}),
     version: 2,
   };
+}
+
+function toStorageAdapterRecord(data: WalletData): WalletData {
+  // StorageAdapter's legacy signature uses the in-memory WalletData shape.
+  return toStorableRecord(data) as unknown as WalletData;
 }
 
 async function accountsFromSeed(
@@ -537,22 +545,6 @@ function refuseSetCodeTransaction(
       "EIP-7702 transactions are not sent or fee-bumped here; delegate with sendDelegation.",
     );
   }
-}
-
-/**
- * True in a browser window or worker, or in any runtime exposing browser
- * globals. Only Node without browser globals defaults to allowing plaintext.
- */
-function isBrowserLikeContext(): boolean {
-  const g = globalThis as typeof globalThis & {
-    importScripts?: unknown;
-    indexedDB?: unknown;
-  };
-  return (
-    (typeof window !== "undefined" && window !== null) ||
-    typeof g.importScripts === "function" ||
-    (typeof g.indexedDB !== "undefined" && g.indexedDB !== null && !g.process?.versions?.node)
-  );
 }
 
 /**
@@ -638,13 +630,8 @@ export class PocketWallet {
    *
    * Priority chain:
    *   1. Custom adapter (config.storage) → use directly
-   *   2. Explicit storageType → force specific backend (no fallback)
-   *   3. Auto-detect:
-   *      a. IndexedDB (available) → default; requires encryptionPassphrase or
-   *         allowInsecureStorage: true, otherwise throws
-   *      b. IndexedDB unavailable + encryptionPassphrase → encrypted
-   *         localStorage, _storageDegraded = true (tier 3)
-   *      c. IndexedDB unavailable without encryptionPassphrase → throws
+   *   2. Built-in storage requires encryptionPassphrase in every runtime.
+   *   3. Auto-detect IndexedDB, falling back to encrypted localStorage.
    *
    * AES-GCM encryption is applied when config.encryptionPassphrase is provided.
    * The passphrase callback may be called while encrypted data is loaded or saved.
@@ -654,8 +641,12 @@ export class PocketWallet {
 
     const explicitType = config.storageType;
     const passphrase = config.encryptionPassphrase;
-    const allowInsecureStorage =
-      config.allowInsecureStorage ?? !isBrowserLikeContext();
+    if (!passphrase) {
+      throw new WalletError(
+        "storage_unavailable",
+        "A storage passphrase is required to encrypt the wallet record.",
+      );
+    }
 
     if (explicitType === "indexedDb") {
       const idbAdapter = new IndexedDbStorageAdapter(this.cfg.storageKey);
@@ -665,22 +656,10 @@ export class PocketWallet {
           "IndexedDB is unavailable. The indexedDb storageType does not fall back; choose another storageType or run where IndexedDB exists.",
         );
       }
-      if (!passphrase && !allowInsecureStorage) {
-        throw new WalletError(
-          "storage_unavailable",
-          "Unencrypted IndexedDB storage is disabled. Provide encryptionPassphrase or explicitly set allowInsecureStorage: true.",
-        );
-      }
       return this.wrapWithEncryption(idbAdapter, passphrase, true);
     }
 
     if (explicitType === "localStorage") {
-      if (!passphrase && !allowInsecureStorage) {
-        throw new WalletError(
-          "storage_unavailable",
-          "Unencrypted localStorage is disabled. Provide encryptionPassphrase or explicitly set allowInsecureStorage: true.",
-        );
-      }
       this._storageDegraded = true;
       return this.wrapWithEncryption(
         new LocalStorageAdapter(this.cfg.storageKey),
@@ -692,33 +671,11 @@ export class PocketWallet {
     // Auto-detect chain: IndexedDB → localStorage (encrypted if configured)
     const idbAdapter = new IndexedDbStorageAdapter(this.cfg.storageKey);
     if (idbAdapter.isAvailable()) {
-      if (!passphrase && !allowInsecureStorage) {
-        throw new WalletError(
-          "storage_unavailable",
-          "Unencrypted IndexedDB storage is disabled. Provide encryptionPassphrase or explicitly set allowInsecureStorage: true.",
-        );
-      }
       return this.wrapWithEncryption(idbAdapter, passphrase, true);
     }
 
-    // Node keeps its historical plaintext localStorage fallback. In browser
-    // and worker contexts, fallback storage must be encrypted regardless of
-    // allowInsecureStorage; that option applies only to an available backend.
-    if (!passphrase && isBrowserLikeContext()) {
-      throw new WalletError(
-        "storage_unavailable",
-        "A browser or worker requires encryptionPassphrase when IndexedDB is unavailable. Provide encryptionPassphrase to use encrypted localStorage.",
-      );
-    }
-    if (!passphrase && !allowInsecureStorage) {
-      throw new WalletError(
-        "storage_unavailable",
-        "IndexedDB is unavailable. Provide encryptionPassphrase to use the encrypted localStorage fallback.",
-      );
-    }
     this._storageDegraded = true;
     const lsAdapter = new LocalStorageAdapter(this.cfg.storageKey);
-    if (!passphrase) return lsAdapter;
     console.warn(
       "[PocketWallet] IndexedDB is unavailable: the wallet is stored in encrypted localStorage, a degraded backend (storage security tier 3). See getStorageSecurityReport().",
     );
@@ -728,8 +685,7 @@ export class PocketWallet {
   }
 
   /**
-   * Wrap adapter with AES-256-GCM encryption if passphrase is provided.
-   * If required=true and no passphrase, throws.
+   * Wrap a built-in adapter with AES-256-GCM using the required passphrase.
    */
   private wrapWithEncryption(
     adapter: StorageAdapter,
@@ -741,8 +697,10 @@ export class PocketWallet {
         prf: this.cfg.prfUnlock,
       });
     }
-    if (required) return adapter; // Origin-scoped backend, still not XSS-proof
-    return adapter;
+    throw new WalletError(
+      "storage_unavailable",
+      "A storage passphrase is required to encrypt the wallet record.",
+    );
   }
 
   /**
@@ -815,9 +773,9 @@ export class PocketWallet {
    * instead of checking multiple boolean flags.
    *
    *   1 = IndexedDB + AES-GCM  (🔒 highest)
-   *   2 = IndexedDB             (✅ default)
+   *   2 = custom/in-memory adapter
    *   3 = localStorage + AES-GCM(⚠️  encrypted but weak backend)
-   *   4 = localStorage          (🚫 XSS-vulnerable, warn user to switch browser)
+   *   4 = reserved for legacy unencrypted storage adapters
    */
   getStorageSecurityLevel(): StorageSecurityLevel {
     const encrypted = this._storage.type === "encrypted";
@@ -959,7 +917,7 @@ export class PocketWallet {
     this.dropSessionMgr();
     await this.initSignerWithKey();
     if (this.cfg.autoSave)
-      await this._storage.save(toStorableRecord(this.data));
+      await this._storage.save(toStorageAdapterRecord(this.data));
     return this.data;
   }
 
@@ -989,7 +947,7 @@ export class PocketWallet {
     this.dropSessionMgr();
     await this.initSignerWithKey();
     if (this.cfg.autoSave)
-      await this._storage.save(toStorableRecord(this.data));
+      await this._storage.save(toStorageAdapterRecord(this.data));
     return this.data;
   }
 
@@ -1034,8 +992,8 @@ export class PocketWallet {
       // No EVM account: clears any previous wallet's key from the worker.
       this.dropSessionMgr();
       await this.initSignerWithKey();
-      if (this.cfg.autoSave)
-        await this._storage.save(toStorableRecord(this.data));
+      // Raw-key wallets have no mnemonic, so they cannot be persisted without
+      // violating the mnemonic-only storage contract.
       return this.data;
     }
 
@@ -1071,8 +1029,8 @@ export class PocketWallet {
     });
     this.dropSessionMgr();
     await this.initSignerWithKey();
-    if (this.cfg.autoSave)
-      await this._storage.save(toStorableRecord(this.data));
+    // Raw-key wallets have no mnemonic, so they cannot be persisted without
+    // violating the mnemonic-only storage contract.
     return this.data;
   }
 
@@ -1085,6 +1043,10 @@ export class PocketWallet {
    * migrated shape is persisted on the next explicit save.
    */
   async load(): Promise<boolean> {
+    // An explicitly imported wallet is already live in this instance. Keep it
+    // available when mnemonic-only persistence has nothing to restore.
+    if (this.data) return true;
+
     const raw = await this._storage.load();
     if (!raw) return false;
 
@@ -1093,37 +1055,66 @@ export class PocketWallet {
       throw new WalletError("invalid_key", "Stored wallet data is malformed.");
     }
 
-    const evm = data.accounts.find((a) => a.namespace === "eip155");
-    if (evm) {
-      // The integrity check that has always been here: an address that does
-      // not match its key means the record was corrupted or tampered with,
-      // and signing with it would produce transactions from an account the
-      // user does not control.
-      if (
-        !/^0x[0-9a-fA-F]{64}$/.test(evm.privateKey) ||
-        !/^0x[0-9a-fA-F]{40}$/.test(evm.address)
-      ) {
+    if (!data.mnemonic) {
+      throw new WalletError(
+        "invalid_key",
+        "Stored wallet has no mnemonic to re-derive its accounts.",
+      );
+    }
+
+    const bip39 = await import("@scure/bip39");
+    const wl = await import("@scure/bip39/wordlists/english.js");
+    if (!bip39.validateMnemonic(data.mnemonic, wl.wordlist)) {
+      throw new WalletError(
+        "invalid_key",
+        "Stored wallet mnemonic is invalid.",
+      );
+    }
+
+    const storedAccounts = data.accounts;
+    const storedEvm = storedAccounts.find(
+      (account) => account.namespace === "eip155",
+    );
+    const evmPath = storedEvm?.derivationPath ?? this.cfg.derivationPath;
+    let derivedAccounts: WalletAccount[];
+    const seed = await bip39.mnemonicToSeed(data.mnemonic);
+    try {
+      derivedAccounts = await accountsFromSeed(seed, evmPath);
+    } catch {
+      throw new WalletError(
+        "invalid_key",
+        "Stored wallet accounts could not be re-derived from its mnemonic.",
+      );
+    } finally {
+      seed.fill(0);
+    }
+
+    for (const stored of storedAccounts) {
+      const derived = derivedAccounts.find(
+        (account) => account.namespace === stored.namespace,
+      );
+      const addressesMatch =
+        derived &&
+        typeof stored.address === "string" &&
+        (stored.namespace === "eip155"
+          ? derived.address.toLowerCase() === stored.address.toLowerCase()
+          : derived.address === stored.address);
+      if (!addressesMatch) {
         throw new WalletError(
           "invalid_key",
-          "Stored wallet data is malformed.",
-        );
-      }
-      const { secp256k1 } = await import("@noble/curves/secp256k1.js");
-      const { keccak_256 } = await import("@noble/hashes/sha3.js");
-      const { hexToBytes, bytesToHex } = await import("@noble/hashes/utils.js");
-      const privateKeyBytes = hexToBytes(evm.privateKey.slice(2));
-      if (!secp256k1.utils.isValidSecretKey(privateKeyBytes)) {
-        throw new WalletError("invalid_key", "Stored private key is invalid.");
-      }
-      const publicKey = secp256k1.getPublicKey(privateKeyBytes, false);
-      const expectedAddress = `0x${bytesToHex(keccak_256(publicKey.slice(1)).slice(-20))}`;
-      if (expectedAddress.toLowerCase() !== evm.address.toLowerCase()) {
-        throw new WalletError(
-          "invalid_key",
-          "Stored wallet address does not match its private key.",
+          "Stored wallet address does not match its private key derived from its mnemonic.",
         );
       }
     }
+
+    // Version-1 records only described their EVM account. Keep that historical
+    // shape until backfillAccounts() explicitly adds the Solana account.
+    data.accounts = storedAccounts.map(
+      (stored) =>
+        derivedAccounts.find(
+          (account) => account.namespace === stored.namespace,
+        )!,
+    );
 
     this.data = withActiveViews(data);
     this.dropSessionMgr();
@@ -1177,7 +1168,7 @@ export class PocketWallet {
   async save(): Promise<void> {
     if (!this.data)
       throw new WalletError("no_wallet", "No wallet data to save");
-    await this._storage.save(toStorableRecord(this.data));
+    await this._storage.save(toStorageAdapterRecord(this.data));
   }
 
   /** Clear wallet from memory and storage */

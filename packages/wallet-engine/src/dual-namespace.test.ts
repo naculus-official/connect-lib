@@ -12,6 +12,7 @@ import { migrateWalletData, PocketWallet } from "./wallet";
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const EVM_ADDRESS = "0x9858eFFd232B4033E47d90003D41EC34EcaEda94";
+const testPassphrase = async () => "test-passphrase-only";
 
 function memoryStorage() {
   let held: unknown = null;
@@ -90,7 +91,7 @@ describe("migrateWalletData", () => {
 
 describe("a wallet from a mnemonic holds both namespaces", () => {
   it("derives an account for each", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     const data = await wallet.importMnemonic(MNEMONIC);
     expect(data.accounts.map((a) => a.namespace).sort()).toEqual([
       "eip155",
@@ -99,7 +100,7 @@ describe("a wallet from a mnemonic holds both namespaces", () => {
   });
 
   it("gives the EVM account the address every other wallet derives", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     expect(wallet.account("eip155")?.address.toLowerCase()).toBe(
       EVM_ADDRESS.toLowerCase(),
@@ -108,7 +109,7 @@ describe("a wallet from a mnemonic holds both namespaces", () => {
 
   it("keeps the two keys independent", async () => {
     // Not variants of one key. Holding one must not reveal the other.
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     expect(wallet.account("eip155")?.privateKey).not.toBe(
       wallet.account("solana")?.privateKey,
@@ -116,14 +117,14 @@ describe("a wallet from a mnemonic holds both namespaces", () => {
   });
 
   it("records where each was derived", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     expect(wallet.account("eip155")?.derivationPath).toBe("m/44'/60'/0'/0/0");
     expect(wallet.account("solana")?.derivationPath).toBe("m/44'/501'/0'/0'");
   });
 
   it("starts on EVM and can switch", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     expect(wallet.address?.toLowerCase()).toBe(EVM_ADDRESS.toLowerCase());
     wallet.setActiveNamespace("solana");
@@ -131,7 +132,7 @@ describe("a wallet from a mnemonic holds both namespaces", () => {
   });
 
   it("refuses to activate a namespace it holds no account for", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importPrivateKey(`0x${"11".repeat(32)}`);
     expect(() => wallet.setActiveNamespace("solana")).toThrow(
       /holds no solana account/,
@@ -143,20 +144,20 @@ describe("a wallet from a raw key holds only that namespace", () => {
   it("does not invent a Solana account", async () => {
     // A raw key is on one curve. Showing a Solana account would show an
     // address the key cannot control and the user cannot recover.
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     const data = await wallet.importPrivateKey(`0x${"11".repeat(32)}`);
     expect(data.accounts).toHaveLength(1);
     expect(data.accounts[0].namespace).toBe("eip155");
   });
 
   it("records no derivation path, because there is none", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importPrivateKey(`0x${"11".repeat(32)}`);
     expect(wallet.account("eip155")?.derivationPath).toBeUndefined();
   });
 
   it("backfills nothing, and says so", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importPrivateKey(`0x${"11".repeat(32)}`);
     expect(await wallet.backfillAccounts()).toEqual([]);
   });
@@ -179,6 +180,7 @@ describe("loading a version 1 record", () => {
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
+      encryptionPassphrase: testPassphrase,
     });
 
     expect(await wallet.load()).toBe(true);
@@ -194,6 +196,7 @@ describe("loading a version 1 record", () => {
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
+      encryptionPassphrase: testPassphrase,
     });
     await wallet.load();
     expect(wallet.account("solana")).toBeNull();
@@ -211,6 +214,7 @@ describe("loading a version 1 record", () => {
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
+      encryptionPassphrase: testPassphrase,
     });
     await wallet.load();
     await wallet.backfillAccounts();
@@ -223,6 +227,7 @@ describe("loading a version 1 record", () => {
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
+      encryptionPassphrase: testPassphrase,
     });
     await wallet.load();
     await wallet.backfillAccounts();
@@ -239,6 +244,7 @@ describe("loading a version 1 record", () => {
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
+      encryptionPassphrase: testPassphrase,
     });
     await expect(wallet.load()).rejects.toThrow(
       /does not match its private key/,
@@ -248,7 +254,7 @@ describe("loading a version 1 record", () => {
 
 describe("secure wipe covers every account", () => {
   it("overwrites all keys, not just the active one", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     const before = wallet.accounts().map((a) => a.privateKey);
     const held = wallet.getWalletData();
@@ -295,6 +301,7 @@ describe("secure wipe covers every account", () => {
     const second = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
+      encryptionPassphrase: testPassphrase,
     });
     expect(await second.load()).toBe(true);
     expect(second.address).toBe(address);

@@ -17,6 +17,7 @@ import { PocketWallet } from "../wallet";
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_PASSPHRASE = async () => "test-passphrase-only";
 
 class MemoryStorage implements StorageAdapter {
   private d: WalletData | null = null;
@@ -78,6 +79,7 @@ describe("worker isolation across a reload", () => {
       storage,
       isolation: "worker",
       autoSave: false,
+      encryptionPassphrase: TEST_PASSPHRASE,
     });
     await first.importMnemonic(MNEMONIC);
     first.setActiveNamespace("solana");
@@ -89,6 +91,7 @@ describe("worker isolation across a reload", () => {
       storage: new MemoryStorage(),
       isolation: "worker",
       autoSave: false,
+      encryptionPassphrase: TEST_PASSPHRASE,
     });
     await other.importPrivateKey(`0x${"cd".repeat(32)}`);
 
@@ -96,6 +99,7 @@ describe("worker isolation across a reload", () => {
       storage,
       isolation: "worker",
       autoSave: false,
+      encryptionPassphrase: TEST_PASSPHRASE,
     });
     expect(await reloaded.load()).toBe(true);
     reloaded.setActiveNamespace("eip155");

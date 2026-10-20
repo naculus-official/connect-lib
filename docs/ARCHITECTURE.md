@@ -287,9 +287,8 @@ Some connectors (e.g., WalletConnect) need to modify namespaces after session cr
 - IndexedDB provides origin isolation — XSS cannot directly access across origins
 - Async API, does not block main thread rendering
 - Larger storage quota (50MB+ vs 5MB)
-- localStorage is only a degraded fallback when IndexedDB is unavailable; in a
-  browser it is rejected unless encryptionPassphrase or the explicit
-  allowInsecureStorage development override is supplied
+- localStorage is only a degraded fallback when IndexedDB is unavailable
+- both built-in backends always encrypt wallet records with a passphrase
 
 ### StorageAdapter.type property
 
@@ -298,14 +297,16 @@ letting connect-react determine whether to show security warnings.
 
 ### Developer force-switch
 
-> ⚠️ Prefer IndexedDB or an encrypted adapter in production. An unencrypted
-> localStorage backend is restricted to controlled development/test contexts.
+All built-in wallet storage backends require `encryptionPassphrase` in every
+runtime. Missing it throws `WalletError` with code `storage_unavailable`.
+`allowInsecureStorage` is deprecated and ignored; no plaintext wallet record
+is written.
 
 ```typescript
-// Force localStorage for test isolation
+// Force encrypted localStorage for test isolation
 const wallet = new PocketWallet({
   storageType: "localStorage",
-  allowInsecureStorage: true,
+  encryptionPassphrase: async () => "test-passphrase-only",
 });
 
 // Force IndexedDB (throws if unavailable)
@@ -315,13 +316,10 @@ const wallet = new PocketWallet({
 });
 ```
 
-Defaults split by runtime. A real Node process (no window, worker, or browser
-globals) defaults to allowing plaintext, including the localStorage fallback
-when IndexedDB is unavailable. Browsers and Web Workers default to requiring
-encryption in available backends; `allowInsecureStorage: true` explicitly
-allows plaintext there. When IndexedDB is unavailable in a browser or worker,
-the only fallback is encrypted localStorage with `encryptionPassphrase`;
-without it, construction throws even when `allowInsecureStorage: true` is set.
+Runtime does not change the storage requirement. A passphrase is mandatory in
+Node, browsers, and workers, including when localStorage is selected as the
+fallback or explicitly requested. The `allowInsecureStorage` option remains
+only as a deprecated compatibility field and cannot enable plaintext storage.
 
 ### AES-256-GCM encryption layer
 
@@ -330,15 +328,12 @@ Each write uses random salt (16 bytes) + IV (12 bytes).
 
 ### Wallet encryption defaults
 
-Only a real Node runtime (no window, worker, or browser globals) defaults to
-allowing plaintext storage, including localStorage fallback if IndexedDB is
-unavailable. Browsers and Web Workers default to requiring encryption for
-available backends; `allowInsecureStorage: true` explicitly allows plaintext
-there. If IndexedDB is unavailable in a browser or worker, auto-detection
-falls back only to encrypted localStorage with `encryptionPassphrase` and
-throws without it, even when `allowInsecureStorage: true` is set. IndexedDB
-provides origin isolation and non-blocking access, but it is not a cryptographic
-boundary: an XSS payload running in the same origin can read it.
+Every runtime requires `encryptionPassphrase` for built-in storage, and missing
+it throws `WalletError('storage_unavailable', ...)`. IndexedDB provides origin
+isolation and non-blocking access, but it is not a cryptographic boundary: an
+XSS payload running in the same origin can access wallet data while the app is
+unlocked. `allowInsecureStorage` is deprecated and ignored. Custom adapters
+remain responsible for their own storage protections.
 
 ---
 

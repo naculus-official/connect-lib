@@ -2,21 +2,20 @@
  * @naculus/wallet-engine — Embedded Wallet
  *
  * Self-custodial embedded wallet using BIP39 + HD key derivation.
- * Default storage: IndexedDB (async and origin-scoped, but not XSS-proof).
- * Browsers and Web Workers default to requiring `encryptionPassphrase`; set
- * `allowInsecureStorage: true` explicitly to allow plaintext in an available
- * backend. Only a real Node runtime defaults to allowing plaintext, including
- * localStorage fallback when IndexedDB is unavailable. In browsers/workers,
- * IndexedDB unavailability requires encrypted localStorage via
- * `encryptionPassphrase`, otherwise construction throws.
+ * Default storage: encrypted IndexedDB (async and origin-scoped, but not
+ * XSS-proof), with encrypted localStorage as a fallback when IndexedDB is
+ * unavailable. `encryptionPassphrase` is mandatory in every runtime; without
+ * it construction throws `WalletError('storage_unavailable', ...)`. Wallet
+ * records are never stored in plaintext. `allowInsecureStorage` is deprecated
+ * and has no effect.
  * Supports EVM signing (personal_sign, eth_sendTransaction).
  *
  * Design goals:
  * - Zero dependency on @naculus/connect-core (fully independent)
  * - Pluggable StorageAdapter for browser / Tauri / React Native
  * - Low barrier for non-web3 users ("EasyCard mode")
- * - Storage choices are explicit: IndexedDB is origin-scoped, and either
- *   backend can be wrapped with AES-256-GCM when a passphrase is supplied.
+ * - Storage choices are explicit: built-in IndexedDB and localStorage
+ *   backends are always wrapped with AES-256-GCM.
  */
 
 export type { DetectedKey, KeyNamespace } from "./derivation/key-formats";

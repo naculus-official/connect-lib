@@ -54,7 +54,10 @@ async function deriveIndependently(mnemonic: string): Promise<string> {
   return `0x${bytesToHex(keccak_256(pub.slice(1)).slice(-20))}`;
 }
 
-const wallet = () => new PocketWallet({ autoSave: false });
+const wallet = () => new PocketWallet({
+  autoSave: false,
+  encryptionPassphrase: async () => "test-passphrase-only",
+});
 
 describe("BIP-39 / BIP-44 interoperability", () => {
   it.each(VECTORS)(
@@ -70,6 +73,7 @@ describe("BIP-39 / BIP-44 interoperability", () => {
     // a change to it should have to change this test too.
     const explicit = new PocketWallet({
       autoSave: false,
+      encryptionPassphrase: async () => "test-passphrase-only",
       derivationPath: "m/44'/60'/0'/0/0",
     });
     const data = await explicit.importMnemonic(VECTORS[0].mnemonic);

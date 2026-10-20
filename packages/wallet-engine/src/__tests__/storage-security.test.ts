@@ -52,7 +52,7 @@ describe("A — Storage Security: localStorage vs IndexedDB", () => {
     try {
       expect(
         () => new PocketWallet({ storageKey: "auto-detect-no-plaintext", allowInsecureStorage: true }),
-      ).toThrow("Provide encryptionPassphrase");
+      ).toThrow("A storage passphrase is required");
     } finally {
       if (previousWindow === undefined) delete g.window;
       else g.window = previousWindow;

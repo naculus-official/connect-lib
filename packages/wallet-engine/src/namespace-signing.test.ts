@@ -21,10 +21,11 @@ const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const EVM_KEY = `0x${"11".repeat(32)}` as const;
 const SOL_SEED = hexToBytes("22".repeat(32));
+const testPassphrase = async () => "test-passphrase-only";
 
 describe("signing routes by active namespace", () => {
   it("signs for Solana with ed25519, verifiable against the account address", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     wallet.setActiveNamespace("solana");
 
@@ -43,7 +44,7 @@ describe("signing routes by active namespace", () => {
   });
 
   it("signs for EVM with secp256k1 and EIP-191, recovering the account", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
 
     const message = "hello";
@@ -73,7 +74,7 @@ describe("signing routes by active namespace", () => {
 
   it("produces different signatures for the two namespaces", async () => {
     // The check that would fail if one signer served both.
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     const evm = await wallet.signMessage("same message");
     wallet.setActiveNamespace("solana");
@@ -87,14 +88,14 @@ describe("signing routes by active namespace", () => {
   it("refuses typed data on Solana rather than signing something else", async () => {
     // EIP-712 is an Ethereum construction. There is no Solana equivalent to
     // silently substitute.
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     wallet.setActiveNamespace("solana");
     await expect(wallet.signTypedData("{}")).rejects.toThrow(/not supported/i);
   });
 
   it("refuses a raw digest on Solana, naming the signer", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importMnemonic(MNEMONIC);
     wallet.setActiveNamespace("solana");
     await expect(wallet.signHash(`0x${"ab".repeat(32)}`)).rejects.toThrow(
@@ -105,7 +106,7 @@ describe("signing routes by active namespace", () => {
 
 describe("importPrivateKey follows the key's own chain", () => {
   it("imports a Phantom key as a Solana wallet", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     const data = await wallet.importPrivateKey(
       toSolanaPrivateKeyBase58(SOL_SEED),
     );
@@ -119,7 +120,7 @@ describe("importPrivateKey follows the key's own chain", () => {
   });
 
   it("imports a MetaMask key as an EVM wallet", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     const data = await wallet.importPrivateKey(EVM_KEY);
     expect(data.accounts).toHaveLength(1);
     expect(data.accounts[0].namespace).toBe("eip155");
@@ -127,17 +128,17 @@ describe("importPrivateKey follows the key's own chain", () => {
   });
 
   it("never enables the namespace the key does not belong to", async () => {
-    const solWallet = new PocketWallet({ autoSave: false });
+    const solWallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await solWallet.importPrivateKey(toSolanaPrivateKeyBase58(SOL_SEED));
     expect(solWallet.account("eip155")).toBeNull();
 
-    const evmWallet = new PocketWallet({ autoSave: false });
+    const evmWallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await evmWallet.importPrivateKey(EVM_KEY);
     expect(evmWallet.account("solana")).toBeNull();
   });
 
   it("signs immediately after importing a Solana key", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await wallet.importPrivateKey(toSolanaPrivateKeyBase58(SOL_SEED));
     const { signature } = await wallet.signMessage("after import");
     expect(
@@ -152,7 +153,7 @@ describe("importPrivateKey follows the key's own chain", () => {
   it("refuses a bare 32-byte hex rather than guessing a chain", async () => {
     // A Solana address has that exact shape, so accepting it would mostly
     // mean accepting a pasted address as a key.
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await expect(
       wallet.importPrivateKey(
         "4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318",
@@ -161,7 +162,7 @@ describe("importPrivateKey follows the key's own chain", () => {
   });
 
   it("refuses a Solana address pasted where a key belongs", async () => {
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     const address = base58.encode(ed25519.getPublicKey(SOL_SEED));
     await expect(wallet.importPrivateKey(address)).rejects.toThrow(
       /does not say which chain/,
@@ -171,20 +172,20 @@ describe("importPrivateKey follows the key's own chain", () => {
   it("refuses a 64-byte value whose halves do not pair", async () => {
     // The verification that makes Solana detection a proof rather than a
     // guess: these bytes are the right length and the wrong keypair.
-    const wallet = new PocketWallet({ autoSave: false });
+    const wallet = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await expect(wallet.importPrivateKey("11".repeat(32))).rejects.toThrow(
       /does not match its secret half/,
     );
   });
 
   it("round-trips a Solana key out and back in", async () => {
-    const first = new PocketWallet({ autoSave: false });
+    const first = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await first.importPrivateKey(toSolanaPrivateKeyBase58(SOL_SEED));
     const exported = toSolanaPrivateKeyBase58(
       hexToBytes(first.account("solana")!.privateKey.slice(2)),
     );
 
-    const second = new PocketWallet({ autoSave: false });
+    const second = new PocketWallet({ autoSave: false, encryptionPassphrase: testPassphrase });
     await second.importPrivateKey(exported);
     expect(second.account("solana")!.address).toBe(
       first.account("solana")!.address,

@@ -410,7 +410,7 @@ describe("PocketWallet config", () => {
   });
 
   it("should use provided RPC URL", async () => {
-    const w = new PocketWallet({ rpcUrl: "https://rpc.example.com" });
+    const w = new PocketWallet({ rpcUrl: "https://rpc.example.com", encryptionPassphrase: async () => "test-passphrase-only" });
     // Access rpcUrl through cfg (private) — verify no error at construction
     expect(w.state.isConnected).toBe(false);
   });
