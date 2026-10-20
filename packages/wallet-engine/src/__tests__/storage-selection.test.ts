@@ -8,7 +8,7 @@
  *   4 = localStorage          (🚫 XSS-vulnerable, switch browser)
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexedDbStorageAdapter } from "../storage/indexed-db";
 import { LocalStorageAdapter } from "../storage/local-storage";
 import type { StorageAdapter } from "../storage/types";
@@ -30,8 +30,10 @@ describe("StorageAdapter.type property", () => {
 function inBrowserEnv(idb: boolean, fn: () => void): void {
   const g = globalThis as any;
   const prevWindow = g.window;
+  const prevDocument = g.document;
   const prevIdb = Object.getOwnPropertyDescriptor(globalThis, "indexedDB");
   g.window = {};
+  g.document = {};
   if (idb) g.indexedDB = {};
   else delete g.indexedDB;
   try {
@@ -39,6 +41,8 @@ function inBrowserEnv(idb: boolean, fn: () => void): void {
   } finally {
     if (prevWindow === undefined) delete g.window;
     else g.window = prevWindow;
+    if (prevDocument === undefined) delete g.document;
+    else g.document = prevDocument;
     if (prevIdb) Object.defineProperty(globalThis, "indexedDB", prevIdb);
     else delete g.indexedDB;
   }
@@ -50,7 +54,7 @@ describe("PocketWallet — encrypted-by-default storage", () => {
   it("browser default without passphrase throws when IndexedDB is unavailable", () => {
     inBrowserEnv(false, () => {
       expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
-        "IndexedDB is unavailable and unencrypted localStorage fallback is disabled",
+        "Provide encryptionPassphrase",
       );
     });
   });
@@ -93,14 +97,11 @@ describe("PocketWallet — encrypted-by-default storage", () => {
     });
   });
 
-  it("allowInsecureStorage: true permits plaintext localStorage fallback (tier 4, degraded)", () => {
+  it("browser auto-detect rejects plaintext fallback even when insecure storage is allowed", () => {
     inBrowserEnv(false, () => {
-      const w = new PocketWallet({
-        storageKey: "t",
-        allowInsecureStorage: true,
-      });
-      expect(w.getStorageSecurityLevel()).toBe(4);
-      expect(w.isStorageDegraded()).toBe(true);
+      expect(
+        () => new PocketWallet({ storageKey: "t", allowInsecureStorage: true }),
+      ).toThrow("Provide encryptionPassphrase");
     });
   });
 
@@ -137,9 +138,10 @@ describe("PocketWallet — encrypted-by-default storage", () => {
     }
   });
 
-  it("Node default (no window) still permits plaintext, so Node tests keep working", () => {
-    const w = new PocketWallet({ storageKey: "t" });
-    expect([2, 4]).toContain(w.getStorageSecurityLevel());
+  it("Node default remains plaintext-allowed for available backends", () => {
+    expect(
+      () => new PocketWallet({ storageType: "localStorage", storageKey: "t" }),
+    ).not.toThrow();
   });
 });
 
@@ -166,10 +168,11 @@ describe("IndexedDbStorageAdapter — writes never drop silently", () => {
 });
 
 describe("PocketWallet — storage security tier", () => {
-  it("auto-detect in Node: IndexedDB unavailable → tier 4 (localStorage)", () => {
+  it("auto-detect in Node allows plaintext localStorage fallback", () => {
     const w = new PocketWallet({ storageKey: "t" });
-    const level = w.getStorageSecurityLevel();
-    expect([2, 4]).toContain(level); // browser → 2, Node → 4
+    expect(w.getStorageType()).toBe("localStorage");
+    expect(w.getStorageSecurityLevel()).toBe(4);
+    expect(w.isStorageDegraded()).toBe(true);
   });
 
   it("storageType: 'localStorage' → tier 4", () => {
@@ -256,23 +259,31 @@ describe("PocketWallet — storage security tier", () => {
 });
 
 describe("PocketWallet — Web Worker and Node defaults", () => {
-  function inWorkerEnv(fn: () => void): void {
-    const g = globalThis as any;
-    const prevWindow = g.window;
-    const prevImport = Object.getOwnPropertyDescriptor(g, "importScripts");
-    const prevIdb = Object.getOwnPropertyDescriptor(g, "indexedDB");
-    delete g.window;
-    g.importScripts = () => {};
-    g.indexedDB = {};
-    try {
-      fn();
-    } finally {
-      if (prevWindow !== undefined) g.window = prevWindow;
-      if (prevImport) Object.defineProperty(g, "importScripts", prevImport);
-      else delete g.importScripts;
-      if (prevIdb) Object.defineProperty(g, "indexedDB", prevIdb);
-      else delete g.indexedDB;
+  const g = globalThis as any;
+  const originalGlobals = new Map<string, PropertyDescriptor | undefined>();
+  const globalNames = ["window", "self", "document", "importScripts", "indexedDB"];
+
+  afterEach(() => {
+    for (const name of globalNames) {
+      const original = originalGlobals.get(name);
+      if (original) Object.defineProperty(g, name, original);
+      else delete g[name];
     }
+    originalGlobals.clear();
+  });
+
+  function inWorkerEnv(fn: () => void): void {
+    for (const name of globalNames) {
+      if (!originalGlobals.has(name)) originalGlobals.set(name, Object.getOwnPropertyDescriptor(g, name));
+    }
+    for (const name of globalNames) {
+      Object.defineProperty(g, name, { configurable: true, writable: true, value: undefined });
+    }
+    Object.defineProperty(g, "self", { configurable: true, writable: true, value: g });
+    Object.defineProperty(g, "document", { configurable: true, writable: true, value: {} });
+    Object.defineProperty(g, "importScripts", { configurable: true, writable: true, value: () => {} });
+    Object.defineProperty(g, "indexedDB", { configurable: true, writable: true, value: {} });
+    fn();
   }
 
   it("worker (importScripts defined, no window) rejects plaintext by default", () => {
@@ -283,11 +294,12 @@ describe("PocketWallet — Web Worker and Node defaults", () => {
     });
   });
 
-  it("worker accepts plaintext only with allowInsecureStorage: true", () => {
+  it("worker auto-detect requires encryption when IndexedDB is unavailable", () => {
     inWorkerEnv(() => {
+      delete (globalThis as any).indexedDB;
       expect(
         () => new PocketWallet({ storageKey: "t", allowInsecureStorage: true }),
-      ).not.toThrow();
+      ).toThrow("Provide encryptionPassphrase");
     });
   });
 

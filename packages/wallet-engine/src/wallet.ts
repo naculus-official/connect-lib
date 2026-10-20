@@ -118,12 +118,12 @@ export interface PocketConfig {
    * Storage backend selection. Storage must be encrypted unless
    * `allowInsecureStorage: true` is set explicitly.
    *
-   * - undefined (default): auto-picks IndexedDB. Without `encryptionPassphrase`
-   *   and without `allowInsecureStorage: true` the constructor throws. If
-   *   IndexedDB is unavailable, falls back to localStorage only when
-   *   `encryptionPassphrase` is set (encrypted, degraded: tier 3) or when
-   *   `allowInsecureStorage: true` is set (plaintext, degraded: tier 4).
-   *   Otherwise it throws.
+   * - undefined (default): auto-picks IndexedDB. In browsers and Web Workers,
+   *   encryptionPassphrase is required unless `allowInsecureStorage: true` is
+   *   explicitly set. If IndexedDB is unavailable, only encrypted localStorage
+   *   is allowed; without a passphrase the constructor throws, even when
+   *   `allowInsecureStorage: true` is set. In a real Node runtime, plaintext is
+   *   allowed by default, including the localStorage fallback.
    * - "indexedDb": force IndexedDB. Throws if IndexedDB is unavailable (no
    *   fallback). Plaintext needs `allowInsecureStorage: true`, as above.
    * - "localStorage": force localStorage. Plaintext needs
@@ -138,9 +138,10 @@ export interface PocketConfig {
    * `encryptionPassphrase`, or the localStorage fallback. Only enable this for
    * controlled development/test environments.
    *
-   * Defaults to `true` when there is no `window` global (Node, and web
-   * workers) and to `false` otherwise, so a browser wallet must set
-   * `encryptionPassphrase` or pass `allowInsecureStorage: true` explicitly.
+   * Defaults to `true` only in a real Node runtime (no window, worker, or
+   * browser globals), and to `false` in browsers and Web Workers. Explicitly
+   * setting this to true allows plaintext in an available backend; it never
+   * enables plaintext localStorage fallback when IndexedDB is unavailable.
    */
   allowInsecureStorage?: boolean;
   /**
@@ -539,17 +540,19 @@ function refuseSetCodeTransaction(
 }
 
 /**
- * True in a browser window, a Web Worker, or any non-Node runtime that exposes
- * IndexedDB. Only a real Node process (no window/worker globals) is treated as
- * a trusted server context where plaintext storage defaults to allowed.
+ * True in a browser window or worker, or in any runtime exposing browser
+ * globals. Only Node without browser globals defaults to allowing plaintext.
  */
 function isBrowserLikeContext(): boolean {
-  const g = globalThis as Record<string, unknown>;
-  if (typeof g.window !== "undefined") return true;
-  if (typeof g.importScripts === "function") return true;
-  const proc = g.process as { versions?: { node?: string } } | undefined;
-  const isNode = typeof proc?.versions?.node === "string";
-  return !isNode && typeof g.indexedDB !== "undefined";
+  const g = globalThis as typeof globalThis & {
+    importScripts?: unknown;
+    indexedDB?: unknown;
+  };
+  return (
+    (typeof window !== "undefined" && window !== null) ||
+    typeof g.importScripts === "function" ||
+    (typeof g.indexedDB !== "undefined" && g.indexedDB !== null && !g.process?.versions?.node)
+  );
 }
 
 /**
@@ -641,9 +644,7 @@ export class PocketWallet {
    *         allowInsecureStorage: true, otherwise throws
    *      b. IndexedDB unavailable + encryptionPassphrase → encrypted
    *         localStorage, _storageDegraded = true (tier 3)
-   *      c. IndexedDB unavailable + allowInsecureStorage: true → plaintext
-   *         localStorage, _storageDegraded = true (tier 4)
-   *      d. IndexedDB unavailable, neither → throws
+   *      c. IndexedDB unavailable without encryptionPassphrase → throws
    *
    * AES-GCM encryption is applied when config.encryptionPassphrase is provided.
    * The passphrase callback may be called while encrypted data is loaded or saved.
@@ -700,26 +701,30 @@ export class PocketWallet {
       return this.wrapWithEncryption(idbAdapter, passphrase, true);
     }
 
-    // IndexedDB unavailable — fall back to localStorage
+    // Node keeps its historical plaintext localStorage fallback. In browser
+    // and worker contexts, fallback storage must be encrypted regardless of
+    // allowInsecureStorage; that option applies only to an available backend.
+    if (!passphrase && isBrowserLikeContext()) {
+      throw new WalletError(
+        "storage_unavailable",
+        "A browser or worker requires encryptionPassphrase when IndexedDB is unavailable. Provide encryptionPassphrase to use encrypted localStorage.",
+      );
+    }
     if (!passphrase && !allowInsecureStorage) {
       throw new WalletError(
         "storage_unavailable",
-        "IndexedDB is unavailable and unencrypted localStorage fallback is disabled. Provide encryptionPassphrase or explicitly set allowInsecureStorage: true.",
+        "IndexedDB is unavailable. Provide encryptionPassphrase to use the encrypted localStorage fallback.",
       );
     }
     this._storageDegraded = true;
     const lsAdapter = new LocalStorageAdapter(this.cfg.storageKey);
-    // Encrypted fallback is the only fallback allowed without an explicit
-    // insecure opt-in. The degraded flag stays set so the tier reads as 3.
-    if (passphrase) {
-      console.warn(
-        "[PocketWallet] IndexedDB is unavailable: the wallet is stored in encrypted localStorage, a degraded backend (storage security tier 3). See getStorageSecurityReport().",
-      );
-      return new EncryptedStorageAdapter(lsAdapter, passphrase, {
-        prf: this.cfg.prfUnlock,
-      });
-    }
-    return lsAdapter;
+    if (!passphrase) return lsAdapter;
+    console.warn(
+      "[PocketWallet] IndexedDB is unavailable: the wallet is stored in encrypted localStorage, a degraded backend (storage security tier 3). See getStorageSecurityReport().",
+    );
+    return new EncryptedStorageAdapter(lsAdapter, passphrase, {
+      prf: this.cfg.prfUnlock,
+    });
   }
 
   /**

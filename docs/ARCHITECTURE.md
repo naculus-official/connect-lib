@@ -315,21 +315,30 @@ const wallet = new PocketWallet({
 });
 ```
 
-Default: in a browser or Web Worker, a wallet without `encryptionPassphrase`
-throws unless `allowInsecureStorage: true` is set. Only a real Node process
-defaults to allowing plaintext.
+Defaults split by runtime. A real Node process (no window, worker, or browser
+globals) defaults to allowing plaintext, including the localStorage fallback
+when IndexedDB is unavailable. Browsers and Web Workers default to requiring
+encryption in available backends; `allowInsecureStorage: true` explicitly
+allows plaintext there. When IndexedDB is unavailable in a browser or worker,
+the only fallback is encrypted localStorage with `encryptionPassphrase`;
+without it, construction throws even when `allowInsecureStorage: true` is set.
 
 ### AES-256-GCM encryption layer
 
 `EncryptedStorageAdapter` wraps any backend, using PBKDF2 (SHA-256, 600K iterations) + AES-256-GCM.
 Each write uses random salt (16 bytes) + IV (12 bytes).
 
-### Why wallet encryption is opt-in
+### Wallet encryption defaults
 
-Encryption requires the user to provide a passphrase, which adds friction. The
-default is IndexedDB (origin isolation + non-blocking), but IndexedDB is not a
-cryptographic boundary: an XSS payload running in the same origin can read it.
-Use `encryptionPassphrase` or `EncryptedStorageAdapter` for sensitive wallets.
+Only a real Node runtime (no window, worker, or browser globals) defaults to
+allowing plaintext storage, including localStorage fallback if IndexedDB is
+unavailable. Browsers and Web Workers default to requiring encryption for
+available backends; `allowInsecureStorage: true` explicitly allows plaintext
+there. If IndexedDB is unavailable in a browser or worker, auto-detection
+falls back only to encrypted localStorage with `encryptionPassphrase` and
+throws without it, even when `allowInsecureStorage: true` is set. IndexedDB
+provides origin isolation and non-blocking access, but it is not a cryptographic
+boundary: an XSS payload running in the same origin can read it.
 
 ---
 

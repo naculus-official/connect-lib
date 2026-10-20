@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 import { IndexedDbStorageAdapter } from "../storage/indexed-db";
 import { LocalStorageAdapter } from "../storage/local-storage";
 import type { WalletData } from "../wallet";
+import { PocketWallet } from "../wallet";
 
 // Inline bigint helpers — wallet-engine has no dependency on @naculus/connect-core
 function toBigInt(value: string, decimals: number): bigint {
@@ -40,6 +41,28 @@ function _fromBigInt(value: bigint, decimals: number): string {
 // ══════════════════════════════════════════════════════════════════════
 
 describe("A — Storage Security: localStorage vs IndexedDB", () => {
+  it("browser auto-detect never stores plaintext when IndexedDB is unavailable", () => {
+    const g = globalThis as any;
+    const previousWindow = g.window;
+    const previousDocument = g.document;
+    const previousIdb = Object.getOwnPropertyDescriptor(g, "indexedDB");
+    g.window = {};
+    g.document = {};
+    delete g.indexedDB;
+    try {
+      expect(
+        () => new PocketWallet({ storageKey: "auto-detect-no-plaintext", allowInsecureStorage: true }),
+      ).toThrow("Provide encryptionPassphrase");
+    } finally {
+      if (previousWindow === undefined) delete g.window;
+      else g.window = previousWindow;
+      if (previousDocument === undefined) delete g.document;
+      else g.document = previousDocument;
+      if (previousIdb) Object.defineProperty(g, "indexedDB", previousIdb);
+      else delete g.indexedDB;
+    }
+  });
+
   // Version 2 keeps the keys in `accounts`; `address` and `privateKey` are
   // read-only views over it, so setting them here would store nothing.
   const walletData: WalletData = {
