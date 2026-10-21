@@ -30,6 +30,7 @@ const DIGEST = `0x${"ab".repeat(32)}` as const;
 
 const scope: Partial<SessionKeyScope> = {
   mode: "eip7702",
+  rails: ["transfer"],
   allowedContracts: [USDC],
   allowedMethods: ["0xa9059cbb"],
   tokenAllowances: { [USDC]: 1_000n },
@@ -236,6 +237,7 @@ describe("eip7702 session keys: redemption", () => {
     const info = await manager.createSessionKey(
       {
         mode: "eip7702",
+        rails: ["transfer"],
         allowedContracts: [PAYEE],
         allowedMethods: ["0x12345678"],
         maxTotalValue: 10n ** 15n,
@@ -274,7 +276,7 @@ describe("eip7702 session keys: redemption", () => {
           validBefore: String(Math.floor(Date.now() / 1000) + 600),
           nonce: `0x${"ab".repeat(32)}`,
         },
-      }),
+      }, "x402-exact"),
     ).rejects.toMatchObject({
       details: expect.stringMatching(/only delegation redemptions/),
     });

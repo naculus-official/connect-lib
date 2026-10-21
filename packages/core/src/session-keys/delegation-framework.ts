@@ -255,7 +255,7 @@ export function caveatsFromScope(
   }
   // A redemption is a token transfer; a scope that does not name that rail
   // has nothing the delegation may carry.
-  if (scope.rails !== undefined && !scope.rails.includes("transfer")) {
+  if (!Array.isArray(scope.rails) || !scope.rails.includes("transfer")) {
     refuse("rails does not include transfer");
   }
 

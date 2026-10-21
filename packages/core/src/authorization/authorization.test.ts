@@ -189,6 +189,21 @@ describe("validateAuthorization", () => {
     expect(validateAuthorization(value)).toMatchObject({ ok: false });
   });
 
+  it.each(["missing", "empty", "unknown"] as const)(
+    "rejects a %s grant rails list with the grant structure error",
+    (kind) => {
+      const value = evmAuthorization() as unknown as {
+        grants: Array<Record<string, unknown>>;
+      };
+      if (kind === "missing") delete value.grants[0].rails;
+      else value.grants[0].rails = kind === "empty" ? [] : ["wire"];
+      expect(validateAuthorization(value)).toEqual({
+        ok: false,
+        reason: "invalid grant structure",
+      });
+    },
+  );
+
   it("requires a period start after zero, as the on-chain enforcer does", () => {
     expect(
       validateAuthorization(
@@ -769,6 +784,7 @@ describe("authorization listing", () => {
         maxValuePerTx: 20n,
         maxTotalValue: 50n,
         nativeTransfer: "empty-calldata-to-recipients" as const,
+        rails: ["transfer"],
         mode: "offchain" as const,
       },
     };
@@ -782,6 +798,36 @@ describe("authorization listing", () => {
       [`eip155:1/erc20:${TOKEN}`]: 75n,
       "eip155:1/slip44:60": 25n,
     });
+  });
+
+  it("does not synthesize native transfer grants for legacy scopes without rails", async () => {
+    const legacy = {
+      id: "legacy-native-without-rails",
+      publicKey: `0x${"11".repeat(33)}`,
+      status: "active" as const,
+      createdAt: 0,
+      expiresAt: NOW * 1_000,
+      useCount: 0,
+      signerAddress: EVM_OWNER as `0x${string}`,
+      scope: {
+        expiry: NOW,
+        allowedChainIds: [1],
+        allowedContracts: [],
+        allowedMethods: [],
+        allowedRecipients: [EVM_PAYEE as `0x${string}`],
+        maxValuePerTx: 20n,
+        maxTotalValue: 100n,
+        nativeTransfer: "empty-calldata-to-recipients" as const,
+        mode: "offchain" as const,
+      },
+    };
+    const evm = {
+      listSessions: vi.fn().mockResolvedValue([legacy]),
+    } as unknown as SessionKeyManager;
+
+    const [entry] = await listAuthorizations({ evm });
+
+    expect(entry.grants).toEqual([]);
   });
 
   it("flags legacy unrestricted recipients and non-expressible EVM scope without inventing grants", async () => {
@@ -819,12 +865,22 @@ describe("authorization listing", () => {
         allowedContracts: [TOKEN],
         allowedMethods: ["0xa9059cbb", "0x095ea7b3"],
         tokenAllowances: { [TOKEN]: 1_000n },
+        rails: ["transfer"],
       },
       1,
     ],
     [
       "a contract permission without a token limit",
       { allowedContracts: [TOKEN], allowedMethods: ["0xa9059cbb"] },
+      0,
+    ],
+    [
+      "a token permission without rails",
+      {
+        allowedContracts: [TOKEN],
+        allowedMethods: ["0xa9059cbb"],
+        tokenAllowances: { [TOKEN]: 1_000n },
+      },
       0,
     ],
   ])("flags %s and returns only exact grants", async (_name, extra, count) => {
@@ -858,7 +914,6 @@ describe("authorization listing", () => {
         recipients: [EVM_PAYEE],
         maxPerPayment: 1_000n,
         maxTotal: 1_000n,
-        // A scope without `rails` signs no EIP-3009 typed data.
         rails: ["transfer"],
       });
     }
@@ -907,6 +962,7 @@ describe("authorization listing", () => {
     const info = await evm.createSessionKey(
       {
         mode: "eip7702",
+        rails: ["transfer"],
         expiry: Math.floor(Date.now() / 1000) + 3_600,
         allowedContracts: [TOKEN],
         allowedMethods: ["0xa9059cbb"],
@@ -948,6 +1004,7 @@ describe("authorization listing", () => {
     );
     await evm.createSessionKey({
       mode: "offchain",
+      rails: ["transfer"],
       expiry: Math.floor(Date.now() / 1000) + 3_600,
       allowedChainIds: [1],
       allowedContracts: [TOKEN],
@@ -1107,7 +1164,7 @@ describe("differential enforcer checks", () => {
       },
     };
     await expect(
-      manager.signTypedDataWithSessionKey(info.id, typedData),
+      manager.signTypedDataWithSessionKey(info.id, typedData, "x402-exact"),
     ).resolves.toMatch(/^0x[0-9a-f]{130}$/);
 
     const nativeCompiled = compileEvmSessionScope(

@@ -26,6 +26,7 @@ const E = DELEGATION_FRAMEWORK.enforcers;
 
 const paymentScope: SessionKeyScope = {
   mode: "eip7702",
+  rails: ["transfer"],
   expiry: 1_790_000_000,
   allowedContracts: [USDC],
   allowedMethods: ["0xa9059cbb"],
@@ -121,6 +122,7 @@ describe("delegation framework: encoding", () => {
     const caveats = caveatsFromScope(
       {
         mode: "eip7702",
+        rails: ["transfer"],
         expiry: 1_800_000_000,
         allowedContracts: [PAYEE],
         allowedMethods: ["0x12345678"],
@@ -170,6 +172,7 @@ describe("delegation framework: encoding", () => {
     const caveats = caveatsFromScope(
       {
         mode: "eip7702",
+        rails: ["transfer"],
         expiry: 1_800_000_000,
         allowedContracts: [PAYEE],
         allowedMethods: ["0x12345678"],
@@ -287,6 +290,9 @@ describe("delegation framework: refusals", () => {
     ],
     ["no expiry", { expiry: 0 }, 8453, /expiry/],
     ["a zero call limit", { maxTxCount: 0 }, 8453, /maxTxCount/],
+    ["a scope without rails", { rails: undefined }, 8453, /rails does not include transfer/],
+    ["an empty rails scope", { rails: [] }, 8453, /rails does not include transfer/],
+    ["an unknown rails scope", { rails: ["unknown"] as never }, 8453, /rails does not include transfer/],
   ];
 
   it.each(cases)("refuses %s", (_name, override, chainId, reason) => {
@@ -331,6 +337,7 @@ describe("delegation framework: refusals", () => {
         delegate: KEY,
         scope: {
           mode: "eip7702",
+          rails: ["transfer"],
           expiry: 1_800_000_000,
           allowedContracts: [PAYEE, target as `0x${string}`],
           allowedMethods: ["0xe9ae5c53"],
@@ -349,6 +356,7 @@ describe("delegation framework: refusals", () => {
   it("applies a configured forbidden-selector list", () => {
     const scope: SessionKeyScope = {
       mode: "eip7702",
+      rails: ["transfer"],
       expiry: 1_800_000_000,
       allowedContracts: [PAYEE],
       allowedMethods: ["0xd505accf"],
@@ -373,6 +381,7 @@ describe("delegation framework: refusals", () => {
       caveatsFromScope(
         {
           mode: "eip7702",
+          rails: ["transfer"],
           expiry: 1_800_000_000,
           allowedContracts: [PAYEE],
           allowedMethods: ["0x12345678"],

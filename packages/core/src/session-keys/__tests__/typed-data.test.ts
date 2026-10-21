@@ -27,7 +27,7 @@ async function authorizedKey(
   m: SessionKeyManager,
   scope: Parameters<SessionKeyManager["createSessionKey"]>[0],
 ) {
-  // EIP-3009 needs a named rail; tests that omit it override with undefined.
+  // EIP-3009 needs a named rail.
   const info = await m.createSessionKey(
     { rails: ["x402-exact"], ...scope },
     SIGNER,
@@ -155,7 +155,11 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       allowedRecipients: [PAYEE],
     });
     const self = sessionKeyAddress(info.publicKey);
-    const sig = await m.signTypedDataWithSessionKey(info.id, request(self));
+    const sig = await m.signTypedDataWithSessionKey(
+      info.id,
+      request(self),
+      "x402-exact",
+    );
     expect(sig).toMatch(/^0x[0-9a-f]{130}$/);
     expect((await m.listSessions())[0]?.usage).toEqual({
       valueSpent: 0n,
@@ -167,6 +171,7 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       m.signTypedDataWithSessionKey(
         info.id,
         request(self, { nonce: `0x${"cd".repeat(32)}` }),
+        "x402-exact",
       ),
     ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
@@ -182,12 +187,13 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
     });
     const self = sessionKeyAddress(info.publicKey);
     await expect(
-      m.signTypedDataWithSessionKey(info.id, request(self)),
+      m.signTypedDataWithSessionKey(info.id, request(self), "x402-exact"),
     ).resolves.toMatch(/^0x/);
     await expect(
       m.signTypedDataWithSessionKey(
         info.id,
         request(self, { value: "1500001", nonce: `0x${"cd".repeat(32)}` }),
+        "x402-exact",
       ),
     ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
@@ -210,10 +216,12 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       [request(self, {}, 10), /Chain 10 not in allowed list/],
     ];
     for (const [req, reason] of cases) {
-      const failure = await m.signTypedDataWithSessionKey(info.id, req).then(
-        () => null,
-        (e: unknown) => e as { code: string; details?: unknown },
-      );
+      const failure = await m
+        .signTypedDataWithSessionKey(info.id, req, "x402-exact")
+        .then(
+          () => null,
+          (e: unknown) => e as { code: string; details?: unknown },
+        );
       expect(failure?.code).toBe("session_key_scope_exceeded");
       expect(String(failure?.details)).toMatch(reason);
     }
@@ -275,18 +283,17 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
     ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
 
-  it("still signs raw digests when recipients are not limited", async () => {
+  it("rejects raw digests when EIP-3009 rails are allowed", async () => {
     const m = manager();
     const info = await authorizedKey(m, {
       allowedContracts: [PAYEE],
-      rails: undefined,
     });
     await expect(
       m.signWithSessionKey(info.id, `0x${"ab".repeat(32)}`, {
         to: PAYEE,
         value: "1",
       }),
-    ).resolves.toMatch(/^0x/);
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
 
   it("signs the digest it checked, recoverable to the session key", async () => {
@@ -298,7 +305,11 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
     });
     const self = sessionKeyAddress(info.publicKey);
     const req = request(self);
-    const sig = await m.signTypedDataWithSessionKey(info.id, req);
+    const sig = await m.signTypedDataWithSessionKey(
+      info.id,
+      req,
+      "x402-exact",
+    );
     const bytes = hexToBytes(sig.slice(2));
     const v = bytes[64] >= 27 ? bytes[64] - 27 : bytes[64];
     const recovered = secp256k1.Signature.fromBytes(
@@ -308,6 +319,37 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       .addRecoveryBit(v)
       .recoverPublicKey(hexToBytes(typedDataDigest(req).slice(2)));
     expect(sessionKeyAddress(`0x${recovered.toHex(true)}`)).toBe(self);
+  });
+
+  it("binds EIP-3009 signatures to the requested payment rail", async () => {
+    const m = manager();
+    const x402Info = await authorizedKey(m, {
+      rails: ["x402-exact"],
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 2_000_000n },
+    });
+    const x402Request = request(sessionKeyAddress(x402Info.publicKey));
+    await expect(
+      m.signTypedDataWithSessionKey(x402Info.id, x402Request, "x402-exact"),
+    ).resolves.toMatch(/^0x[0-9a-f]{130}$/);
+    await expect(
+      m.signTypedDataWithSessionKey(x402Info.id, x402Request, "mpp-charge"),
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
+
+    const mppInfo = await authorizedKey(m, {
+      rails: ["mpp-charge"],
+      allowedContracts: [USDC],
+      allowedChainIds: [1],
+      tokenAllowances: { [USDC]: 2_000_000n },
+    });
+    const mppRequest = request(sessionKeyAddress(mppInfo.publicKey));
+    await expect(
+      m.signTypedDataWithSessionKey(mppInfo.id, mppRequest, "mpp-charge"),
+    ).resolves.toMatch(/^0x[0-9a-f]{130}$/);
+    await expect(
+      m.signTypedDataWithSessionKey(mppInfo.id, mppRequest, "x402-exact"),
+    ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
   });
 
   it("checks and signs one read of each field", async () => {
@@ -331,7 +373,11 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
         },
       },
     } as SessionKeyTypedDataRequest;
-    const sig = await m.signTypedDataWithSessionKey(info.id, shifty);
+    const sig = await m.signTypedDataWithSessionKey(
+      info.id,
+      shifty,
+      "x402-exact",
+    );
     expect(reads).toBe(1);
     // The signature is over the payee transfer that was checked.
     const bytes = hexToBytes(sig.slice(2));
@@ -356,6 +402,7 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       .signTypedDataWithSessionKey(
         info.id,
         request(self, { value: ((1n << 256n) - 1n).toString() }),
+        "x402-exact",
       )
       .then(
         () => null,
@@ -389,10 +436,12 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       [request(self, { nonce: `0x${"ab".repeat(31)}` }), /32 bytes/],
     ];
     for (const [req, reason] of cases) {
-      const failure = await m.signTypedDataWithSessionKey(info.id, req).then(
-        () => null,
-        (e: unknown) => e as { code: string; details?: unknown },
-      );
+      const failure = await m
+        .signTypedDataWithSessionKey(info.id, req, "x402-exact")
+        .then(
+          () => null,
+          (e: unknown) => e as { code: string; details?: unknown },
+        );
       expect(failure?.code).toBe("session_key_scope_exceeded");
       expect(String(failure?.details)).toMatch(reason);
     }
@@ -431,7 +480,7 @@ describe("SessionKeyManager typed data + recipient allowlist", () => {
       },
     ]) {
       await expect(
-        m.signTypedDataWithSessionKey(info.id, req as never),
+        m.signTypedDataWithSessionKey(info.id, req as never, "x402-exact"),
       ).rejects.toMatchObject({ code: "session_key_scope_exceeded" });
     }
   });

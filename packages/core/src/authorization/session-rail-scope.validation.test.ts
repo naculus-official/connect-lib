@@ -121,6 +121,7 @@ async function signEip3009(scope: SessionKeyScope): Promise<string> {
     () => message,
     async () => true,
     request,
+    "x402-exact",
   );
 }
 
@@ -161,7 +162,7 @@ describe("session rail scope validation", () => {
     });
     if (!offchain.ok) return;
     await expect(signEip3009(offchain.scope)).rejects.toThrow(
-      "TransferWithAuthorization needs an x402-exact or mpp-charge rail",
+      "TransferWithAuthorization needs the x402-exact rail in the session scope",
     );
   });
 
@@ -177,18 +178,23 @@ describe("session rail scope validation", () => {
     );
   });
 
-  // A scope without the field (written before it existed, or by hand) names
-  // no EIP-3009 rail, so it fails closed.
-  it("refuses EIP-3009 signing for a scope that names no rail", async () => {
+  // A scope without the required field (written before it existed, or by
+  // hand) is rejected before a key can be created.
+  it("rejects creation of a scope that names no rail", async () => {
     const compiled = compileEvmSessionScope(
       authorization(["transfer", "x402-exact"]),
       1,
     );
     if (!compiled.ok) throw new Error(compiled.reason);
     const { rails: _rails, ...legacy } = compiled.scope;
-    await expect(signEip3009(legacy)).rejects.toThrow(
-      "TransferWithAuthorization needs an x402-exact or mpp-charge rail",
-    );
+    const manager = newManager();
+    await expect(
+      manager.createSessionKey(legacy as unknown as SessionKeyScope, OWNER),
+    ).rejects.toMatchObject({
+      code: "session_key_invalid_input",
+      details:
+        "rails must list distinct values from transfer, x402-exact, mpp-charge",
+    });
   });
 
   // The Solana scope signs the same TransferChecked for every rail it
@@ -211,7 +217,11 @@ describe("session rail scope validation", () => {
   it("refuses a raw digest and the raw key while rails is set", async () => {
     const manager = newManager();
     const info = await manager.createSessionKey(
-      { expiry: EXPIRES_AT, allowedContracts: [TOKEN], rails: ["transfer"] },
+      {
+        expiry: EXPIRES_AT,
+        allowedContracts: [TOKEN],
+        rails: ["x402-exact"],
+      },
       OWNER,
     );
     const refusal = {

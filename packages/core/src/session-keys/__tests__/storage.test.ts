@@ -433,7 +433,7 @@ describe("encryptPrivateKey never returns the private key as the public key", ()
       adapter,
     );
     const info = await manager.createSessionKey(
-      { mode: "offchain" },
+      { mode: "offchain", rails: ["transfer"] },
       "0x742D35CC6634C0532925a3B844Bc9E7595F2bD18",
     );
     const stored = await new SessionKeyStorage(adapter).get(info.id);
