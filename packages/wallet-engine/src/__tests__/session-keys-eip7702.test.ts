@@ -55,6 +55,7 @@ const DELEGATED_CODE = `0xef0100${DELEGATION_FRAMEWORK.eip7702StatelessDeleGator
 
 const scope = {
   mode: "eip7702",
+  rails: ["transfer"],
   allowedContracts: [USDC],
   allowedMethods: ["0xa9059cbb"],
   tokenAllowances: { [USDC]: 1_000n },

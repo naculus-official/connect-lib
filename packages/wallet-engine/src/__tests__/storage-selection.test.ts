@@ -386,7 +386,7 @@ describe("PocketWallet — Web Worker and Node defaults", () => {
       expect(g.importScripts).toBeUndefined();
       expect(g.process.versions.node).toBeUndefined();
       expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
-        "Unencrypted IndexedDB storage is disabled",
+        "A storage passphrase is required",
       );
     } finally {
       for (const [name, descriptor] of previous) {

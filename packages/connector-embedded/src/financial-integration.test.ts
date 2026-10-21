@@ -88,11 +88,13 @@ function mockFetchRpc(handler: (method: string, params: unknown[]) => unknown) {
 
 const TEST_MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_PASSPHRASE = "test-passphrase-only";
 const RECIPIENT = ("0x" + "ab".repeat(20)) as `0x${string}`;
 const RECIPIENT2 = ("0x" + "cd".repeat(20)) as `0x${string}`;
 
 async function createWallet(rpcUrl?: string) {
   const w = new PocketWallet({
+    encryptionPassphrase: async () => TEST_PASSPHRASE,
     storage: new MockStorage(),
     autoSave: false,
     rpcUrl,
@@ -119,13 +121,21 @@ describe("Embedded Financial: Address Derivation", () => {
   });
 
   it("derives address from private key", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      encryptionPassphrase: async () => TEST_PASSPHRASE,
+    });
     await w.importPrivateKey(("0x" + "11".repeat(32)) as `0x${string}`);
     expect(w.address).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
   it("returns null address before any import", () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({
+      storage: new MockStorage(),
+      autoSave: false,
+      encryptionPassphrase: async () => TEST_PASSPHRASE,
+    });
     expect(w.address).toBeNull();
   });
 });

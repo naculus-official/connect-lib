@@ -2,7 +2,17 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import type { StorageAdapter } from "@naculus/wallet-engine";
 import type { WalletData } from "@naculus/wallet-engine";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPocketConnector } from "./index";
+import { createPocketConnector as createPocketConnectorImpl } from "./index";
+
+const TEST_PASSPHRASE = "test-passphrase-only";
+function createPocketConnector(
+  options: Parameters<typeof createPocketConnectorImpl>[0] = {},
+) {
+  return createPocketConnectorImpl({
+    encryptionPassphrase: async () => TEST_PASSPHRASE,
+    ...options,
+  });
+}
 
 /**
  * Signing routed on the active namespace.
