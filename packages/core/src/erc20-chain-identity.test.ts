@@ -7,6 +7,7 @@ import { ERC20TokenHelper } from "./token/ERC20TokenHelper";
 
 const MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_PASSPHRASE = "test-passphrase-only";
 const TOKEN = `0x${"11".repeat(20)}` as `0x${string}`;
 const OWNER = `0x${"22".repeat(20)}` as `0x${string}`;
 const RECIPIENT = `0x${"33".repeat(20)}` as `0x${string}`;
@@ -111,6 +112,7 @@ async function buildRequest(operation: Operation): Promise<TransactionRequest> {
 
 async function createWallet(chainId = "eip155:10") {
   const wallet = new PocketWallet({
+    encryptionPassphrase: async () => TEST_PASSPHRASE,
     chainId,
     storage: new MemoryStorage(),
     autoSave: false,

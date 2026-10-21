@@ -5,7 +5,17 @@ import {
 } from "@naculus/connect-core";
 import type { StorageAdapter, WalletData } from "@naculus/wallet-engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createPocketConnector } from "./index";
+import { createPocketConnector as createPocketConnectorImpl } from "./index";
+
+const TEST_PASSPHRASE = "test-passphrase-only";
+function createPocketConnector(
+  options: Parameters<typeof createPocketConnectorImpl>[0] = {},
+) {
+  return createPocketConnectorImpl({
+    encryptionPassphrase: async () => TEST_PASSPHRASE,
+    ...options,
+  });
+}
 
 /**
  * EIP-7702 authorization signing through the embedded connector, with real
@@ -44,6 +54,7 @@ const MNEMONIC =
 async function connected() {
   const connector = createPocketConnector({
     storage: new MemoryStorage(),
+    autoSave: false,
     chainId: "eip155:1",
     rpcUrl: "https://rpc.invalid",
   });

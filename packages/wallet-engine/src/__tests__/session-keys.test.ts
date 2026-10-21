@@ -102,6 +102,7 @@ describe("PocketWallet session keys on the core engine", () => {
   it("authorizes a new key with the wallet's EVM account", async () => {
     const w = await wallet();
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
     } as never);
     expect(info.authorized).toBe(true);
@@ -115,6 +116,7 @@ describe("PocketWallet session keys on the core engine", () => {
     const storage = new MemoryStorageAdapter();
     const w = await wallet(storage);
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
       tokenAllowances: { [USDC]: 1_000n },
     } as never);
@@ -165,6 +167,7 @@ describe("PocketWallet session keys on the core engine", () => {
   it("enforces token allowances", async () => {
     const w = await wallet();
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
       tokenAllowances: { [USDC]: 1_000n },
     } as never);
@@ -181,6 +184,7 @@ describe("PocketWallet session keys on the core engine", () => {
   it("refuses forbidden selectors such as approve", async () => {
     const w = await wallet();
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
     } as never);
     const calls = mockRpc();
@@ -207,6 +211,7 @@ describe("PocketWallet session keys on the core engine", () => {
     };
     const w = await wallet(flaky);
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
     } as never);
     const calls = mockRpc();
@@ -220,6 +225,7 @@ describe("PocketWallet session keys on the core engine", () => {
   it("refuses a transaction for another chain before any RPC call", async () => {
     const w = await wallet();
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
     } as never);
     const calls = mockRpc();
@@ -249,7 +255,7 @@ describe("PocketWallet session keys on the core engine", () => {
       removeItem: (k: string) => items.delete(k),
     });
     const w = await wallet();
-    await w.createSessionKey({ allowedContracts: [USDC] } as never);
+    await w.createSessionKey({ rails: ["transfer"], allowedContracts: [USDC] } as never);
     await w.listSessions();
     expect(items.get(LEGACY_SESSION_KEYS_STORAGE_KEY)).toBe(legacy);
   });
@@ -258,6 +264,7 @@ describe("PocketWallet session keys on the core engine", () => {
     const storage = new MemoryStorageAdapter();
     const w = await wallet(storage);
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
     } as never);
     const { createEmbeddedSessionKeyManager } = await import(
@@ -298,7 +305,7 @@ describe("PocketWallet session keys on the core engine", () => {
     });
     await w.importMnemonic(MNEMONIC);
     await expect(
-      w.createSessionKey({ allowedContracts: [USDC] } as never),
+      w.createSessionKey({ rails: ["transfer"], allowedContracts: [USDC] } as never),
     ).rejects.toThrow("user rejected");
     const sessions = await w.listSessions();
     expect(sessions).toHaveLength(1);
@@ -309,6 +316,7 @@ describe("PocketWallet session keys on the core engine", () => {
     const w = await wallet();
     await expect(
       w.createSessionKey({
+        rails: ["transfer"],
         allowedContracts: [USDC],
         mode: "aa_module",
       } as never),
@@ -318,6 +326,7 @@ describe("PocketWallet session keys on the core engine", () => {
   it("previews another chain as invalid, as the send would refuse it", async () => {
     const w = await wallet();
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
     } as never);
     await expect(
@@ -329,6 +338,7 @@ describe("PocketWallet session keys on the core engine", () => {
     const storage = new MemoryStorageAdapter();
     const w = await wallet(storage);
     const info = await w.createSessionKey({
+      rails: ["transfer"],
       allowedContracts: [USDC],
     } as never);
     // Another wallet on the same storage cannot use the first one's key.
@@ -355,7 +365,7 @@ describe("PocketWallet session keys on the core engine", () => {
     });
     await w.importPrivateKey(`0x${"ab".repeat(32)}`);
     await expect(
-      w.createSessionKey({ allowedContracts: [USDC] } as never),
+      w.createSessionKey({ rails: ["transfer"], allowedContracts: [USDC] } as never),
     ).rejects.toMatchObject({ code: "no_wallet" });
     expect(await w.listSessions()).toEqual([]);
   });

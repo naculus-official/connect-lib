@@ -1,6 +1,16 @@
 import type { StorageAdapter, WalletData } from "@naculus/wallet-engine";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPocketConnector } from "./index";
+import { createPocketConnector as createPocketConnectorImpl } from "./index";
+
+const TEST_PASSPHRASE = "test-passphrase-only";
+function createPocketConnector(
+  options: Parameters<typeof createPocketConnectorImpl>[0] = {},
+) {
+  return createPocketConnectorImpl({
+    encryptionPassphrase: async () => TEST_PASSPHRASE,
+    ...options,
+  });
+}
 
 /**
  * What the session says, and who is told when it changes.
@@ -33,7 +43,10 @@ class MemoryStorage implements StorageAdapter {
 }
 
 async function connected() {
-  const connector = createPocketConnector({ storage: new MemoryStorage() });
+  const connector = createPocketConnector({
+    storage: new MemoryStorage(),
+    autoSave: false,
+  });
   const session = await connector.connect();
   await connector.importFromMnemonic(MNEMONIC);
   return { connector, session };
@@ -69,9 +82,15 @@ describe("session namespaces", () => {
   });
 
   it("omits a namespace the wallet holds no account for", async () => {
-    const connector = createPocketConnector({ storage: new MemoryStorage() });
+    const connector = createPocketConnector({
+      storage: new MemoryStorage(),
+      autoSave: false,
+    });
     await connector.connect();
-    const solanaKey = createPocketConnector({ storage: new MemoryStorage() });
+    const solanaKey = createPocketConnector({
+      storage: new MemoryStorage(),
+      autoSave: false,
+    });
     await solanaKey.connect();
     await solanaKey.importFromMnemonic(MNEMONIC);
     // A raw EVM key: one curve, one account.

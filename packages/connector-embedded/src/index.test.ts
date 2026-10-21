@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createPocketConnector } from "./index";
+import { createPocketConnector as createPocketConnectorImpl } from "./index";
+
+const TEST_PASSPHRASE = "test-passphrase-only";
+function createPocketConnector(
+  options: Parameters<typeof createPocketConnectorImpl>[0] = {},
+) {
+  return createPocketConnectorImpl({
+    encryptionPassphrase: async () => TEST_PASSPHRASE,
+    ...options,
+  });
+}
 
 // LocalStorage mock
 const localStorageMock = (() => {
