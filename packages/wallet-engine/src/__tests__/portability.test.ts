@@ -41,7 +41,8 @@ class MemoryStorage implements StorageAdapter {
 }
 
 function wallet() {
-  return new PocketWallet({ storage: new MemoryStorage() });
+  return new PocketWallet({
+    encryptionPassphrase: async () => "test-passphrase-only", storage: new MemoryStorage() });
 }
 
 /** BIP-32 / BIP-44 over secp256k1, independent of anything in this package. */
@@ -185,10 +186,16 @@ describe("round trip", () => {
   // account. Both have to work, and they are not interchangeable.
   it("keeps the phrase readable after the wallet is stored and reloaded", async () => {
     const storage = new MemoryStorage();
-    const first = new PocketWallet({ storage });
+    const first = new PocketWallet({
+      storage,
+      encryptionPassphrase: async () => "test-passphrase-only",
+    });
     await first.importMnemonic(MNEMONIC);
 
-    const reopened = new PocketWallet({ storage });
+    const reopened = new PocketWallet({
+      storage,
+      encryptionPassphrase: async () => "test-passphrase-only",
+    });
     await reopened.load();
     expect(reopened.getWalletData()!.mnemonic).toBe(MNEMONIC);
   });

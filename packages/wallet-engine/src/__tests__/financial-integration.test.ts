@@ -91,6 +91,7 @@ function mockFetchRpc(handler: (method: string, params: unknown[]) => unknown) {
 async function createWallet(rpcUrl?: string) {
   const w = new PocketWallet({
     storage: new MockStorage(),
+    encryptionPassphrase: async () => "test-passphrase-only",
     autoSave: false,
     rpcUrl,
   });

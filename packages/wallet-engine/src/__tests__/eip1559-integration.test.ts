@@ -66,6 +66,7 @@ describe("EIP-1559 Integration", () => {
     wallet = new PocketWallet({
       rpcUrl: "https://eth.llamarpc.com",
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     await wallet.importMnemonic(TEST_MNEMONIC);
@@ -247,7 +248,8 @@ describe("EIP-1559 Integration", () => {
 
   describe("sendTransaction validation errors", () => {
     it("should throw when no wallet loaded", async () => {
-      const empty = new PocketWallet({ storage: new MockStorage() });
+      const empty = new PocketWallet({
+        encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
       await expect(empty.sendTransaction({ to: "0xabcd" })).rejects.toThrow(
         "No wallet loaded",
       );
@@ -292,7 +294,8 @@ describe("EIP-1559 Integration", () => {
 
   describe("bumpFee", () => {
     it("should throw WalletError when no wallet loaded", async () => {
-      const empty = new PocketWallet({ storage: new MockStorage() });
+      const empty = new PocketWallet({
+        encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
       await expect(empty.bumpFee({ to: "0xabcd" })).rejects.toThrow(
         "No wallet loaded",
       );
@@ -325,7 +328,8 @@ describe("EIP-1559 Integration", () => {
     });
 
     it("should throw when no RPC URL configured", async () => {
-      const w = new PocketWallet({ storage: new MockStorage() });
+      const w = new PocketWallet({
+        encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
       await expect(w.estimateFee()).rejects.toThrow("RPC URL not configured");
     });
   });

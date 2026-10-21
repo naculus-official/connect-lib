@@ -53,6 +53,7 @@ async function wallet(
   storage: CoreStorageAdapter = new MemoryStorageAdapter(),
 ) {
   const w = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
     storage: new MemoryWalletStorage(),
     autoSave: false,
     chainId: "eip155:1",
@@ -286,6 +287,7 @@ describe("PocketWallet session keys on the core engine", () => {
       throw new Error("user rejected");
     };
     const w = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
       storage: new MemoryWalletStorage(),
       autoSave: false,
       signer: refusing,
@@ -346,6 +348,7 @@ describe("PocketWallet session keys on the core engine", () => {
 
   it("requires a mnemonic", async () => {
     const w = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
       storage: new MemoryWalletStorage(),
       autoSave: false,
       sessionKeys: { storage: new MemoryStorageAdapter() },

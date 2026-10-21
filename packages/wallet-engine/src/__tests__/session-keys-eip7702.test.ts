@@ -95,6 +95,7 @@ function mockRpc(code: string | null = DELEGATED_CODE) {
 
 async function wallet(options: { isolation?: "worker" } = {}) {
   const w = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
     storage: new MemoryWalletStorage(),
     autoSave: false,
     chainId: "eip155:8453",

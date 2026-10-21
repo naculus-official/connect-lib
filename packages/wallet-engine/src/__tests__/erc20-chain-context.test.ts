@@ -30,6 +30,7 @@ describe("PocketWallet ERC-20 chain context", () => {
 
   beforeEach(async () => {
     wallet = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
       chainId: "eip155:1",
       rpcUrl: "http://rpc.test",
       storage: new MemoryStorage(),

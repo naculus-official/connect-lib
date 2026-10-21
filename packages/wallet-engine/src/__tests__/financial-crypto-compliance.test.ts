@@ -27,10 +27,12 @@ describe("Financial Crypto Compliance: Key Security", () => {
   it("derives same address from same mnemonic (deterministic)", async () => {
     const w1 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     const w2 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     await w1.importMnemonic(TEST_MNEMONIC);
@@ -41,7 +43,7 @@ describe("Financial Crypto Compliance: Key Security", () => {
   });
 
   it("signs with secp256k1 and produces recoverable signature", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const msg = "0x" + Buffer.from("hello").toString("hex");
     const sig = await w.signMessage(msg);
@@ -49,7 +51,7 @@ describe("Financial Crypto Compliance: Key Security", () => {
   });
 
   it("signs EIP-1559 transaction", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const tx = await w.signTransaction({
       to: ("0x" + "ab".repeat(20)) as `0x${string}`,
@@ -64,7 +66,7 @@ describe("Financial Crypto Compliance: Key Security", () => {
   });
 
   it("signs legacy transaction", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const tx = await w.signTransaction({
       to: ("0x" + "ab".repeat(20)) as `0x${string}`,
@@ -80,14 +82,14 @@ describe("Financial Crypto Compliance: Key Security", () => {
 
 describe("Financial Crypto Compliance: Address Derivation", () => {
   it("EVM address is 20 bytes with 0x prefix", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const d = w["data"];
     expect(d?.address).toMatch(/^0x[0-9a-f]{40}$/);
   });
 
   it("address starts with 0x and is 42 chars", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const d = w["data"];
     expect(d?.address).toMatch(/^0x[0-9a-f]{40}$/);
@@ -98,10 +100,12 @@ describe("Financial Crypto Compliance: Key Isolation", () => {
   it("two wallets have different addresses (different mnemonics)", async () => {
     const w1 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     const w2 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     await w1.generate();
@@ -113,7 +117,11 @@ describe("Financial Crypto Compliance: Key Isolation", () => {
 
   it("re-generating wallet overwrites old keys", async () => {
     const storage = new MockStorage();
-    const w = new PocketWallet({ storage, autoSave: false });
+    const w = new PocketWallet({
+      storage,
+      autoSave: false,
+      encryptionPassphrase: async () => "test-passphrase-only",
+    });
     await w.generate();
     const addr1 = w["data"]?.address;
     await w.generate();
@@ -124,7 +132,7 @@ describe("Financial Crypto Compliance: Key Isolation", () => {
 
 describe("Financial Crypto Compliance: Message Signing Standards", () => {
   it("signs EIP-191 personal_sign format", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const msg = "0x" + Buffer.from("Hello, World!").toString("hex");
     const sig = await w.signMessage(msg);
@@ -133,7 +141,7 @@ describe("Financial Crypto Compliance: Message Signing Standards", () => {
   });
 
   it("signs empty message", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const msg = "0x" as `0x${string}`;
     const sig = await w.signMessage(msg);
@@ -141,7 +149,7 @@ describe("Financial Crypto Compliance: Message Signing Standards", () => {
   });
 
   it("signs deterministically (RFC 6979) — same message, same signature", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await w.importMnemonic(TEST_MNEMONIC);
     const msg = "0x" + Buffer.from("test").toString("hex");
     const sig1 = await w.signMessage(msg);

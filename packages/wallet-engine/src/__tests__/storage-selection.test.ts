@@ -11,8 +11,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IndexedDbStorageAdapter } from "../storage/indexed-db";
 import { LocalStorageAdapter } from "../storage/local-storage";
+import { EncryptedStorageAdapter } from "../storage/encrypted";
 import type { StorageAdapter } from "../storage/types";
-import { PocketWallet } from "../wallet";
+import { PocketWallet, type WalletData } from "../wallet";
 
 describe("StorageAdapter.type property", () => {
   it("LocalStorageAdapter reports type 'localStorage'", () => {
@@ -216,7 +217,7 @@ describe("PocketWallet — storage security tier", () => {
     ).toThrow("IndexedDB is unavailable");
   });
 
-  it("custom adapter takes precedence", () => {
+  it("custom adapter requires a passphrase", () => {
     const a: StorageAdapter = {
       type: "custom",
       isAvailable: () => true,
@@ -224,9 +225,77 @@ describe("PocketWallet — storage security tier", () => {
       save: vi.fn().mockResolvedValue(undefined),
       clear: vi.fn().mockResolvedValue(undefined),
     };
-    const w = new PocketWallet({ storage: a, storageKey: "t" });
+    expect(() => new PocketWallet({ storage: a, storageKey: "t" })).toThrow(
+      /passphrase.*custom storage/i,
+    );
+  });
+
+  it("encrypts wallet records before passing them to custom storage", async () => {
+    let stored: unknown = null;
+    const a: StorageAdapter = {
+      type: "custom",
+      isAvailable: () => true,
+      load: vi.fn().mockResolvedValue(null),
+      save: vi.fn(async (value) => { stored = value; }),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const w = new PocketWallet({
+      storage: a,
+      storageKey: "t",
+      encryptionPassphrase: async () => "custom-storage-passphrase",
+    });
+    await w.importMnemonic(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    );
+    expect(JSON.stringify(stored)).not.toContain(
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    );
+    expect(stored).toEqual({
+      _encrypted: expect.objectContaining({
+        v: 2,
+        ciphertext: expect.any(String),
+      }),
+    });
     expect(w.getStorageType()).toBe("custom");
     expect(w.getStorageSecurityLevel() <= 2).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "unknown namespace",
+      accounts: [
+        { namespace: "unknown", address: "x", privateKey: "x" },
+      ],
+    },
+    {
+      name: "duplicate namespace",
+      accounts: [
+        { namespace: "eip155", address: "x", privateKey: "x" },
+        { namespace: "eip155", address: "y", privateKey: "y" },
+      ],
+    },
+  ])("rejects stored account records with $name", async ({ accounts }) => {
+    let stored: unknown = null;
+    const inner: StorageAdapter = {
+      type: "custom",
+      isAvailable: () => true,
+      load: vi.fn(async () => stored as WalletData | null),
+      save: vi.fn(async (value) => { stored = value; }),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const passphrase = async () => "namespace-validation-passphrase";
+    const writer = new EncryptedStorageAdapter(inner, passphrase);
+    await writer.save({
+      version: 2,
+      mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      accounts,
+      activeNamespace: "eip155",
+      createdAt: Date.now(),
+    } as unknown as WalletData);
+    const wallet = new PocketWallet({ storage: inner, encryptionPassphrase: passphrase });
+    await expect(wallet.load()).rejects.toMatchObject({
+      code: "invalid_key",
+    });
   });
 
   it("encryptionPassphrase with IndexedDB → tier 1", (ctx) => {

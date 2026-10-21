@@ -63,6 +63,7 @@ describe("PocketWallet with isolation: worker", () => {
   it("creates IsolatedSigner when isolation=worker", () => {
     const wallet = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       isolation: "worker",
       autoSave: false,
     });
@@ -74,6 +75,7 @@ describe("PocketWallet with isolation: worker", () => {
       () =>
         new PocketWallet({
           storage: new MockStorage(),
+          encryptionPassphrase: async () => "test-passphrase-only",
           isolation: "secure",
           autoSave: false,
         }),
@@ -83,6 +85,7 @@ describe("PocketWallet with isolation: worker", () => {
   it("creates EVMSigner when isolation not specified", () => {
     const wallet = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     expect(wallet["_signer"]).not.toBeInstanceOf(IsolatedSigner);
@@ -91,6 +94,7 @@ describe("PocketWallet with isolation: worker", () => {
   it("generates wallet in worker isolation mode", async () => {
     const wallet = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       isolation: "worker",
       autoSave: false,
     });
@@ -101,6 +105,7 @@ describe("PocketWallet with isolation: worker", () => {
   it("imports mnemonic in worker isolation mode", async () => {
     const wallet = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       isolation: "worker",
       autoSave: false,
     });
@@ -111,11 +116,13 @@ describe("PocketWallet with isolation: worker", () => {
   it("generates deterministic address same as non-isolated", async () => {
     const w1 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       isolation: "worker",
       autoSave: false,
     });
     const w2 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     await w1.importMnemonic(TEST_MNEMONIC);
@@ -128,6 +135,7 @@ describe("PocketWallet with isolation: worker", () => {
   it("clears worker on wallet.clear", async () => {
     const wallet = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       isolation: "worker",
       autoSave: false,
     });
@@ -141,6 +149,7 @@ describe("PocketWallet with isolation: worker", () => {
   it("signs message in worker isolation mode", async () => {
     const wallet = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       isolation: "worker",
       autoSave: false,
     });

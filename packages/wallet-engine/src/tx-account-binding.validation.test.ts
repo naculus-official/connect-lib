@@ -179,6 +179,7 @@ function stubRpc(holdNonce: boolean): Rpc {
 
 function makeWallet() {
   return new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
     rpcUrl: RPC,
     chainId: "eip155:1",
     storage: new MemoryStorage(),

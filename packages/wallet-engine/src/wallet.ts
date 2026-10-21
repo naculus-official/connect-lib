@@ -144,9 +144,10 @@ export interface PocketConfig {
    * new one. An empty passphrase is refused. Cancel by throwing rather than
    * returning an empty passphrase.
    *
-   * This is required for every built-in wallet storage backend in every
-   * runtime. Without it, construction throws `WalletError` with code
-   * `storage_unavailable`.
+   * This is required for every wallet storage backend, including custom
+   * adapters, in every runtime. The wallet encrypts records before passing
+   * them to an adapter. Without it, construction throws `WalletError` with
+   * code `storage_unavailable`.
    *
    * Example:
    * ```ts
@@ -175,7 +176,7 @@ export interface PocketConfig {
    * `createPasskeyUnlockProvider(connector)`.
    */
   prfUnlock?: PrfUnlockProvider;
-  /** Custom storage adapter (overrides storageType auto-selection) */
+  /** Custom storage adapter, wrapped in wallet encryption (overrides storageType auto-selection). */
   storage?: StorageAdapter;
   /** Custom signer for transaction signing (default: EVMSigner) */
   signer?: Signer;
@@ -575,6 +576,7 @@ export class PocketWallet {
   private signerEpoch = 0;
   private _ed25519Signer?: Ed25519Signer;
   private _storage: StorageAdapter;
+  private readonly _customStorage: boolean;
 
   private _sessionMgr: SessionKeyManager | null = null;
   /** Fingerprint of the mnemonic the cached session manager was built for. */
@@ -610,7 +612,8 @@ export class PocketWallet {
     this._signer =
       config.signer ??
       (config.isolation === "worker" ? new IsolatedSigner() : new EVMSigner());
-    this._storage = config.storage ?? this.resolveStorage(config);
+    this._storage = this.resolveStorage(config);
+    this._customStorage = config.storage !== undefined;
     this._simulateFn = config.simulateFn;
 
     // Initialize built-in SimulationManager if rpcUrl is available
@@ -629,7 +632,7 @@ export class PocketWallet {
    * Resolve storage adapter based on config and environment capability.
    *
    * Priority chain:
-   *   1. Custom adapter (config.storage) → use directly
+   *   1. Custom adapter (config.storage) → encrypt before passing records to it
    *   2. Built-in storage requires encryptionPassphrase in every runtime.
    *   3. Auto-detect IndexedDB, falling back to encrypted localStorage.
    *
@@ -637,15 +640,17 @@ export class PocketWallet {
    * The passphrase callback may be called while encrypted data is loaded or saved.
    */
   private resolveStorage(config: PocketConfig): StorageAdapter {
-    if (config.storage) return config.storage;
-
     const explicitType = config.storageType;
     const passphrase = config.encryptionPassphrase;
     if (!passphrase) {
       throw new WalletError(
         "storage_unavailable",
-        "A storage passphrase is required to encrypt the wallet record.",
+        "A storage passphrase is required to encrypt the wallet record, including when using custom storage.",
       );
+    }
+
+    if (config.storage) {
+      return this.wrapWithEncryption(config.storage, passphrase, true);
     }
 
     if (explicitType === "indexedDb") {
@@ -765,7 +770,7 @@ export class PocketWallet {
   }
 
   getStorageType(): StorageType {
-    return this._storage.type;
+    return this._customStorage ? this.cfg.storage!.type : this._storage.type;
   }
 
   /**
@@ -783,10 +788,13 @@ export class PocketWallet {
       this._storage.type === "indexedDb" ||
       (encrypted && !this._storageDegraded);
     const isCustom =
-      this._storage.type === "custom" || this._storage.type === "memory";
+      this._customStorage ||
+      this._storage.type === "custom" ||
+      this._storage.type === "memory";
 
+    if (isCustom) return 2;
     if (encrypted && !this._storageDegraded) return 1;
-    if (isIndexedDB || isCustom) return 2;
+    if (isIndexedDB) return 2;
     if (encrypted) return 3;
     return 4;
   }
@@ -816,11 +824,13 @@ export class PocketWallet {
     // `type` reports the wrapper, so an encrypted record over IndexedDB
     // reads as "encrypted" and would name the encryption as its own backend.
     // Report the store underneath instead, which is what the finding is about.
-    const backend: StorageType = this._storageDegraded
-      ? "localStorage"
-      : encrypted
-        ? "indexedDb"
-        : this._storage.type;
+    const backend: StorageType = this._customStorage
+      ? this.cfg.storage!.type
+      : this._storageDegraded
+        ? "localStorage"
+        : encrypted
+          ? "indexedDb"
+          : this._storage.type;
 
     return assessStorageSecurity({ level, backend, encrypted, unlock });
   }
@@ -834,6 +844,7 @@ export class PocketWallet {
   /** @deprecated Use getStorageSecurityLevel() instead */
   isEncrypted(): boolean {
     return (
+      this._storage.type === "encrypted" ||
       this.getStorageSecurityLevel() === 1 ||
       this.getStorageSecurityLevel() === 3
     );
@@ -1079,6 +1090,22 @@ export class PocketWallet {
     }
 
     const storedAccounts = data.accounts;
+    const namespaces = new Set<string>();
+    for (const account of storedAccounts) {
+      if (account.namespace !== "eip155" && account.namespace !== "solana") {
+        throw new WalletError(
+          "invalid_key",
+          "Stored wallet contains an unknown account namespace.",
+        );
+      }
+      if (namespaces.has(account.namespace)) {
+        throw new WalletError(
+          "invalid_key",
+          "Stored wallet contains duplicate account namespaces.",
+        );
+      }
+      namespaces.add(account.namespace);
+    }
     const storedEvm = storedAccounts.find(
       (account) => account.namespace === "eip155",
     );

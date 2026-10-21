@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletError } from "./errors";
 import { LocalStorageAdapter } from "./storage/local-storage";
 import type { StorageAdapter } from "./storage/types";
+import { EncryptedStorageAdapter } from "./storage/encrypted";
 import { PocketWallet, type WalletData } from "./wallet";
 
 // ── Storage Adapter for testing ───────────────────────────────────
@@ -28,6 +29,11 @@ class MockStorage implements StorageAdapter {
 
 const TEST_MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+const TEST_PASSPHRASE = async () => "test-passphrase-only";
+
+function readStoredWallet(storage: StorageAdapter) {
+  return new EncryptedStorageAdapter(storage, TEST_PASSPHRASE).load();
+}
 
 // ── Wallet generation tests ───────────────────────────────────────
 
@@ -35,7 +41,7 @@ describe("PocketWallet", () => {
   let wallet: PocketWallet;
 
   beforeEach(() => {
-    wallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    wallet = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
   });
 
   describe("generate", () => {
@@ -123,7 +129,7 @@ describe("PocketWallet signing", () => {
   let wallet: PocketWallet;
 
   beforeEach(async () => {
-    wallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    wallet = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await wallet.importMnemonic(TEST_MNEMONIC);
   });
 
@@ -147,7 +153,8 @@ describe("PocketWallet signing", () => {
     });
 
     it("should throw when no wallet loaded", async () => {
-      const empty = new PocketWallet({ storage: new MockStorage() });
+      const empty = new PocketWallet({
+        encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
       await expect(empty.signMessage("test")).rejects.toThrow(
         "No wallet loaded",
       );
@@ -184,6 +191,7 @@ describe("PocketWallet signing", () => {
       };
       const configured = new PocketWallet({
         storage: new MockStorage(),
+        encryptionPassphrase: async () => "test-passphrase-only",
         autoSave: false,
         chainId: "eip155:137",
         signer,
@@ -207,12 +215,12 @@ describe("PocketWallet storage", () => {
 
   beforeEach(() => {
     mockStorage = new MockStorage();
-    wallet = new PocketWallet({ storage: mockStorage, autoSave: true });
+    wallet = new PocketWallet({ storage: mockStorage, encryptionPassphrase: async () => "test-passphrase-only", autoSave: true });
   });
 
   it("should save wallet after generate when autoSave is true", async () => {
     await wallet.generate();
-    const loaded = await mockStorage.load();
+    const loaded = await readStoredWallet(mockStorage);
     expect(loaded).not.toBeNull();
     // The stored record holds the account list. `address` on a live wallet is
     // a view over it, and persisting a snapshot of that view would be a second
@@ -222,7 +230,7 @@ describe("PocketWallet storage", () => {
   });
 
   it("should not save when autoSave is false", async () => {
-    wallet = new PocketWallet({ storage: mockStorage, autoSave: false });
+    wallet = new PocketWallet({ storage: mockStorage, encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await wallet.generate();
     const loaded = await mockStorage.load();
     expect(loaded).toBeNull();
@@ -232,7 +240,7 @@ describe("PocketWallet storage", () => {
     await wallet.generate();
     const address = wallet.address;
 
-    const wallet2 = new PocketWallet({ storage: mockStorage, autoSave: false });
+    const wallet2 = new PocketWallet({ storage: mockStorage, encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     const found = await wallet2.load();
     expect(found).toBe(true);
     expect(wallet2.address?.toLowerCase()).toBe(address?.toLowerCase());
@@ -250,7 +258,7 @@ describe("PocketWallet storage", () => {
   });
 
   it("should return false from load when no wallet stored", async () => {
-    const wallet2 = new PocketWallet({ storage: mockStorage, autoSave: false });
+    const wallet2 = new PocketWallet({ storage: mockStorage, encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     expect(await wallet2.load()).toBe(false);
   });
 });
@@ -260,7 +268,11 @@ describe("PocketWallet storage", () => {
 describe("PocketWallet wipe", () => {
   it("should overwrite sensitive data then clear", async () => {
     const storage = new MockStorage();
-    const wallet = new PocketWallet({ storage, autoSave: false });
+    const wallet = new PocketWallet({
+      storage,
+      autoSave: false,
+      encryptionPassphrase: TEST_PASSPHRASE,
+    });
     await wallet.generate();
 
     await wallet.wipe();
@@ -375,11 +387,13 @@ describe("PocketWallet config", () => {
   it("should use custom derivation path", async () => {
     const w1 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       derivationPath: "m/44'/60'/0'/0/0",
       autoSave: false,
     });
     const w2 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       derivationPath: "m/44'/60'/0'/0/1",
       autoSave: false,
     });
@@ -391,22 +405,28 @@ describe("PocketWallet config", () => {
   });
 
   it("should set and get chainId", () => {
-    const w = new PocketWallet({ storage: new MockStorage() });
+    const w = new PocketWallet({
+      encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
     expect(w.state.chainId).toBe("eip155:1");
     w.setChain("eip155:137");
     expect(w.state.chainId).toBe("eip155:137");
   });
 
   it("should auto-prefix eip155 when setting chain with plain number", () => {
-    const w = new PocketWallet({ storage: new MockStorage() });
+    const w = new PocketWallet({
+      encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
     w.setChain("137");
     expect(w.state.chainId).toBe("eip155:137");
   });
 
   it("should use provided storage", () => {
     const storage = new MockStorage();
-    const w = new PocketWallet({ storage });
-    expect((w as any)._storage).toBe(storage);
+    const w = new PocketWallet({
+      storage,
+      encryptionPassphrase: TEST_PASSPHRASE,
+    });
+    expect((w as any)._storage).not.toBe(storage);
+    expect((w as any)._storage.type).toBe("encrypted");
   });
 
   it("should use provided RPC URL", async () => {

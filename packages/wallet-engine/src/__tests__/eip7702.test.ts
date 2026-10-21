@@ -41,6 +41,7 @@ const SIGNED_AUTH = {
 
 async function wallet(): Promise<PocketWallet> {
   const w = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
     storage: new MemoryStorage(),
     autoSave: false,
     chainId: "eip155:1",

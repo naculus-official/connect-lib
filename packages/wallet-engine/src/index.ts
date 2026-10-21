@@ -4,15 +4,17 @@
  * Self-custodial embedded wallet using BIP39 + HD key derivation.
  * Default storage: encrypted IndexedDB (async and origin-scoped, but not
  * XSS-proof), with encrypted localStorage as a fallback when IndexedDB is
- * unavailable. `encryptionPassphrase` is mandatory in every runtime; without
- * it construction throws `WalletError('storage_unavailable', ...)`. Wallet
- * records are never stored in plaintext. `allowInsecureStorage` is deprecated
+ * unavailable. `encryptionPassphrase` is mandatory in every runtime,
+ * including with a custom `StorageAdapter`; without it construction throws
+ * `WalletError('storage_unavailable', ...)`. The wallet encrypts records
+ * before any adapter receives them. `allowInsecureStorage` is deprecated
  * and has no effect.
  * Supports EVM signing (personal_sign, eth_sendTransaction).
  *
  * Design goals:
  * - Zero dependency on @naculus/connect-core (fully independent)
- * - Pluggable StorageAdapter for browser / Tauri / React Native
+ * - Pluggable StorageAdapter for browser / Tauri / React Native, always
+ *   wrapped with wallet encryption
  * - Low barrier for non-web3 users ("EasyCard mode")
  * - Storage choices are explicit: built-in IndexedDB and localStorage
  *   backends are always wrapped with AES-256-GCM.

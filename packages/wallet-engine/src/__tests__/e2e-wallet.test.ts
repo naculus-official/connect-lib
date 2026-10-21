@@ -20,12 +20,21 @@ import type { StorageAdapter } from "../storage/types";
 import { WalletError } from "../errors";
 import type { WalletData } from "../wallet";
 import { PocketWallet } from "../wallet";
+import { EncryptedStorageAdapter } from "../storage/encrypted";
 
 // ── Constants ──────────────────────────────────────────────────────
 
 const TEST_MNEMONIC =
   "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 const TEST_PASSPHRASE = async () => "test-passphrase-only";
+
+function readStoredWallet(storage: StorageAdapter) {
+  return new EncryptedStorageAdapter(storage, TEST_PASSPHRASE).load();
+}
+
+function writeStoredWallet(storage: StorageAdapter, data: WalletData) {
+  return new EncryptedStorageAdapter(storage, TEST_PASSPHRASE).save(data);
+}
 
 const KNOWN_ADDRESS_FROM_TEST_MNEMONIC =
   "0x9858effd232b4033e47d90003d41ec34ecaeda94";
@@ -117,7 +126,7 @@ describe("E2E: Wallet Creation", () => {
   let wallet: PocketWallet;
 
   beforeEach(() => {
-    wallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    wallet = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
   });
 
   it("should generate a wallet with valid address and mnemonic", async () => {
@@ -152,6 +161,7 @@ describe("E2E: Wallet Creation", () => {
     const w1 = await wallet.generate();
     const w2 = await new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     }).generate();
     expect(w1.address).not.toBe(w2.address);
@@ -191,7 +201,7 @@ describe("E2E: Wallet Persistence", () => {
   it("should save wallet when autoSave is enabled", async () => {
     const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     const data = await w.generate();
-    const saved = await storage.load();
+    const saved = await readStoredWallet(storage);
     expect(saved).not.toBeNull();
     expect(saved!.accounts[0].address).toBe(data.address);
   });
@@ -200,7 +210,7 @@ describe("E2E: Wallet Persistence", () => {
     const w = new PocketWallet({ storage, autoSave: true, encryptionPassphrase: TEST_PASSPHRASE });
     await w.importMnemonic(TEST_MNEMONIC);
 
-    const stored = await storage.load();
+    const stored = await readStoredWallet(storage);
     expect(stored).not.toBeNull();
     expect(stored!.mnemonic).toBe(TEST_MNEMONIC);
     expect(JSON.stringify(stored)).not.toContain("privateKey");
@@ -248,6 +258,7 @@ describe("E2E: Wallet Persistence", () => {
   it("should ignore legacy account keys and re-derive them from the mnemonic", async () => {
     const source = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     const expected = await source.importMnemonic(TEST_MNEMONIC);
@@ -258,7 +269,7 @@ describe("E2E: Wallet Persistence", () => {
         privateKey: "legacy-private-key-must-be-ignored",
       })),
     };
-    await storage.save(legacyRecord);
+    await writeStoredWallet(storage, legacyRecord);
 
     const loaded = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await expect(loaded.load()).resolves.toBe(true);
@@ -268,10 +279,11 @@ describe("E2E: Wallet Persistence", () => {
   it("should reject stored addresses that do not match the mnemonic", async () => {
     const source = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     const expected = await source.importMnemonic(TEST_MNEMONIC);
-    await storage.save({
+    await writeStoredWallet(storage, {
       ...expected,
       accounts: expected.accounts.map((account, index) => ({
         ...account,
@@ -290,7 +302,7 @@ describe("E2E: Wallet Persistence", () => {
   it("should not save when autoSave is disabled", async () => {
     const w = new PocketWallet({ storage, autoSave: false, encryptionPassphrase: TEST_PASSPHRASE });
     await w.generate();
-    const saved = await storage.load();
+    const saved = await readStoredWallet(storage);
     expect(saved).toBeNull();
   });
 
@@ -307,7 +319,7 @@ describe("E2E: Wallet Persistence", () => {
   });
 
   it("should return false from load when no wallet stored", async () => {
-    const w = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     expect(await w.load()).toBe(false);
   });
 
@@ -350,7 +362,7 @@ describe("E2E: Wallet Persistence", () => {
     await w.importMnemonic(TEST_MNEMONIC);
     await w.save();
 
-    const saved = await storage.load();
+    const saved = await readStoredWallet(storage);
     expect(saved!.accounts[0].address).not.toBe(addr1);
     expect(saved!.accounts[0].address.toLowerCase()).toBe(
       KNOWN_ADDRESS_FROM_TEST_MNEMONIC,
@@ -364,7 +376,7 @@ describe("E2E: Message Signing", () => {
   let wallet: PocketWallet;
 
   beforeEach(async () => {
-    wallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    wallet = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await wallet.importMnemonic(TEST_MNEMONIC);
   });
 
@@ -390,6 +402,7 @@ describe("E2E: Message Signing", () => {
   it("should produce different signatures for different wallets", async () => {
     const w2 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     await w2.generate();
@@ -400,7 +413,8 @@ describe("E2E: Message Signing", () => {
   });
 
   it("should throw when no wallet is loaded", async () => {
-    const empty = new PocketWallet({ storage: new MockStorage() });
+    const empty = new PocketWallet({
+      encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
     await expect(empty.signMessage("test")).rejects.toThrow("No wallet loaded");
   });
 });
@@ -411,7 +425,7 @@ describe("E2E: Transaction Signing (local, no RPC)", () => {
   let wallet: PocketWallet;
 
   beforeEach(async () => {
-    wallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    wallet = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
     await wallet.importMnemonic(TEST_MNEMONIC);
   });
 
@@ -471,7 +485,8 @@ describe("E2E: Transaction Signing (local, no RPC)", () => {
   });
 
   it("should throw when no wallet loaded", async () => {
-    const empty = new PocketWallet({ storage: new MockStorage() });
+    const empty = new PocketWallet({
+      encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
     await expect(
       empty.signTransaction({ to: "0xabcd" } as any),
     ).rejects.toThrow("No wallet loaded");
@@ -489,6 +504,7 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
     wallet = new PocketWallet({
       rpcUrl: "https://eth.llamarpc.com",
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     await wallet.importMnemonic(TEST_MNEMONIC);
@@ -522,7 +538,8 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
     });
 
     it("should throw when no wallet loaded", async () => {
-      const empty = new PocketWallet({ storage: new MockStorage() });
+      const empty = new PocketWallet({
+        encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
       await expect(empty.getBalance()).rejects.toThrow("No wallet loaded");
     });
   });
@@ -586,6 +603,7 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
     it("should throw when RPC is not configured", async () => {
       const noRpcWallet = new PocketWallet({
         storage: new MockStorage(),
+        encryptionPassphrase: async () => "test-passphrase-only",
         autoSave: false,
       });
       await noRpcWallet.importMnemonic(TEST_MNEMONIC);
@@ -608,6 +626,7 @@ describe("E2E: RPC-Dependent Operations (Mocked RPC)", () => {
     it("should throw when no RPC URL configured", async () => {
       const noRpcWallet = new PocketWallet({
         storage: new MockStorage(),
+        encryptionPassphrase: async () => "test-passphrase-only",
         autoSave: false,
       });
       await expect(noRpcWallet.estimateFee()).rejects.toThrow(
@@ -623,17 +642,19 @@ describe("E2E: Edge Cases", () => {
   let wallet: PocketWallet;
 
   beforeEach(() => {
-    wallet = new PocketWallet({ storage: new MockStorage(), autoSave: false });
+    wallet = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", autoSave: false });
   });
 
   it("should handle custom derivation paths", async () => {
     const w1 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       derivationPath: "m/44'/60'/0'/0/0",
       autoSave: false,
     });
     const w2 = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       derivationPath: "m/44'/60'/0'/0/1",
       autoSave: false,
     });
@@ -644,7 +665,8 @@ describe("E2E: Edge Cases", () => {
   });
 
   it("should handle chain switching", async () => {
-    const w = new PocketWallet({ storage: new MockStorage() });
+    const w = new PocketWallet({
+      encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
     expect(w.state.chainId).toBe("eip155:1");
 
     w.setChain("eip155:137");
@@ -652,7 +674,8 @@ describe("E2E: Edge Cases", () => {
   });
 
   it("should auto-prefix eip155 when setting chain with number string", async () => {
-    const w = new PocketWallet({ storage: new MockStorage() });
+    const w = new PocketWallet({
+      encryptionPassphrase: async () => "test-passphrase-only", storage: new MockStorage() });
     w.setChain("137");
     expect(w.state.chainId).toBe("eip155:137");
   });
@@ -773,6 +796,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should create wallet in secure mode and sign successfully", async () => {
     const w = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
       isolation: "secure",
     });
@@ -797,10 +821,12 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should produce same signatures as memory mode", async () => {
     const wMem = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     const wSec = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
       isolation: "secure",
     });
@@ -817,6 +843,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should import from private key in secure mode", async () => {
     const w = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
       isolation: "secure",
     });
@@ -835,6 +862,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should properly clean decrypted data after signing", async () => {
     const w = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
       isolation: "secure",
     });
@@ -851,6 +879,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
   it("should handle secure mode with destroySession", async () => {
     const w = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
       isolation: "secure",
     });
@@ -877,7 +906,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
     ];
 
     for (const cfg of configs) {
-      const w = new PocketWallet({ storage: new MockStorage(), ...cfg });
+      const w = new PocketWallet({ storage: new MockStorage(), encryptionPassphrase: async () => "test-passphrase-only", ...cfg });
       await w.generate();
       expect(w.hasWallet).toBe(true);
       const sig = await w.signMessage("test config");
@@ -921,6 +950,7 @@ describe.skip("E2E: Memory Isolation — secure mode", () => {
     // but the wallet should still function normally
     const w = new PocketWallet({
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
       isolation: "secure",
     });
@@ -1039,6 +1069,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     const wallet = new PocketWallet({
       rpcUrl,
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     // Inject mnemonic so we have a wallet even though we can't control this address
@@ -1057,6 +1088,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     const wallet = new PocketWallet({
       rpcUrl,
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     await wallet.importMnemonic(TEST_MNEMONIC);
@@ -1075,6 +1107,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     const wallet = new PocketWallet({
       rpcUrl,
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     // Use the actual derived key from TEST_MNEMONIC — it's a valid secp256k1 key
@@ -1095,6 +1128,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     const wallet = new PocketWallet({
       rpcUrl,
       storage: new MockStorage(),
+      encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
     });
     const validKey: `0x${string}` =

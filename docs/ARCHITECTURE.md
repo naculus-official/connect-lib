@@ -297,8 +297,10 @@ letting connect-react determine whether to show security warnings.
 
 ### Developer force-switch
 
-All built-in wallet storage backends require `encryptionPassphrase` in every
-runtime. Missing it throws `WalletError` with code `storage_unavailable`.
+All wallet storage backends, including custom `StorageAdapter` implementations,
+require `encryptionPassphrase` in every runtime. The wallet encrypts records
+before passing them to a custom adapter. Missing the passphrase throws
+`WalletError` with code `storage_unavailable`.
 `allowInsecureStorage` is deprecated and ignored; no plaintext wallet record
 is written.
 
@@ -328,12 +330,15 @@ Each write uses random salt (16 bytes) + IV (12 bytes).
 
 ### Wallet encryption defaults
 
-Every runtime requires `encryptionPassphrase` for built-in storage, and missing
-it throws `WalletError('storage_unavailable', ...)`. IndexedDB provides origin
+Every runtime requires `encryptionPassphrase` for wallet storage, including
+custom adapters, and missing it throws `WalletError('storage_unavailable', ...)`.
+The wallet wraps custom adapters with `EncryptedStorageAdapter`, so they receive
+ciphertext rather than wallet records. IndexedDB provides origin
 isolation and non-blocking access, but it is not a cryptographic boundary: an
 XSS payload running in the same origin can access wallet data while the app is
 unlocked. `allowInsecureStorage` is deprecated and ignored. Custom adapters
-remain responsible for their own storage protections.
+remain responsible for storage protections beyond the wallet's at-rest
+encryption.
 
 ---
 

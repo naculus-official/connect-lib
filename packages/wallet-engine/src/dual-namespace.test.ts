@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { migrateWalletData, PocketWallet } from "./wallet";
+import { EncryptedStorageAdapter } from "./storage/encrypted";
+import type { StorageAdapter } from "./storage/types";
+import { migrateWalletData, PocketWallet, type WalletData } from "./wallet";
 
 /**
  * WalletData version 2: one wallet, one account per namespace.
@@ -16,19 +18,22 @@ const testPassphrase = async () => "test-passphrase-only";
 
 function memoryStorage() {
   let held: unknown = null;
-  return {
-    adapter: {
+  const adapter: StorageAdapter = {
+      type: "custom",
+      isAvailable: () => true,
       save: async (d: unknown) => {
         held = JSON.parse(JSON.stringify(d));
       },
-      load: async () => held,
+      load: async () => held as WalletData | null,
       clear: async () => {
         held = null;
       },
-    },
+    };
+  return {
+    adapter,
     peek: () => held as Record<string, unknown> | null,
-    seed: (record: unknown) => {
-      held = record;
+    seed: async (record: WalletData) => {
+      await new EncryptedStorageAdapter(adapter, testPassphrase).save(record);
     },
   };
 }
@@ -176,7 +181,8 @@ describe("loading a version 1 record", () => {
     // A read that writes is a read that can fail. The migrated shape is
     // persisted on the next explicit save instead.
     const storage = memoryStorage();
-    storage.seed(legacy);
+    await storage.seed(legacy as unknown as WalletData);
+    const beforeLoad = storage.peek();
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
@@ -185,14 +191,14 @@ describe("loading a version 1 record", () => {
 
     expect(await wallet.load()).toBe(true);
     expect(wallet.address?.toLowerCase()).toBe(EVM_ADDRESS.toLowerCase());
-    expect(storage.peek()).toEqual(legacy);
+    expect(storage.peek()).toEqual(beforeLoad);
   });
 
   it("gains its Solana account only when asked", async () => {
     // The account already exists — the same phrase in Phantom shows it — so
     // hiding it would mean the balance is visible everywhere except here.
     const storage = memoryStorage();
-    storage.seed(legacy);
+    await storage.seed(legacy as unknown as WalletData);
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
@@ -210,7 +216,7 @@ describe("loading a version 1 record", () => {
     // Shown, not switched to. A user who had an Ethereum wallet yesterday
     // should not find themselves on Solana today.
     const storage = memoryStorage();
-    storage.seed(legacy);
+    await storage.seed(legacy as unknown as WalletData);
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
@@ -223,7 +229,7 @@ describe("loading a version 1 record", () => {
 
   it("backfills at most once", async () => {
     const storage = memoryStorage();
-    storage.seed(legacy);
+    await storage.seed(legacy as unknown as WalletData);
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
@@ -240,7 +246,7 @@ describe("loading a version 1 record", () => {
     // with a mismatched pair means transactions from an account the user does
     // not control.
     const storage = memoryStorage();
-    storage.seed({ ...legacy, address: `0x${"22".repeat(20)}` });
+    await storage.seed({ ...legacy, address: `0x${"22".repeat(20)}` } as unknown as WalletData);
     const wallet = new PocketWallet({
       storage: storage.adapter as never,
       autoSave: false,
@@ -267,30 +273,26 @@ describe("secure wipe covers every account", () => {
   });
 
   it("does not corrupt what was already persisted", async () => {
-    // The saved record shared its accounts array with the live one, so wiping
-    // in place reached through and replaced the stored key too — measured, and
-    // the next load could not open the wallet.
+    // Wiping the live account objects must not mutate persisted ciphertext.
     const storage = memoryStorage();
     const wallet = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
       storage: storage.adapter as never,
       autoSave: true,
     });
     await wallet.generate();
-    const readStoredKey = () => {
-      const record = storage.peek();
-      if (!record) throw new Error("nothing was persisted");
-      return (record.accounts as { privateKey: string }[])[0].privateKey;
-    };
-    const savedKey = readStoredKey();
+    const savedRecord = storage.peek();
+    expect(savedRecord).not.toBeNull();
 
     wallet.destroySession();
 
-    expect(readStoredKey()).toBe(savedKey);
+    expect(storage.peek()).toEqual(savedRecord);
   });
 
   it("leaves a wallet loadable again after destroySession", async () => {
     const storage = memoryStorage();
     const first = new PocketWallet({
+  encryptionPassphrase: async () => "test-passphrase-only",
       storage: storage.adapter as never,
       autoSave: true,
     });
