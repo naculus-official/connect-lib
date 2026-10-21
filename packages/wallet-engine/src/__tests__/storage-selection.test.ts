@@ -358,6 +358,44 @@ describe("PocketWallet — Web Worker and Node defaults", () => {
     });
   });
 
+  it("indexedDB-only non-Node runtime rejects plaintext by default", () => {
+    const names = ["window", "importScripts", "indexedDB", "process"];
+    const previous = new Map(
+      names.map((name) => [name, Object.getOwnPropertyDescriptor(g, name)]),
+    );
+    try {
+      for (const name of names) {
+        Object.defineProperty(g, name, {
+          configurable: true,
+          writable: true,
+          value: undefined,
+        });
+      }
+      Object.defineProperty(g, "indexedDB", {
+        configurable: true,
+        writable: true,
+        value: {},
+      });
+      Object.defineProperty(g, "process", {
+        configurable: true,
+        writable: true,
+        value: { versions: {} },
+      });
+
+      expect(g.window).toBeUndefined();
+      expect(g.importScripts).toBeUndefined();
+      expect(g.process.versions.node).toBeUndefined();
+      expect(() => new PocketWallet({ storageKey: "t" })).toThrow(
+        "Unencrypted IndexedDB storage is disabled",
+      );
+    } finally {
+      for (const [name, descriptor] of previous) {
+        if (descriptor) Object.defineProperty(g, name, descriptor);
+        else delete g[name];
+      }
+    }
+  });
+
   it("worker auto-detect requires encryption when IndexedDB is unavailable", () => {
     inWorkerEnv(() => {
       delete (globalThis as any).indexedDB;

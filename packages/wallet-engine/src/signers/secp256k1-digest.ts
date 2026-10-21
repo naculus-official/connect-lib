@@ -52,6 +52,10 @@ export function signDigest(
   digest: Uint8Array,
   privateKey: Uint8Array,
 ): DigestSignature {
+  if (digest.length !== 32) {
+    throw new Error(`Digest must be exactly 32 bytes; received ${digest.length} bytes.`);
+  }
+
   const signature = secp256k1.sign(digest, privateKey, {
     prehash: false,
     format: "recovered",
