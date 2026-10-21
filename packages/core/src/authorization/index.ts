@@ -881,7 +881,9 @@ function decompileEvm(raw: SessionKeyInfo): ListedAuthorization {
         scope.maxValuePerTx !== undefined &&
         scope.maxValuePerTx > 0n &&
         scope.maxTotalValue !== undefined &&
-        scope.maxTotalValue > 0n
+        scope.maxTotalValue > 0n &&
+        hasValidEvmScopeRails(scope.rails) &&
+        scope.rails.includes("transfer")
       ) {
         const asset = `eip155:${chainId}/slip44:60`;
         grants.push({

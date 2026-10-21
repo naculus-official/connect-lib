@@ -507,6 +507,7 @@ export class SessionKeyManager {
   async signTypedDataWithSessionKey(
     sessionId: string,
     request: SessionKeyTypedDataRequest,
+    rail: "x402-exact" | "mpp-charge",
   ): Promise<`0x${string}`> {
     return this.storage.withKeyLock(sessionId, () =>
       this.withSessionLock(sessionId, async () => {
@@ -522,7 +523,7 @@ export class SessionKeyManager {
           );
         }
         const snapshot = snapshotTypedDataRequest(request);
-        const tx = this.typedDataToScopedTransaction(stored, snapshot);
+        const tx = this.typedDataToScopedTransaction(stored, snapshot, rail);
         return this.signStoredSessionKey(stored, typedDataDigest(snapshot), tx);
       }),
     );
@@ -534,6 +535,7 @@ export class SessionKeyManager {
     buildExpectedMessage: (policy: SessionKeyInfo) => string,
     verify: OffchainAuthorizationVerifier,
     request: SessionKeyTypedDataRequest,
+    rail: "x402-exact" | "mpp-charge",
   ): Promise<`0x${string}`> {
     return this.storage.withKeyLock(sessionId, () =>
       this.withSessionLock(sessionId, async () => {
@@ -565,7 +567,7 @@ export class SessionKeyManager {
           );
         }
         const snapshot = snapshotTypedDataRequest(request);
-        const tx = this.typedDataToScopedTransaction(stored, snapshot);
+        const tx = this.typedDataToScopedTransaction(stored, snapshot, rail);
         return this.signStoredSessionKey(stored, typedDataDigest(snapshot), tx);
       }),
     );
@@ -619,6 +621,7 @@ export class SessionKeyManager {
   private typedDataToScopedTransaction(
     stored: StoredSessionKey,
     request: SessionKeyTypedDataRequest,
+    rail: "x402-exact" | "mpp-charge",
   ): SessionKeyTransaction {
     const structural = validateTypedDataRequest(request);
     if (structural) {
@@ -627,10 +630,13 @@ export class SessionKeyManager {
     // Default-deny: a scope that names no EIP-3009 rail (including one with
     // no `rails` at all) never signs a TransferWithAuthorization, so a
     // transfer-only grant cannot become an x402/MPP charge signature.
-    if (!stored.scope.rails?.some((rail) => EIP3009_RAILS.includes(rail))) {
+    if (
+      !EIP3009_RAILS.includes(rail) ||
+      !stored.scope.rails?.includes(rail)
+    ) {
       throw createSessionKeyError(
         "session_key_scope_exceeded",
-        "TransferWithAuthorization needs an x402-exact or mpp-charge rail in the session scope",
+        `TransferWithAuthorization needs the ${rail} rail in the session scope`,
       );
     }
     // The amount must count against something. Without a tokenAllowances

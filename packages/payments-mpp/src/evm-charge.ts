@@ -61,7 +61,7 @@ export async function sessionKeyMppSigner(
   return {
     address: sessionKeyAddress(info.publicKey),
     signTypedData: (request) =>
-      manager.signTypedDataWithSessionKey(sessionId, request),
+      manager.signTypedDataWithSessionKey(sessionId, request, "mpp-charge"),
   };
 }
 

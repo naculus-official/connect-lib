@@ -800,6 +800,36 @@ describe("authorization listing", () => {
     });
   });
 
+  it("does not synthesize native transfer grants for legacy scopes without rails", async () => {
+    const legacy = {
+      id: "legacy-native-without-rails",
+      publicKey: `0x${"11".repeat(33)}`,
+      status: "active" as const,
+      createdAt: 0,
+      expiresAt: NOW * 1_000,
+      useCount: 0,
+      signerAddress: EVM_OWNER as `0x${string}`,
+      scope: {
+        expiry: NOW,
+        allowedChainIds: [1],
+        allowedContracts: [],
+        allowedMethods: [],
+        allowedRecipients: [EVM_PAYEE as `0x${string}`],
+        maxValuePerTx: 20n,
+        maxTotalValue: 100n,
+        nativeTransfer: "empty-calldata-to-recipients" as const,
+        mode: "offchain" as const,
+      },
+    };
+    const evm = {
+      listSessions: vi.fn().mockResolvedValue([legacy]),
+    } as unknown as SessionKeyManager;
+
+    const [entry] = await listAuthorizations({ evm });
+
+    expect(entry.grants).toEqual([]);
+  });
+
   it("flags legacy unrestricted recipients and non-expressible EVM scope without inventing grants", async () => {
     const base = {
       id: "legacy",
@@ -1134,7 +1164,7 @@ describe("differential enforcer checks", () => {
       },
     };
     await expect(
-      manager.signTypedDataWithSessionKey(info.id, typedData),
+      manager.signTypedDataWithSessionKey(info.id, typedData, "x402-exact"),
     ).resolves.toMatch(/^0x[0-9a-f]{130}$/);
 
     const nativeCompiled = compileEvmSessionScope(

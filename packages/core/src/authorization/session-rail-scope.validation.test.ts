@@ -121,6 +121,7 @@ async function signEip3009(scope: SessionKeyScope): Promise<string> {
     () => message,
     async () => true,
     request,
+    "x402-exact",
   );
 }
 
@@ -161,7 +162,7 @@ describe("session rail scope validation", () => {
     });
     if (!offchain.ok) return;
     await expect(signEip3009(offchain.scope)).rejects.toThrow(
-      "TransferWithAuthorization needs an x402-exact or mpp-charge rail",
+      "TransferWithAuthorization needs the x402-exact rail in the session scope",
     );
   });
 

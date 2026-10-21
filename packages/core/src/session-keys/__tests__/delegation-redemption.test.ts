@@ -276,7 +276,7 @@ describe("eip7702 session keys: redemption", () => {
           validBefore: String(Math.floor(Date.now() / 1000) + 600),
           nonce: `0x${"ab".repeat(32)}`,
         },
-      }),
+      }, "x402-exact"),
     ).rejects.toMatchObject({
       details: expect.stringMatching(/only delegation redemptions/),
     });

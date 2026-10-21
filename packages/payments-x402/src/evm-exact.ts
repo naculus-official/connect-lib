@@ -49,7 +49,7 @@ export async function sessionKeyX402Signer(
   return {
     address: sessionKeyAddress(info.publicKey),
     signTypedData: (request) =>
-      manager.signTypedDataWithSessionKey(sessionId, request),
+      manager.signTypedDataWithSessionKey(sessionId, request, "x402-exact"),
   };
 }
 
