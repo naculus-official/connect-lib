@@ -1067,7 +1067,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
-      rpcUrl,
+      rpcUrl: rpcUrl!,
       storage: new MockStorage(),
       encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
@@ -1086,7 +1086,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
-      rpcUrl,
+      rpcUrl: rpcUrl!,
       storage: new MockStorage(),
       encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
@@ -1105,7 +1105,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
-      rpcUrl,
+      rpcUrl: rpcUrl!,
       storage: new MockStorage(),
       encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,
@@ -1126,7 +1126,7 @@ describe("E2E: Live Sepolia Testnet (read-only)", () => {
     if (!rpcUrl) ctx.skip();
 
     const wallet = new PocketWallet({
-      rpcUrl,
+      rpcUrl: rpcUrl!,
       storage: new MockStorage(),
       encryptionPassphrase: async () => "test-passphrase-only",
       autoSave: false,

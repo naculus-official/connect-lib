@@ -437,6 +437,7 @@ describe("delegation framework: refusals", () => {
       caveatsFromScope(
         {
           mode: "eip7702",
+          rails: ["transfer"],
           expiry: 1_800_000_000,
           allowedContracts: [PAYEE],
           allowedMethods: [selector],

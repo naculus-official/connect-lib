@@ -309,6 +309,7 @@ function createTestKey(
       salt: "11111111",
     },
     scope: {
+      rails: ["transfer" as const],
       expiry: Math.floor(now / 1000) + 3600,
       mode: "offchain" as const,
       maxTxCount: 10,
