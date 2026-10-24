@@ -102,7 +102,8 @@ elif [ -n "$VERSION" ]; then
       esac
       echo "🔼 Bumping $CURRENT → $NEW"
       find "$ROOT_DIR/packages" -name package.json -not -path "*/node_modules/*" \
-        -exec sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/g" {} +
+        -exec sed -i.bak "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/g" {} +
+      find "$ROOT_DIR/packages" -name 'package.json.bak' -not -path '*/node_modules/*' -delete
       VERSION="$NEW"
       # sed reports nothing when a pattern does not match, so exit 0 says only
       # that sed ran. Confirm the bump landed on every package.
