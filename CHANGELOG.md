@@ -7,6 +7,8 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## 0.14.0 — 2026-10-24
+
 ### Breaking
 
 - **Authorization grants require explicit payment rails** (`@naculus/connect-core`) — every grant must include a non-empty list of supported rails. Creating or validating a grant without rails, with an empty list, or with an unknown rail fails closed. Existing EVM session records without rails are no longer listed as transfer grants; callers must recreate grants with the rails they authorize.
