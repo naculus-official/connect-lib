@@ -20,3 +20,4 @@ overrides:
   vite: '^7.3.7'
   undici: '^8.12.2'
   launch-editor: '^2.14.2'
+  follow-redirects: '^1.16.1'
