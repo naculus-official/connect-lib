@@ -59,7 +59,7 @@ the reason as data. Treat `message` as display text.
 
 Move native USDC between chains: CCTP burns it on the source chain and Circle
 mints native USDC on the destination, with no wrapped token. Design:
-[cctp-bridge.md](../design/cctp-bridge.md).
+cctp-bridge.md.
 
 **Import path.** `@naculus/connect-core/cctp` is a separate entry, so apps
 that do not bridge never load it. The root `@naculus/connect-core` entry does

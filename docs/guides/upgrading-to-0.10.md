@@ -116,7 +116,7 @@ always positive.
 
 Declare once what a delegate may spend, validate it fail-closed, preview a
 payment, compile it to an existing enforcer, then list and revoke across
-managers. Design: [authorization-model.md](../design/authorization-model.md).
+managers. Design: authorization-model.md.
 
 ```ts
   const checked = validateAuthorization(authorization); // fail-closed
@@ -165,7 +165,7 @@ the delegation expire. The helper never signs or broadcasts.
 Fetch is unchanged and never verifies. To check a receipt on chain, pass the
 fetch result and an RPC endpoint to `verifyX402Settlement` or
 `verifyMppSettlement`; they compare it with `settlementBinding`, what the
-client signed. Design: [receipt-verification.md](../design/receipt-verification.md).
+client signed. Design: receipt-verification.md.
 
 ```ts
 export async function isSettled(
@@ -192,7 +192,7 @@ switches to the typed-data chain, maps wallet rejection, and recovers the
 signature against the requested account before paying; smart-contract wallet
 signatures are not supported. Full walkthrough:
 [x402-external-wallet.md](./x402-external-wallet.md); design:
-[x402-external-wallet.md](../design/x402-external-wallet.md).
+x402-external-wallet.md.
 
 ```ts
   const session = await connector.connect(wallet.id);
@@ -216,7 +216,7 @@ period-transfer caveat (`enforcement: "on-chain"`), and `requireOnChain: true`
 refuses any target that would only be device-enforced. Set `start` from chain
 time, not the device clock. Full guide:
 [periodic-authorization.md](./periodic-authorization.md); design:
-[periodic-authorization.md](../design/periodic-authorization.md).
+periodic-authorization.md.
 
 ```ts
   // start from chain time (latest block), never Date.now(); it must be > 0.

@@ -6,7 +6,7 @@ OKX, Phantom, or any other EIP-6963 wallet). It uses `walletX402Signer` and
 `createX402Fetch` from `@naculus/payments-x402` (0.9.0 or later), and
 optionally checks the receipt with `verifyX402Settlement`.
 
-Design and rationale: [x402-external-wallet.md](../design/x402-external-wallet.md).
+Design and rationale: x402-external-wallet.md.
 The code below is excerpted from
 [examples/x402-external-wallet.ts](./examples/x402-external-wallet.ts), which
 is typechecked with the rest of the repository (`npx tsc --noEmit`).

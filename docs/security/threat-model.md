@@ -6,11 +6,11 @@ Every statement about behavior cites the code it comes from; paths are
 relative to `packages/`. Statements marked **(inferred)** are conclusions
 drawn from the code, not behavior the code states or tests.
 
-External specifications the payment code implements, as pinned by the
-existing design notes:
+External specifications the payment code implements, as pinned in the
+maintainers' internal records:
 
 - x402 v2 — `coinbase/x402` `specs/` (pinned 2026-09-24 in
-  `docs/design/agentic-payments.md`). Note: `coinbase/x402` is now a
+  an internal design record). Note: `coinbase/x402` is now a
   development fork; its README (commit `dd927a2`, 2026-04-21) says the
   canonical repository is `https://github.com/x402-foundation/x402`. The v2
   HTTP transport there (`specs/transports-v2/http.md`, last changed
@@ -20,10 +20,10 @@ existing design notes:
 - MPP — `https://github.com/tempoxyz/mpp-specs` @ `08e7dd8`
   (`draft-httpauth-payment-01`, `draft-payment-intent-charge-00`,
   `draft-evm-charge-00`, `draft-solana-charge-00`), pinned 2026-09-26 in
-  `docs/design/agentic-payments.md`.
+  an internal design record.
 - MetaMask Delegation Framework v1.3.0 —
   `https://github.com/MetaMask/delegation-framework`, release of 2025-07-24,
-  pinned 2026-09-25 in `docs/design/eip7702-session-delegation.md`.
+  pinned 2026-09-25 in an internal design record.
 
 ## 1. Scope
 
@@ -33,7 +33,7 @@ Solana payment builder/verifier, EIP-7702 delegation helpers),
 signing entry points of the `connector-*` packages.
 
 Out of scope: UI packages in `naculus-official/connect-appkit`, the React
-Native package described in `docs/design/mobile-wallets.md` (not present on
+Native package described in an internal design record (not present on
 connect-appkit's default branch at `d18ada8`), smart contracts Naculus
 calls but does not ship (Delegation Framework, token contracts, SPL Token),
 and third-party wallets.
@@ -48,7 +48,7 @@ and third-party wallets.
 | A4 | **Solana session keys** (ed25519, SPL delegate) | `SolanaSessionKeyManager.createSessionKey` (`core/src/session-keys/solana-session-keys.ts`) | Record under `solana_session_keys`; secret sealed with AES-GCM whose associated data is a hash of the record's fixed facts (`recordBinding`, `:137`) | Opened per payment, zero-filled after use (`signPayment`, `:490`) |
 | A5 | **Delegation / authorization signatures** — (a) off-chain policy signature by the owner over a policy message; (b) EIP-712 `Delegation` signed by the owner (Delegation Framework); (c) EIP-7702 authorization tuple; (d) owner-signed SPL `ApproveChecked` | (a) `setAuthorization` (`SessionKeyManager.ts:685`); (b) `attachDelegation` (`:790`); (c) `PocketWallet.signAuthorization` / `sendDelegation` (`wallet.ts:1277`, `:1667`); (d) `attachApproval` (`solana-session-keys.ts:419`) | (a), (b) in the session-key record, **not encrypted**; (c) on chain once sent; (d) on chain once broadcast | — |
 | A6 | **Payment authorizations** — EIP-3009 `TransferWithAuthorization` signatures (x402 EVM `exact`, MPP `evm` charge), partially signed Solana `TransferChecked` transactions (x402 SVM `exact`, MPP `solana` charge) | `payments-x402/src/evm-exact.ts`, `svm-exact.ts`; `payments-mpp/src/evm-charge.ts`, `solana-charge.ts` | Not persisted by Naculus; sent in `PAYMENT-SIGNATURE` / `Authorization: Payment` | Bearer until settled or expired (see §5.6) |
-| A7 | **Storage unlock material** — wallet passphrase, WebAuthn PRF output, the RN key-store key | Supplied by the app (`encryptionPassphrase`, `prfUnlock`) or generated (`KeyStoreStorageAdapter`, `wallet-engine/src/storage/key-store.ts:65`) | Passphrase: never stored by Naculus. PRF salt: in the record (not secret by design, `docs/design/passkey-storage-unlock.md`). RN key: platform key store | Transient during `load`/`save` |
+| A7 | **Storage unlock material** — wallet passphrase, WebAuthn PRF output, the RN key-store key | Supplied by the app (`encryptionPassphrase`, `prfUnlock`) or generated (`KeyStoreStorageAdapter`, `wallet-engine/src/storage/key-store.ts:65`) | Passphrase: never stored by Naculus. PRF salt: in the record (not secret by design, an internal design record). RN key: platform key store | Transient during `load`/`save` |
 | A8 | **Session-key budget counters** — `useCount`, `accumulatedValue`, `accumulatedGas`, `accumulatedTokenSpends`, Solana `spent` | Updated on every signature | Same record as A3/A4, **plaintext** | — |
 
 ## 3. Adversaries considered
@@ -98,7 +98,7 @@ signature over the returned message. `verifySignedOwnerTransaction`
   RPC's genesis hash to match the challenge's CAIP-2 cluster before any
   signing, and the blockhash always comes from that RPC, never from the
   server (MPP's advisory `recentBlockhash` is ignored; rationale in
-  `docs/design/agentic-payments.md` §Step 5). The RPC is still trusted for
+  an internal design record §Step 5). The RPC is still trusted for
   the genesis hash itself and for mint data (`readMint` → token program and
   decimals). A lying RPC can therefore mis-state the cluster or decimals
   **(inferred)**; `TransferChecked` carries the decimals, so a wrong value
@@ -142,7 +142,7 @@ error (`fetch.ts` comments).
 | RN wallet record (`KeyStoreStorageAdapter`, `storage/key-store.ts:65`) | A1, A2 | AES-256-GCM via `@noble/ciphers` (`core/src/aead.ts:11`) under a random 32-byte key held by an app-supplied `WalletKeyStore` (e.g. iOS Keychain / Android Keystore); AAD binds a slot name |
 | EVM session keys, embedded wallet (`createEmbeddedSessionKeyManager`, `wallet-engine/src/session-keys/embedded.ts`) | A3, A5(a/b), A8 | `localStorage` under `naculus_embedded_` (`:30`), or memory. Private key sealed with a password = SHA-256(seed ‖ `"naculus/embedded-session-keys/v1"`) (`:54`). **Record metadata is plaintext and independent of whether the wallet record is encrypted.** |
 | EVM session keys, other hosts (`SessionKeyManager`) | A3, A5(a/b), A8 | App-supplied adapter. Password = `encryptionKey` if supplied, else a **deterministic** SHA-256 of the storage prefix and optional salt (`deriveEncryptionPassword`, `SessionKeyManager.ts:101`) — which any code knowing the prefix can recompute. AAD binds only the public key (`storage.ts:175`). |
-| Legacy wallet-engine session keys | pre-0.3.0 funded session-key EOAs | Left in `localStorage` under `naculus_session_keys`, never read or deleted (`embedded.ts:27`; `docs/design/session-keys-convergence.md`) |
+| Legacy wallet-engine session keys | pre-0.3.0 funded session-key EOAs | Left in `localStorage` under `naculus_session_keys`, never read or deleted (`embedded.ts:27`; an internal design record) |
 | Solana session keys | A4, A8 | App-supplied adapter; `encryptionKey` is required (constructor throws without it). AAD binds id, address, owner, cluster, mint, token program, decimals, budget, per-payment cap, recipients, expiry, max count (`recordBinding`). `status`, `spent`, `useCount` are **not** bound. |
 
 Cross-tab consistency: EVM and Solana session-key mutations run under
@@ -160,7 +160,7 @@ Cross-tab consistency: EVM and Solana session-key mutations run under
   main-thread memory, and every `PocketWallet` signing method still passes
   `activeAccount().privateKey` to the signer. Solana keys never enter the
   worker. This is documented in
-  `docs/design/worker-isolation-threat-model.md`; the one change since that
+  an internal design record; the one change since that
   note is that `crypto-worker.ts` no longer reads `process.env.PBKDF2_ITER`
   (it is the constant at `signers/crypto-worker.ts:107`).
 - `isolation: "secure"` is declared in `PocketConfig` (`wallet.ts:258`,
@@ -169,7 +169,7 @@ Cross-tab consistency: EVM and Solana session-key mutations run under
   (`grep -rn isolation wallet-engine/src`). **"secure" currently behaves as
   the default.**
 - React Native has no Web Worker; the design decision
-  (`docs/design/mobile-wallets.md`, decisions of 2026-09-27) is in-thread
+  (an internal design record, decisions of 2026-09-27) is in-thread
   signing with the encryption key in the platform key store. In code, that
   is `KeyStoreStorageAdapter` plus the default `EVMSigner`. The key store
   protects the record at rest; in memory, RN has the same exposure as the
@@ -232,7 +232,7 @@ Per method:
 
 `eip7702`-mode keys are additionally bounded on chain by the Delegation
 Framework caveats (`core/src/session-keys/delegation-framework.ts`; mapping
-and refusals in `docs/design/eip7702-session-delegation.md`), including
+and refusals in an internal design record), including
 `RedeemerEnforcer` pinning the session key as the only redeemer.
 `attachDelegation` requires the delegation to hash-equal the one the
 manager builds and the signature to recover to the owner with low-s
@@ -296,16 +296,16 @@ it is paying and does not track settlement **(inferred from §4.3)**.
 
 | # | Risk | Where documented |
 |---|---|---|
-| R1 | Worker isolation is not key-material isolation: decryption on the main thread, key crosses `postMessage`, no protection against XSS or heap capture. `IsolatedSigner.init` (worker-side decryption) has no caller. | `docs/design/worker-isolation-threat-model.md` |
-| R2 | Hot-wallet keys cannot be non-extractable `CryptoKey`s (no secp256k1 / mature ed25519 in WebCrypto); a record with PRF and passphrase wraps is only as strong as the passphrase. | `docs/design/passkey-storage-unlock.md` |
-| R3 | Off-chain session-key revocation is device-local; an exported `SessionKeyBundle` cannot be recalled; a leaked key plus a signed Delegation stays valid until `expiry` unless the owner calls `disableDelegation` on chain. | `SessionKeyManager.ts` `revokeSession` doc comment; `docs/design/eip7702-session-delegation.md` §Invariants |
-| R4 | A raw digest cannot be tied to the transaction described with it; hence the recipient-scope refusal. | `refuseRawDigestForRecipientScope` comment; `docs/design/agentic-payments.md` |
-| R5 | Pre-0.3.0 embedded session keys are funded EOAs whose only key copy stays in `naculus_session_keys`, unread. | `docs/design/session-keys-convergence.md` |
-| R6 | MPP gives no token EIP-712 domain; a wrong domain yields an unusable signature (liveness, not funds). | `docs/design/agentic-payments.md` §Step 4 |
-| R7 | Delegation Framework: allow-list only, no on-chain deny-list; multi-token / multi-recipient scopes refused; the session key's own gas funds are exposed to arbitrary digests in `signDelegationRedemption`. | `docs/design/eip7702-session-delegation.md`; `SessionKeyManager.ts:936` doc comment |
-| R8 | Solana: one delegate per token account; approving replaces another dapp's delegate. The chain never expires a delegate; after local expiry the owner must revoke. | `docs/design/solana-session-keys.md` |
-| R9 | React Native embedded wallet signs in-thread; weaker isolation than the web worker. | `docs/design/mobile-wallets.md` §Decisions |
-| R10 | Server-controlled requirement order, amount and payee reach the key; only policy and `approve` bound them. | `payments-x402/src/fetch.ts` doc comment; `docs/design/agentic-payments.md` |
+| R1 | Worker isolation is not key-material isolation: decryption on the main thread, key crosses `postMessage`, no protection against XSS or heap capture. `IsolatedSigner.init` (worker-side decryption) has no caller. | an internal design record |
+| R2 | Hot-wallet keys cannot be non-extractable `CryptoKey`s (no secp256k1 / mature ed25519 in WebCrypto); a record with PRF and passphrase wraps is only as strong as the passphrase. | an internal design record |
+| R3 | Off-chain session-key revocation is device-local; an exported `SessionKeyBundle` cannot be recalled; a leaked key plus a signed Delegation stays valid until `expiry` unless the owner calls `disableDelegation` on chain. | `SessionKeyManager.ts` `revokeSession` doc comment; an internal design record §Invariants |
+| R4 | A raw digest cannot be tied to the transaction described with it; hence the recipient-scope refusal. | `refuseRawDigestForRecipientScope` comment; an internal design record |
+| R5 | Pre-0.3.0 embedded session keys are funded EOAs whose only key copy stays in `naculus_session_keys`, unread. | an internal design record |
+| R6 | MPP gives no token EIP-712 domain; a wrong domain yields an unusable signature (liveness, not funds). | an internal design record §Step 4 |
+| R7 | Delegation Framework: allow-list only, no on-chain deny-list; multi-token / multi-recipient scopes refused; the session key's own gas funds are exposed to arbitrary digests in `signDelegationRedemption`. | an internal design record; `SessionKeyManager.ts:936` doc comment |
+| R8 | Solana: one delegate per token account; approving replaces another dapp's delegate. The chain never expires a delegate; after local expiry the owner must revoke. | an internal design record |
+| R9 | React Native embedded wallet signs in-thread; weaker isolation than the web worker. | an internal design record §Decisions |
+| R10 | Server-controlled requirement order, amount and payee reach the key; only policy and `approve` bound them. | `payments-x402/src/fetch.ts` doc comment; an internal design record |
 
 ## 7. Observations from the code not covered by a design note
 

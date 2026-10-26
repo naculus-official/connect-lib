@@ -5,8 +5,8 @@ This guide shows how to let a delegate spend **at most an amount per period**
 `@naculus/connect-core` (0.10.0 or later), and how to choose who enforces that
 limit: the user's device, or the chain.
 
-Design and rationale: [periodic-authorization.md](../design/periodic-authorization.md),
-extending [authorization-model.md](../design/authorization-model.md). The code
+Design and rationale: periodic-authorization.md,
+extending authorization-model.md. The code
 below is excerpted from
 [examples/periodic-authorization.ts](./examples/periodic-authorization.ts),
 which is typechecked with the rest of the repository (`npx tsc --noEmit`).
@@ -131,7 +131,7 @@ Solana and MPP target), so you cannot get a device-only scope by mistake.
 The owner signs the delegation with `eth_signTypedData_v4`. For it to be
 redeemable, the owner's account must be EIP-7702-delegated to
 `EIP7702StatelessDeleGator`; see
-[eip7702-session-delegation.md](../design/eip7702-session-delegation.md) for
+eip7702-session-delegation.md for
 that step and for redeeming.
 
 ### What `mode: "eip7702"` accepts

@@ -4,7 +4,7 @@ Cross-chain Web3 connection SDK. Pure library, no frontend components.
 
 ## Positioning
 
-`connect-lib/` is a framework-agnostic library monorepo that only handles **connection logic**. Frontend components (React hooks, UI components) live in the separate [`connect-appkit/`](../connect-appkit/) project.
+`connect-lib/` is a framework-agnostic library monorepo that only handles **connection logic**. Frontend components (React hooks, UI components) live in the separate [`connect-appkit/`](https://github.com/naculus-official/connect-suite/tree/dev/packages/appkit) project.
 
 ```
 naculus/
@@ -52,7 +52,7 @@ pnpm add @naculus/connect
 ```
 
 > **Use React?** Install `connect-appkit` instead — it wraps the library in hooks.
-> See [connect-appkit](../connect-appkit/).
+> See [connect-appkit](https://github.com/naculus-official/connect-suite/tree/dev/packages/appkit).
 
 ```ts
 import { ConnectorManager } from "@naculus/connect-core";
@@ -130,7 +130,7 @@ Guides:
 - [Charging with x402 on your server](docs/guides/x402-server.md) — `requirePayment` + `settlePayment`, settled with viem.
 - [Periodic authorization](docs/guides/periodic-authorization.md) — per-period spending limits, enforced by the device or on chain.
 
-Reference: [docs overview](docs/README.md), [architecture](docs/ARCHITECTURE.md), [design notes](docs/design/).
+Reference: [docs overview](docs/README.md), [architecture](docs/ARCHITECTURE.md).
 
 ## Development
 
